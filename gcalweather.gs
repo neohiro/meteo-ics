@@ -5,7 +5,7 @@
  *  - Fixed Open-Meteo 400 Bad Request by separating hourly (pressure/soil) and daily variables.
  *  - Strict Model Isolation: Deterministic (<14d) is strictly protected from NOAA Ensemble overwrite.
  *  - Mobile View Overhaul: Clean, compact card layout formatted for narrow mobile phone viewports.
- *  - Full preservation of Brunssum & Hasselt base locations + dynamic travel co-existence.
+ *  - Generic globally distributed base locations + dynamic travel co-existence.
  *  - Atomic PropertiesService storage (9KB limit safe).
  */
 
@@ -18,8 +18,9 @@ const CONFIG = {
   historyDays: 5,                   // Past days to verify with ground truth
   autoDetectFromEvents: true,       // Auto-detect travel locations from primary calendar
   locations: [
-    { name: "Brunssum", lat: 50.9458, lon: 5.9722 },
-    { name: "Hasselt", lat: 50.9311, lon: 5.3378 }
+    { name: "Kyoto", lat: 35.0116, lon: 135.7681 },
+    { name: "Valparaíso", lat: -33.0472, lon: -71.6127 },
+    { name: "Reykjavik", lat: 64.1466, lon: -21.9426 }
   ]
 };
 
@@ -755,8 +756,7 @@ function resolveCalendar() {
 
 function norm(str) {
   if (!str) return "";
-  const s = str.toLowerCase().trim();
-  return s.startsWith("brun") ? "brunssum" : s;
+  return str.toLowerCase().trim();
 }
 
 function detectEventCity(text, locationPool) {
@@ -765,8 +765,6 @@ function detectEventCity(text, locationPool) {
   for (let [key] of locationPool) {
     if (lower.includes(key)) return key;
   }
-  if (/brun[ns]{2}um/i.test(text)) return "brunssum";
-  if (/hasselt/i.test(text)) return "hasselt";
   return null;
 }
 
