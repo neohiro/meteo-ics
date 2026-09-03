@@ -2,6 +2,7 @@
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
  * 
  * Production-Ready Architecture:
+ *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
  *  - Endpoint Documentation Fallback: meteo-ics_readme.txt generated when URL is opened without parameters.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - Open-Meteo Parameter Separation: Distinct daily and hourly requests eliminate 400 Bad Request errors.
@@ -9,7 +10,7 @@
  *  - Deterministic DTSTAMP: Prevents background sync churn and battery drain across calendar clients.
  *  - Standard Atmosphere: Pressure in atm (1013.25 hPa baseline).
  *  - Parallel HTTP Requests: External APIs fetched concurrently using UrlFetchApp.fetchAll.
- *  - Discrete Card Layout: Single empty line (\n\n) separation for mobile scanning and clean copy-pasting.
+ *  - Clean single empty line (\n\n) separation between card blocks.
  */
 
 const ICAL_CONFIG = {
@@ -142,8 +143,6 @@ function generateIcsFeed(locations, temperatureUnit) {
   const todayStr = Utilities.formatDate(today, "UTC", "yyyy-MM-dd");
   const todayRef = Utilities.parseDate(todayStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
 
-  const dtstampStr = Utilities.formatDate(todayRef, "UTC", "yyyyMMdd'T'000000'Z'");
-
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -164,6 +163,7 @@ function generateIcsFeed(locations, temperatureUnit) {
       const icsDate = Utilities.formatDate(targetDate, "UTC", "yyyyMMdd");
       const nextDate = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
       const icsNextDate = Utilities.formatDate(nextDate, "UTC", "yyyyMMdd");
+      const dtstampStr = `${icsDate}T000000Z`;
 
       const idx = data.det.time.indexOf(dateKey);
       if (idx === -1) continue;
@@ -432,7 +432,7 @@ function fetchIcsAtmosphericDataParallel(loc, unit) {
         const aggs = {};
         for (let i = 0; i < hData.time.length; i++) {
           const dStr = hData.time[i].slice(0, 10);
-          if (!aggs[dStr]) aggs[dStr] = { pressures: [], soilTemps: [], hums: [], dews: [], clouds: [] };
+          if (!aggs[dStr]) aggs[dStr] = { pressures: [], soilTemps: [] };
           if (hData.pressure_msl && hData.pressure_msl[i] !== null) aggs[dStr].pressures.push(hData.pressure_msl[i]);
           if (hData.soil_temperature_0cm && hData.soil_temperature_0cm[i] !== null) aggs[dStr].soilTemps.push(hData.soil_temperature_0cm[i]);
           if (hData.relative_humidity_2m && hData.relative_humidity_2m[i] !== null) (aggs[dStr].hums = aggs[dStr].hums || []).push(hData.relative_humidity_2m[i]);
