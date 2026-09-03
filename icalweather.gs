@@ -1,13 +1,12 @@
 /**
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
  * 
- * Complete Feature Set & Zero-Omission Guarantee:
- *  - Atmosphere Pressure Metric: Native surface barometer in Standard Atmosphere (atm).
+ * Architecture & Format:
+ *  - Category Spacing: Clean single empty line (\n\n) between discrete card blocks.
+ *  - Atmosphere Pressure Metric: Surface pressure converted to Standard Atmosphere (atm).
  *  - Hourly Aggregations: Accurately parses hourly surface pressure and minimum soil temperatures.
- *  - Full Astronomical Catalog: Synchronized major meteor showers, equinoxes, solstices, perihelion, and oppositions.
- *  - Actionable GDD Guidance: 7-day Growing Degree Days agricultural/garden benchmark.
- *  - Multi-Vector Priority Advisory Engine: Hierarchical hazard, bio, thermal, and garden actions.
- *  - Complete 4-Tier Lead Curve Audit: D1-3, D4-7, D8-14, D15+ benchmark tracking.
+ *  - Full 4-Tier Lead Curve Audit: D1-3, D4-7, D8-14, D15+ benchmark tracking.
+ *  - Complete Feature Set: Actionable GDD, solar radiation, full celestial catalog, and priority advisory engine.
  *  - Compact Stargazing: Mobile-optimized condition string with trailing cloud text removed.
  *  - Stateless Parameter Delivery: Clean URL query interface (?cities=... or ?locations=...).
  */
@@ -220,7 +219,7 @@ function generateIcsFeed(locations, temperatureUnit) {
       if (data.aq && data.aq.time) {
         const aqIdx = data.aq.time.indexOf(dateKey);
         if (aqIdx !== -1) {
-          aqiVal = data.aq.european_aqi ? Math.round(data.aq.european_aqi[aqIdx]) : null;
+          aqiVal = data.aq.european_aqi ? Math.round(data.aq.european_aqi[idx]) : null;
           pm25Val = data.aq.pm2_5 ? Number(data.aq.pm2_5[aqIdx].toFixed(1)) : null;
           pm10Val = data.aq.pm10 ? Number(data.aq.pm10[aqIdx].toFixed(1)) : null;
           const birch = data.aq.birch_pollen ? data.aq.birch_pollen[aqIdx] : 0;
@@ -235,21 +234,16 @@ function generateIcsFeed(locations, temperatureUnit) {
       const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, cloudCover);
       const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
 
-      // Atmospheric conversion
       const pressureAtm = (pressure / 1013.25).toFixed(2);
-
-      // Multi-day GDD aggregate & actionable garden guidance
       const aggregates = computeMultiDayAggregates(data, offset, isC);
       const gddNote = getGddAction(aggregates.sevenDayGDD);
 
-      // Full 4-Tier Lead Curve Benchmark for Stateless Consumers
       const lead = offset;
       const expectedErr = lead <= 3 ? 0.8 : (lead <= 7 ? 1.7 : (lead <= 14 ? 2.9 : 4.3));
       const modelAuditStatus = lead === 0 
         ? "🎯 Ground-Truth (Live)" 
         : (lead <= 3 ? "🟢 D1-3 High" : (lead <= 7 ? "🟡 D4-7 Medium" : (lead <= 14 ? "🟠 D8-14 Extended" : "🎲 D15+ Ensemble")));
 
-      // Prioritized multi-hazard & operational advice
       const adviceContext = {
         tempMax: currentMax,
         tempMin: currentMin,
@@ -266,92 +260,76 @@ function generateIcsFeed(locations, temperatureUnit) {
       };
       const prioritizedAdvice = generatePrioritizedAdvices(adviceContext);
 
-      const sections = [];
+      const sections = [
+        [
+          `📍 ${loc.name}`,
+          `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${dateKey}`
+        ].join("\n"),
 
-      // 1. Temperature & Comfort
-      const tempSection = [
-        `🌡️ TEMPERATURE & COMFORT`,
-        `• Range: ${currentMin}${unitSymbol} ➔ ${currentMax}${unitSymbol} (${getThermalText(currentMax, isC)})`,
-        `• Sensation: Feels ~${apparentMax}${unitSymbol}${dewPoint !== null ? ` · Dew: ${dewPoint}${unitSymbol}` : ""}`,
-        humidity !== null ? `• Humidity: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity)})` : ``,
-        offset >= ICAL_CONFIG.deterministicDays
-          ? `• Consensus: ±${spreadVal}${unitSymbol}`
-          : `• Rain: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
-        offset < ICAL_CONFIG.deterministicDays
-          ? `• Wind: ${currentWind} km/h${windGusts > currentWind ? ` (Gusts ${windGusts} km/h)` : ""}`
-          : ``,
-        offset < ICAL_CONFIG.deterministicDays ? `• Barometer: ${pressureAtm} atm` : ``
-      ].filter(Boolean);
-      sections.push(tempSection.join("\n"));
+        [
+          `🌡️ TEMPERATURE & COMFORT`,
+          `• Range: ${currentMin}${unitSymbol} ➔ ${currentMax}${unitSymbol} (${getThermalText(currentMax, isC)})`,
+          `• Sensation: Feels ~${apparentMax}${unitSymbol}${dewPoint !== null ? ` · Dew: ${dewPoint}${unitSymbol}` : ""}`,
+          humidity !== null ? `• Humidity: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity)})` : ``,
+          offset >= ICAL_CONFIG.deterministicDays
+            ? `• Consensus: ±${spreadVal}${unitSymbol}`
+            : `• Rain: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
+          offset < ICAL_CONFIG.deterministicDays
+            ? `• Wind: ${currentWind} km/h${windGusts > currentWind ? ` (Gusts ${windGusts} km/h)` : ""}`
+            : ``,
+          offset < ICAL_CONFIG.deterministicDays ? `• Barometer: ${pressureAtm} atm` : ``
+        ].filter(Boolean).join("\n"),
 
-      // 2. Sun & Celestial
-      const sunSection = [
-        `☀️ SUN & CELESTIAL`,
-        astroEvent ? `• ${astroEvent}` : ``,
-        `• Daylight: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
-        `• Golden Hr: ~${getGoldenHourWindow(sunsetStr)}`,
-        cloudCover !== null ? `• Cloud Cover: ${cloudCover}%` : ``,
-        `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
-        `• Stargazing: ${stargazing}`,
-        uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
-        et0 > 0 ? `• Evapotranspiration: ${et0.toFixed(1)} mm` : ``,
-        radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
-      ].filter(Boolean);
-      sections.push(sunSection.join("\n"));
+        [
+          `☀️ SUN & CELESTIAL`,
+          astroEvent ? `• ${astroEvent}` : ``,
+          `• Daylight: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
+          `• Golden Hr: ~${getGoldenHourWindow(sunsetStr)}`,
+          cloudCover !== null ? `• Cloud Cover: ${cloudCover}%` : ``,
+          `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
+          `• Stargazing: ${stargazing}`,
+          uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
+          et0 > 0 ? `• Evapotranspiration: ${et0.toFixed(1)} mm` : ``,
+          radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
+        ].filter(Boolean).join("\n"),
 
-      // 3. Air Quality & Bio
-      const bioSection = [
-        `🧪 AIR QUALITY & BIO`,
-        aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal)} (${getAqiLabel(aqiVal)})` : `• AQI: Monitoring`,
-        pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
-        pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
-      ].filter(Boolean);
-      sections.push(bioSection.join("\n"));
+        [
+          `🧪 AIR QUALITY & BIO`,
+          aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal)} (${getAqiLabel(aqiVal)})` : `• AQI: Monitoring`,
+          pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
+          pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
+        ].filter(Boolean).join("\n"),
 
-      // 4. 7-Day Accumulated
-      const aggSection = [
-        `📅 7-DAY AGGREGATE`,
-        `• Rain Sum: ${aggregates.sevenDayRain} mm`,
-        `• Mean Temp: ${aggregates.sevenDayMeanTemp}${unitSymbol}`,
-        `• Growing Deg: ${aggregates.sevenDayGDD} GDD (${gddNote})`
+        [
+          `📅 7-DAY AGGREGATE`,
+          `• Rain Sum: ${aggregates.sevenDayRain} mm`,
+          `• Mean Temp: ${aggregates.sevenDayMeanTemp}${unitSymbol}`,
+          `• Growing Deg: ${aggregates.sevenDayGDD} GDD (${gddNote})`
+        ].join("\n"),
+
+        [
+          `📉 MODEL AUDIT`,
+          `• Status: ${modelAuditStatus}`,
+          `• Expected Lead Drift: ±${expectedErr.toFixed(1)}${unitSymbol}`,
+          `• Lead Curve: D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°`
+        ].join("\n")
       ];
-      sections.push(aggSection.join("\n"));
 
-      // 5. Model Horizon & Audit
-      const auditSection = [
-        `📉 MODEL AUDIT`,
-        `• Status: ${modelAuditStatus}`,
-        `• Expected Lead Drift: ±${expectedErr.toFixed(1)}${unitSymbol}`,
-        `• Lead Curve: D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°`
-      ];
-      sections.push(auditSection.join("\n"));
-
-      // 6. Road Hazards (Threshold: <= 7°C)
       if (tempMinInC <= 7) {
         const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC);
-        const roadSection = [
+        sections.push([
           `🚗 ROAD SAFETY (<=7°C)`,
           `• Status: ${roadHazard.status}`,
           `• Ground: ${Math.round(soilTempMin)}${unitSymbol} (${roadHazard.advisory})`
-        ];
-        sections.push(roadSection.join("\n"));
+        ].join("\n"));
       }
 
-      // 7. Actionable Advice
-      const adviceSection = [
+      sections.push([
         `💡 ACTIONABLE ADVICE`,
         prioritizedAdvice.map(adv => `• ${adv}`).join("\n"),
         ``,
         `ℹ️ Engine: ${modelLabel}`
-      ];
-      sections.push(adviceSection.join("\n"));
-
-      // 8. Location & Date (Footer)
-      const footerSection = [
-        `📍 ${loc.name}`,
-        `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${dateKey}`
-      ];
-      sections.push(footerSection.join("\n"));
+      ].join("\n"));
 
       const fullDesc = sections.join("\n\n");
       const uid = `weather_${norm(loc.name)}_${dateKey}@weatherdashboard`;
@@ -616,41 +594,30 @@ function assessRoadConditions(tMin, soilMin, rainVol, isC) {
 function getAstronomicalEvents(dateStr) {
   const md = dateStr.slice(5);
   const events = {
-    // January
     "01-03": "Quadrantid Meteor Peak (~110/hr)",
     "01-04": "Earth at Perihelion (Closest to Sun)",
-    // March
     "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
     "03-24": "Mercury at Greatest Eastern Elongation",
-    // April
     "04-22": "Lyrid Meteor Peak (~18/hr)",
     "04-23": "Lyrid Active Window",
-    // May
     "05-06": "Eta Aquariids Peak (~50/hr)",
     "05-07": "Eta Aquariids Active Window",
-    // June
     "06-21": "☀️ Summer Solstice (Longest Day)",
-    // July
     "07-04": "Earth at Aphelion (Furthest from Sun)",
     "07-28": "Delta Aquariids Peak (~20/hr)",
     "07-29": "Delta Aquariids Active Window",
-    // August
     "08-12": "Perseid Meteor Peak (~100/hr)",
     "08-13": "Perseid Active Window",
     "08-27": "Saturn at Opposition (Brightest)",
-    // September
     "09-19": "Neptune at Opposition",
     "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
-    // October
     "10-07": "Draconid Meteor Peak (~10/hr)",
     "10-21": "Orionid Meteor Peak (~20/hr)",
     "10-22": "Orionid Active Window",
-    // November
     "11-05": "Southern Taurids Peak (~5-10 fireball/hr)",
     "11-12": "Northern Taurids Peak (~5 fireball/hr)",
     "11-17": "Leonid Meteor Peak (~15/hr)",
     "11-18": "Leonid Active Window",
-    // December
     "12-07": "Jupiter at Opposition (Brightest)",
     "12-13": "Geminid Meteor Ramp-up (~60/hr)",
     "12-14": "Geminid Meteor Peak (~120/hr)",
