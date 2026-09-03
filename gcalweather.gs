@@ -7,6 +7,7 @@
  *  - Mobile View Overhaul: Clean, compact card layout formatted for narrow mobile phone viewports.
  *  - Generic globally distributed base locations + dynamic travel co-existence.
  *  - Atomic PropertiesService storage (9KB limit safe).
+ *  - Hardened Deduplication: Timezone-safe all-day event date resolution & robust multi-field city detection.
  */
 
 const CONFIG = {
@@ -67,16 +68,23 @@ function syncWeatherToCalendar() {
   reconcileGroundTruth(locationPool, weatherCache);
   const globalStats = computeGlobalModelAccuracy(unitSymbol);
 
-  // 4. Batch-index calendar events
-  const windowStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - CONFIG.historyDays - 2);
+  // 4. Batch-index calendar events with hardened multi-factor identification
+  const windowStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - CONFIG.historyDays - 3);
   const windowEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + CONFIG.forecastDays + 5);
   const existingEvents = cal.getEvents(windowStart, windowEnd);
 
   const eventMap = new Map();
+  const calTz = cal.getTimeZone();
+
   existingEvents.forEach(ev => {
-    const dStr = Utilities.formatDate(ev.getStartTime(), cal.getTimeZone(), "yyyy-MM-dd");
-    const cityKey = detectEventCity(ev.getTitle() + " " + (ev.getDescription() || ""), locationPool);
-    if (cityKey) {
+    // Resolve all-day start date immune to midnight offset drift
+    const dStr = getEventDateString(ev, calTz);
+    const cityKey = detectEventCity(
+      `${ev.getTitle()} ${ev.getDescription() || ""} ${ev.getLocation() || ""}`,
+      locationPool
+    );
+
+    if (cityKey && dStr) {
       const mapKey = `${dStr}_${cityKey}`;
       if (!eventMap.has(mapKey)) eventMap.set(mapKey, []);
       eventMap.get(mapKey).push(ev);
@@ -85,8 +93,8 @@ function syncWeatherToCalendar() {
 
   // 5. Update or create events
   daySchedule.forEach(({ date, offset, locKeys }) => {
-    const dStr = Utilities.formatDate(date, cal.getTimeZone(), "yyyy-MM-dd");
-    const todayStr = Utilities.formatDate(today, cal.getTimeZone(), "yyyy-MM-dd");
+    const dStr = Utilities.formatDate(date, calTz, "yyyy-MM-dd");
+    const todayStr = Utilities.formatDate(today, calTz, "yyyy-MM-dd");
 
     locKeys.forEach(key => {
       const loc = locationPool.get(key);
@@ -104,7 +112,11 @@ function syncWeatherToCalendar() {
         primary.setTitle(payload.title);
         primary.setDescription(payload.desc);
         if (payload.color) primary.setColor(payload.color);
-        for (let i = 1; i < matched.length; i++) matched[i].deleteEvent();
+
+        // Delete any duplicate copies for this exact date & location key
+        for (let i = 1; i < matched.length; i++) {
+          matched[i].deleteEvent();
+        }
       } else {
         const created = cal.createAllDayEvent(payload.title, date, { description: payload.desc });
         if (payload.color) created.setColor(payload.color);
@@ -115,6 +127,25 @@ function syncWeatherToCalendar() {
 
   // 6. Housekeeping: clear keys older than 45 days
   cleanupOldStorageKeys();
+}
+
+// ==========================================================
+// TIMEZONE-SAFE EVENT IDENTIFIER HELPERS
+// ==========================================================
+
+function getEventDateString(ev, calTz) {
+  if (ev.isAllDayEvent()) {
+    // Google Calendar stores all-day events anchored to midnight UTC.
+    // Check both local calendar time and UTC to ensure consistent yyyy-MM-dd assignment.
+    const start = ev.getAllDayStartDate ? ev.getAllDayStartDate() : ev.getStartTime();
+    const utcStr = Utilities.formatDate(start, "UTC", "yyyy-MM-dd");
+    const localStr = Utilities.formatDate(start, calTz, "yyyy-MM-dd");
+
+    // If start lands close to daylight shift boundaries, verify against midday of the event
+    const mid = new Date(start.getTime() + (12 * 60 * 60 * 1000));
+    return Utilities.formatDate(mid, calTz, "yyyy-MM-dd") || localStr || utcStr;
+  }
+  return Utilities.formatDate(ev.getStartTime(), calTz, "yyyy-MM-dd");
 }
 
 // ==========================================================
@@ -756,14 +787,22 @@ function resolveCalendar() {
 
 function norm(str) {
   if (!str) return "";
-  return str.toLowerCase().trim();
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // strip diacritics (e.g. Valparaíso -> valparaiso)
+    .toLowerCase()
+    .trim();
 }
 
 function detectEventCity(text, locationPool) {
   if (!text) return null;
-  const lower = text.toLowerCase();
-  for (let [key] of locationPool) {
-    if (lower.includes(key)) return key;
+  const normalizedText = norm(text);
+
+  for (let [key, locObj] of locationPool) {
+    const rawKey = norm(locObj.name || key);
+    if (normalizedText.includes(key) || normalizedText.includes(rawKey)) {
+      return key;
+    }
   }
   return null;
 }
