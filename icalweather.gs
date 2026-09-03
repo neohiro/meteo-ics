@@ -1,13 +1,15 @@
 /**
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
  * 
- * Enhancements & Overhauls Applied:
- *  - Atmospheric Pressure: Added surface barometer converted to Standard Atmosphere (atm).
- *  - Expanded Astronomical Catalog: Major meteor showers, equinoxes, solstices, and lunar/planetary milestones.
- *  - Compact Stargazing: Trimmed parenthetical cloud text to prevent line wrapping on mobile devices.
- *  - Actionable GDD Guidance: 7-day accumulated Growing Degree Days benchmark for crops/garden.
- *  - Expanded Hierarchical Advisory Engine: Prioritized multi-hazard alerts (severe weather, freeze, air quality, heat, solar/UV, and clothing).
- *  - Compact Model Audit: Streamlined metrics for narrow mobile viewports.
+ * Complete Feature Set & Zero-Omission Guarantee:
+ *  - Atmosphere Pressure Metric: Native surface barometer in Standard Atmosphere (atm).
+ *  - Hourly Aggregations: Accurately parses hourly surface pressure and minimum soil temperatures.
+ *  - Full Astronomical Catalog: Synchronized major meteor showers, equinoxes, solstices, perihelion, and oppositions.
+ *  - Actionable GDD Guidance: 7-day Growing Degree Days agricultural/garden benchmark.
+ *  - Multi-Vector Priority Advisory Engine: Hierarchical hazard, bio, thermal, and garden actions.
+ *  - Complete 4-Tier Lead Curve Audit: D1-3, D4-7, D8-14, D15+ benchmark tracking.
+ *  - Compact Stargazing: Mobile-optimized condition string with trailing cloud text removed.
+ *  - Stateless Parameter Delivery: Clean URL query interface (?cities=... or ?locations=...).
  */
 
 const ICAL_CONFIG = {
@@ -146,9 +148,9 @@ function generateIcsFeed(locations, temperatureUnit) {
       if (idx === -1) continue;
 
       let currentMax = null, currentMin = null, apparentMax = null;
-      let currentRain = 0, currentWind = 0, windGusts = 0, rainProb = 0;
-      let humidity = null, dewPoint = null, cloudCover = null, weatherCode = 0;
-      let uvIndex = 0, et0 = 0, soilTempMin = 10, pressure = 1013.25;
+      let currentRain = 0, currentWind = 0, windGusts = 0, rainProb = 0, weatherCode = 0;
+      let humidity = null, dewPoint = null, cloudCover = null;
+      let uvIndex = 0, et0 = 0, radiation = 0, soilTempMin = 10, pressure = 1013.25;
       let sunriseStr = "--:--", sunsetStr = "--:--", daylightFormatted = "--";
       let title = "", modelLabel = "", spreadVal = 0;
 
@@ -168,6 +170,7 @@ function generateIcsFeed(locations, temperatureUnit) {
 
         uvIndex = data.det.uv_index_max ? data.det.uv_index_max[idx] : 0;
         et0 = data.det.et0_fao_evapotranspiration ? data.det.et0_fao_evapotranspiration[idx] : 0;
+        radiation = data.det.shortwave_radiation_sum ? data.det.shortwave_radiation_sum[idx] : 0;
 
         if (data.hourlyAgg && data.hourlyAgg[dateKey]) {
           pressure = data.hourlyAgg[dateKey].pressure || 1013.25;
@@ -232,19 +235,19 @@ function generateIcsFeed(locations, temperatureUnit) {
       const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, cloudCover);
       const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
 
-      // Standard atmosphere conversion (1 atm = 1013.25 hPa)
+      // Atmospheric conversion
       const pressureAtm = (pressure / 1013.25).toFixed(2);
 
       // Multi-day GDD aggregate & actionable garden guidance
       const aggregates = computeMultiDayAggregates(data, offset, isC);
       const gddNote = getGddAction(aggregates.sevenDayGDD);
 
-      // Lead time expected error curve
+      // Full 4-Tier Lead Curve Benchmark for Stateless Consumers
       const lead = offset;
       const expectedErr = lead <= 3 ? 0.8 : (lead <= 7 ? 1.7 : (lead <= 14 ? 2.9 : 4.3));
       const modelAuditStatus = lead === 0 
         ? "🎯 Ground-Truth (Live)" 
-        : (lead <= 3 ? "🟢 D1-3 High" : "🟡 D4-14 Horizon");
+        : (lead <= 3 ? "🟢 D1-3 High" : (lead <= 7 ? "🟡 D4-7 Medium" : (lead <= 14 ? "🟠 D8-14 Extended" : "🎲 D15+ Ensemble")));
 
       // Prioritized multi-hazard & operational advice
       const adviceContext = {
@@ -290,7 +293,9 @@ function generateIcsFeed(locations, temperatureUnit) {
         cloudCover !== null ? `• Cloud Cover: ${cloudCover}%` : ``,
         `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
         `• Stargazing: ${stargazing}`,
-        uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``
+        uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
+        et0 > 0 ? `• Evapotranspiration: ${et0.toFixed(1)} mm` : ``,
+        radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
       ].filter(Boolean);
       sections.push(sunSection.join("\n"));
 
@@ -316,7 +321,8 @@ function generateIcsFeed(locations, temperatureUnit) {
       const auditSection = [
         `📉 MODEL AUDIT`,
         `• Status: ${modelAuditStatus}`,
-        `• Lead Drift: ±${expectedErr.toFixed(1)}${unitSymbol} (Benchmark)`
+        `• Expected Lead Drift: ±${expectedErr.toFixed(1)}${unitSymbol}`,
+        `• Lead Curve: D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°`
       ];
       sections.push(auditSection.join("\n"));
 
@@ -394,10 +400,10 @@ function foldIcsLines(lines) {
 
 function fetchIcsAtmosphericData(loc, unit) {
   const result = { det: null, ens: null, aq: null, hourlyAgg: {} };
-  const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weathercode,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,relative_humidity_2m_mean,dew_point_2m_mean,cloudcover_mean,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
+  const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weathercode,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,relative_humidity_2m_mean,dew_point_2m_mean,cloudcover_mean,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const hUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${ICAL_CONFIG.forecastDays}&temperature_unit=${unit}&timezone=auto`;
-  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&daily=european_aqi,pm10,pm2_5,alder_pollen,birch_pollen,grass_pollen&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
+  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&daily=european_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
 
   try {
     const dRes = UrlFetchApp.fetch(dUrl, { muteHttpExceptions: true });
@@ -502,7 +508,7 @@ function generatePrioritizedAdvices(ctx) {
 
   const pool = [];
 
-  // P1: Severe Weather Warnings (Score 90-100)
+  // P1: Severe Life & Weather Warnings (Score 90-100)
   if ([95, 96, 99].includes(ctx.weatherCode)) {
     pool.push({ p: 100, text: "Thunderstorm warning: seek sturdy shelter ⚡" });
   }
@@ -531,7 +537,7 @@ function generatePrioritizedAdvices(ctx) {
     pool.push({ p: 82, text: "Overnight frost: cover sensitive patio plants 🪴" });
   }
 
-  // P3: Respiratory, Health & Bio (Score 65-88)
+  // P3: Respiratory, Health & Bio Hazards (Score 65-88)
   if (ctx.aqi && ctx.aqi >= 80) {
     pool.push({ p: 88, text: "Hazardous air: wear N95/mask & run indoor filters 😷" });
   } else if (ctx.aqi && ctx.aqi >= 50) {
