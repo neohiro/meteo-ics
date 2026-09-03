@@ -1,14 +1,12 @@
 /**
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
  * 
- * Architecture & Format:
- *  - Category Spacing: Clean single empty line (\n\n) between discrete card blocks.
- *  - Atmosphere Pressure Metric: Surface pressure converted to Standard Atmosphere (atm).
- *  - Hourly Aggregations: Accurately parses hourly surface pressure and minimum soil temperatures.
- *  - Full 4-Tier Lead Curve Audit: D1-3, D4-7, D8-14, D15+ benchmark tracking.
- *  - Complete Feature Set: Actionable GDD, solar radiation, full celestial catalog, and priority advisory engine.
- *  - Compact Stargazing: Mobile-optimized condition string with trailing cloud text removed.
- *  - Stateless Parameter Delivery: Clean URL query interface (?cities=... or ?locations=...).
+ * Performance & Architecture Hardening:
+ *  - Parallel Fetching: Executes all Open-Meteo and Copernicus API calls concurrently.
+ *  - Deterministic DTSTAMP: Prevents calendar churn and continuous background syncing.
+ *  - Standard Atmosphere: Surface pressure scaled to atm (1013.25 hPa baseline).
+ *  - Complete 4-Tier Lead Curve Audit: D1-3, D4-7, D8-14, D15+ benchmark tracking.
+ *  - Single-Empty-Line Card Spacing (\n\n) formatted cleanly for mobile screens.
  */
 
 const ICAL_CONFIG = {
@@ -32,7 +30,7 @@ function doGet(e) {
       "X-WR-CALNAME:Weather Feed - Error",
       "BEGIN:VEVENT",
       `UID:error_no_locations_${Date.now()}@weatherdashboard`,
-      `DTSTAMP:${Utilities.formatDate(new Date(), "UTC", "yyyyMMdd'T'HHmmss'Z'")}`,
+      `DTSTAMP:${Utilities.formatDate(new Date(), "UTC", "yyyyMMdd'T'000000'Z'")}`,
       `DTSTART;VALUE=DATE:${Utilities.formatDate(new Date(), "UTC", "yyyyMMdd")}`,
       "SUMMARY:⚠️ No Locations Specified",
       "DESCRIPTION:Please supply locations via URL query parameters.\\nExample: ?cities=Tokyo,Paris or ?locations=Kyoto:35.0116:135.7681",
@@ -62,16 +60,13 @@ function parseLocationsFromParams(e) {
   const list = [];
 
   if (p.locations) {
-    const entries = p.locations.split(",");
-    entries.forEach(entry => {
+    p.locations.split(",").forEach(entry => {
       const parts = entry.split(":");
       if (parts.length >= 3) {
         const name = parts[0].trim();
         const lat = parseFloat(parts[1]);
         const lon = parseFloat(parts[2]);
-        if (!isNaN(lat) && !isNaN(lon) && name) {
-          list.push({ name, lat, lon });
-        }
+        if (!isNaN(lat) && !isNaN(lon) && name) list.push({ name, lat, lon });
       }
     });
   }
@@ -80,17 +75,12 @@ function parseLocationsFromParams(e) {
     const lat = parseFloat(p.lat);
     const lon = parseFloat(p.lon);
     if (!isNaN(lat) && !isNaN(lon)) {
-      list.push({
-        name: p.name ? p.name.trim() : "Custom Location",
-        lat,
-        lon
-      });
+      list.push({ name: p.name ? p.name.trim() : "Custom Location", lat, lon });
     }
   }
 
   if (p.cities) {
-    const cityNames = p.cities.split(",");
-    cityNames.forEach(cityName => {
+    p.cities.split(",").forEach(cityName => {
       const trimmed = cityName.trim();
       if (trimmed) {
         const geo = geocodeCity(trimmed);
@@ -122,6 +112,9 @@ function generateIcsFeed(locations, temperatureUnit) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Stable daily timestamp for caching
+  const dtstampStr = Utilities.formatDate(today, "UTC", "yyyyMMdd'T'000000'Z'");
+
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -133,7 +126,7 @@ function generateIcsFeed(locations, temperatureUnit) {
   ];
 
   locations.forEach(loc => {
-    const data = fetchIcsAtmosphericData(loc, temperatureUnit);
+    const data = fetchIcsAtmosphericDataParallel(loc, temperatureUnit);
     if (!data || !data.det || !data.det.time) return;
 
     for (let offset = 0; offset < ICAL_CONFIG.forecastDays; offset++) {
@@ -220,11 +213,11 @@ function generateIcsFeed(locations, temperatureUnit) {
         const aqIdx = data.aq.time.indexOf(dateKey);
         if (aqIdx !== -1) {
           aqiVal = data.aq.european_aqi ? Math.round(data.aq.european_aqi[idx]) : null;
-          pm25Val = data.aq.pm2_5 ? Number(data.aq.pm2_5[aqIdx].toFixed(1)) : null;
-          pm10Val = data.aq.pm10 ? Number(data.aq.pm10[aqIdx].toFixed(1)) : null;
-          const birch = data.aq.birch_pollen ? data.aq.birch_pollen[aqIdx] : 0;
-          const grass = data.aq.grass_pollen ? data.aq.grass_pollen[aqIdx] : 0;
-          const alder = data.aq.alder_pollen ? data.aq.alder_pollen[aqIdx] : 0;
+          pm25Val = data.aq.pm2_5 ? Number(data.aq.pm2_5[idx].toFixed(1)) : null;
+          pm10Val = data.aq.pm10 ? Number(data.aq.pm10[idx].toFixed(1)) : null;
+          const birch = data.aq.birch_pollen ? data.aq.birch_pollen[idx] : 0;
+          const grass = data.aq.grass_pollen ? data.aq.grass_pollen[idx] : 0;
+          const alder = data.aq.alder_pollen ? data.aq.alder_pollen[idx] : 0;
           pollenVal = Math.round(Math.max(birch, grass, alder));
         }
       }
@@ -336,7 +329,7 @@ function generateIcsFeed(locations, temperatureUnit) {
 
       lines.push("BEGIN:VEVENT");
       lines.push(`UID:${uid}`);
-      lines.push(`DTSTAMP:${Utilities.formatDate(new Date(), "UTC", "yyyyMMdd'T'HHmmss'Z'")}`);
+      lines.push(`DTSTAMP:${dtstampStr}`);
       lines.push(`DTSTART;VALUE=DATE:${icsDate}`);
       lines.push(`DTEND;VALUE=DATE:${icsNextDate}`);
       lines.push(`SUMMARY:${escapeIcsText(title)}`);
@@ -376,7 +369,7 @@ function foldIcsLines(lines) {
   }).join("\r\n");
 }
 
-function fetchIcsAtmosphericData(loc, unit) {
+function fetchIcsAtmosphericDataParallel(loc, unit) {
   const result = { det: null, ens: null, aq: null, hourlyAgg: {} };
   const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weathercode,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,relative_humidity_2m_mean,dew_point_2m_mean,cloudcover_mean,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const hUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
@@ -384,12 +377,19 @@ function fetchIcsAtmosphericData(loc, unit) {
   const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&daily=european_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
 
   try {
-    const dRes = UrlFetchApp.fetch(dUrl, { muteHttpExceptions: true });
-    if (dRes.getResponseCode() === 200) result.det = JSON.parse(dRes.getContentText()).daily;
+    const responses = UrlFetchApp.fetchAll([
+      { url: dUrl, muteHttpExceptions: true },
+      { url: hUrl, muteHttpExceptions: true },
+      { url: eUrl, muteHttpExceptions: true },
+      { url: aqUrl, muteHttpExceptions: true }
+    ]);
 
-    const hRes = UrlFetchApp.fetch(hUrl, { muteHttpExceptions: true });
-    if (hRes.getResponseCode() === 200) {
-      const hData = JSON.parse(hRes.getContentText()).hourly;
+    if (responses[0].getResponseCode() === 200) result.det = JSON.parse(responses[0].getContentText()).daily;
+    if (responses[2].getResponseCode() === 200) result.ens = JSON.parse(responses[2].getContentText()).daily;
+    if (responses[3].getResponseCode() === 200) result.aq = JSON.parse(responses[3].getContentText()).daily;
+
+    if (responses[1].getResponseCode() === 200) {
+      const hData = JSON.parse(responses[1].getContentText()).hourly;
       if (hData && hData.time) {
         const aggs = {};
         for (let i = 0; i < hData.time.length; i++) {
@@ -408,12 +408,6 @@ function fetchIcsAtmosphericData(loc, unit) {
         });
       }
     }
-
-    const eRes = UrlFetchApp.fetch(eUrl, { muteHttpExceptions: true });
-    if (eRes.getResponseCode() === 200) result.ens = JSON.parse(eRes.getContentText()).daily;
-
-    const aqRes = UrlFetchApp.fetch(aqUrl, { muteHttpExceptions: true });
-    if (aqRes.getResponseCode() === 200) result.aq = JSON.parse(aqRes.getContentText()).daily;
   } catch (e) {
     Logger.log("iCal atmospheric fetch error: " + e);
   }
@@ -433,11 +427,7 @@ function geocodeCity(name) {
 
 function norm(str) {
   if (!str) return "";
-  return str
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
 function getGddAction(gdd) {
@@ -486,7 +476,6 @@ function generatePrioritizedAdvices(ctx) {
 
   const pool = [];
 
-  // P1: Severe Life & Weather Warnings (Score 90-100)
   if ([95, 96, 99].includes(ctx.weatherCode)) {
     pool.push({ p: 100, text: "Thunderstorm warning: seek sturdy shelter ⚡" });
   }
@@ -503,7 +492,6 @@ function generatePrioritizedAdvices(ctx) {
     pool.push({ p: 60, text: "Scattered showers expected: keep umbrella handy 🌂" });
   }
 
-  // P2: Thermal Extremes & Freeze (Score 80-92)
   if (appC >= 38 || maxC >= 36) {
     pool.push({ p: 92, text: "Dangerously extreme heat: stay indoors in AC 🚨" });
   } else if (maxC >= 30) {
@@ -515,7 +503,6 @@ function generatePrioritizedAdvices(ctx) {
     pool.push({ p: 82, text: "Overnight frost: cover sensitive patio plants 🪴" });
   }
 
-  // P3: Respiratory, Health & Bio Hazards (Score 65-88)
   if (ctx.aqi && ctx.aqi >= 80) {
     pool.push({ p: 88, text: "Hazardous air: wear N95/mask & run indoor filters 😷" });
   } else if (ctx.aqi && ctx.aqi >= 50) {
@@ -527,14 +514,12 @@ function generatePrioritizedAdvices(ctx) {
     pool.push({ p: 55, text: "Moderate pollen: rinse eyes & face after walks 🌼" });
   }
 
-  // P4: Solar & UV Exposure (Score 50-70)
   if (ctx.uv >= 8) {
     pool.push({ p: 70, text: "Very high UV: SPF 50+, hat & sunglasses required 🧴" });
   } else if (ctx.uv >= 5) {
     pool.push({ p: 58, text: "Moderate UV: apply sunscreen for midday outings 🕶️" });
   }
 
-  // P5: Garden, Irrigation & Agriculture (Score 40-62)
   if (ctx.et0 >= 4.5 && ctx.rainVol < 2) {
     pool.push({ p: 62, text: "High soil moisture loss: deep-soak garden beds 💧" });
   } else if (ctx.rainVol >= 15) {
@@ -543,7 +528,6 @@ function generatePrioritizedAdvices(ctx) {
     pool.push({ p: 40, text: "Low evaporation: avoid overwatering potted crops 🌱" });
   }
 
-  // P6: Clothing & Daily Routine Comfort (Score 30-52)
   if (maxC <= 3) {
     pool.push({ p: 52, text: "Freezing weather: thermal base layer & heavy parka 🧤" });
   } else if (maxC <= 11) {
@@ -569,25 +553,13 @@ function assessRoadConditions(tMin, soilMin, rainVol, isC) {
   const groundC = isC ? soilMin : (soilMin - 32) * (5 / 9);
 
   if (groundC <= 0 && rainVol > 0.2) {
-    return {
-      status: "🧊 BLACK ICE DANGER",
-      advisory: "Glazed surface. Triple braking distance."
-    };
+    return { status: "🧊 BLACK ICE DANGER", advisory: "Glazed surface. Triple braking distance." };
   } else if (groundC <= 0) {
-    return {
-      status: "❄️ FROST / SLICK SPOTS",
-      advisory: "Bridges & shaded ramps prone to ice."
-    };
+    return { status: "❄️ FROST / SLICK SPOTS", advisory: "Bridges & shaded ramps prone to ice." };
   } else if (minC <= 3 && rainVol > 2.0) {
-    return {
-      status: "💧 COLD SPRAY RISK",
-      advisory: "Reduced grip on summer tires."
-    };
+    return { status: "💧 COLD SPRAY RISK", advisory: "Reduced grip on summer tires." };
   } else {
-    return {
-      status: "🚗 CHILLED ASPHALT",
-      advisory: "Sub-7°C rubber hardening threshold."
-    };
+    return { status: "🚗 CHILLED ASPHALT", advisory: "Sub-7°C rubber hardening threshold." };
   }
 }
 
@@ -682,15 +654,17 @@ function getGoldenHourWindow(sunsetStr) {
 
 function getWeatherGlyph(code) {
   if (code === 0) return "☀️";
-  if (code < 3) return "🌤️";
+  if (code === 1) return "🌤️";
+  if (code === 2) return "⛅";
   if (code === 3) return "☁️";
-  if (code <= 48) return "🌫️";
-  if (code <= 57 || (code >= 66 && code <= 67)) return "🧊";
-  if (code <= 65) return code === 65 ? "🌊" : "🌧️";
-  if (code <= 77) return "❄️";
-  if (code <= 82) return "🌦️";
-  if (code <= 86) return "🌨️";
-  return "⚡";
+  if (code === 45 || code === 48) return "🌫️";
+  if (code >= 51 && code <= 57) return "🌦️";
+  if (code >= 61 && code <= 67) return code === 65 ? "🌊" : "🌧️";
+  if (code >= 71 && code <= 77) return "❄️";
+  if (code >= 80 && code <= 82) return "🌧️";
+  if (code === 85 || code === 86) return "🌨️";
+  if (code >= 95) return "⚡";
+  return "🌤️";
 }
 
 function getThermalText(t, isC) {
