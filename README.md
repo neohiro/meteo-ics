@@ -6,6 +6,31 @@
 
 High-precision, cross-platform calendar subscription (`.ics` / WebCal) powered by Open-Meteo, NOAA GFS Ensembles, and Copernicus CAMS. Compatible with Apple Calendar, Microsoft Outlook, Google Calendar, and Thunderbird.
 
+<details>
+<summary>TEMPERATURE & COMFORT</summary>
+High, low, feels like, rain, wind, barometer, humidity,...
+</details>
+<details>
+<summary>SUN & CELESTIAL</summary>
+Sun, daylight, golden hour, moon, stargazing info, uv, evaporation,...
+</details>
+<details>
+<summary>AIR QUALITY & BIO</summary>
+AQI, pollen, allergens,...
+</details>
+<details>
+<summary>LAST WEEK TOTALS</summary>
+Rain sum, mean temp, growing degree days, mean AQI, etc.
+</details>
+<details>
+<summary>MODEL AUDIT</summary>
+Error of prediction, drift for rain and temperature, lifetime reliability.
+</details>
+<details>
+<summary>ADVICE & RELIABILITY</summary>
+Advice based on weather summary, engine reliability info
+</details>
+
 ### Language Jump Links / 语言导航 / भाषा चयन
 - [🇬🇧 English](#-english)
 - [🇨🇳 中文 (Chinese)](#-中文-chinese)
