@@ -49,7 +49,8 @@ Advice based on weather summary, engine reliability info
 
 ## Base Endpoint
 
-https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec
+[https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec
+](https://script.google.com/macros/s/AKfycbzwkRzpOskREtgz2TE187v4jEiurxRhiM7HLKeyOyQ4SSFU1CwVo_vhr6o7iJd79Pw-eg/exec)
 
 ---
 
