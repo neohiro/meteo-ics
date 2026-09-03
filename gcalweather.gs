@@ -8,6 +8,7 @@
  *  - Generic globally distributed base locations + dynamic travel co-existence.
  *  - Atomic PropertiesService storage (9KB limit safe).
  *  - Hardened Deduplication: Timezone-safe all-day event date resolution & robust multi-field city detection.
+ *  - Mobile Optimization: Headers start immediately at top; location/date metadata relocated to footer; category spacing.
  */
 
 const CONFIG = {
@@ -77,7 +78,6 @@ function syncWeatherToCalendar() {
   const calTz = cal.getTimeZone();
 
   existingEvents.forEach(ev => {
-    // Resolve all-day start date immune to midnight offset drift
     const dStr = getEventDateString(ev, calTz);
     const cityKey = detectEventCity(
       `${ev.getTitle()} ${ev.getDescription() || ""} ${ev.getLocation() || ""}`,
@@ -113,7 +113,6 @@ function syncWeatherToCalendar() {
         primary.setDescription(payload.desc);
         if (payload.color) primary.setColor(payload.color);
 
-        // Delete any duplicate copies for this exact date & location key
         for (let i = 1; i < matched.length; i++) {
           matched[i].deleteEvent();
         }
@@ -135,13 +134,9 @@ function syncWeatherToCalendar() {
 
 function getEventDateString(ev, calTz) {
   if (ev.isAllDayEvent()) {
-    // Google Calendar stores all-day events anchored to midnight UTC.
-    // Check both local calendar time and UTC to ensure consistent yyyy-MM-dd assignment.
     const start = ev.getAllDayStartDate ? ev.getAllDayStartDate() : ev.getStartTime();
     const utcStr = Utilities.formatDate(start, "UTC", "yyyy-MM-dd");
     const localStr = Utilities.formatDate(start, calTz, "yyyy-MM-dd");
-
-    // If start lands close to daylight shift boundaries, verify against midday of the event
     const mid = new Date(start.getTime() + (12 * 60 * 60 * 1000));
     return Utilities.formatDate(mid, calTz, "yyyy-MM-dd") || localStr || utcStr;
   }
@@ -307,30 +302,38 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
     const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym);
 
-    const desc = [
-      `📍 ${loc.name} · Verified Log`,
-      `📅 ${targetDateStr} (${Math.abs(offset)}d ago)`,
-      ``,
-      `📊 GROUND TRUTH (MEASURED)`,
-      `🌡️ Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
-      `🌤️ Sky: ${weatherGlyph} ${getWeatherName(actualCode)}`,
-      `🌧️ Rain: ${Number(actualRain).toFixed(1)} mm`,
-      aqiVal !== null ? `🍃 Air Quality: ${aqiVal} ${getAqiGlyph(aqiVal)} (${getAqiLabel(aqiVal)})` : ``,
-      astroEvent ? `✨ Event: ${astroEvent}` : ``,
-      ``,
-      `🎯 PREDICTION ACCURACY AUDIT`,
-      `• Temp Error: ${audit.tempDelta}`,
-      `• Rain Error: ${audit.rainDelta}`,
-      `• Stability: ${audit.volatility}`,
-      ``,
-      `🌐 HISTORICAL MODEL BENCHMARK`,
-      `• Lifetime Temp MAE: ${globalStats.tempMAE}`,
-      `• Lifetime Rain MAE: ${globalStats.rainMAE}`,
-      `• Reliability: ${globalStats.modelGrade}`,
-      `• Horizon: ${globalStats.leadCurve}`
-    ].filter(Boolean).join("\n");
+    const descSections = [
+      [
+        `📊 GROUND TRUTH (MEASURED)`,
+        `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
+        `• Sky: ${weatherGlyph} ${getWeatherName(actualCode)}`,
+        `• Rain: ${Number(actualRain).toFixed(1)} mm`,
+        aqiVal !== null ? `• Air Quality: ${aqiVal} ${getAqiGlyph(aqiVal)} (${getAqiLabel(aqiVal)})` : ``,
+        astroEvent ? `• Event: ${astroEvent}` : ``
+      ].filter(Boolean).join("\n"),
 
-    return { title, desc, color };
+      [
+        `🎯 PREDICTION ACCURACY AUDIT`,
+        `• Temp Error: ${audit.tempDelta}`,
+        `• Rain Error: ${audit.rainDelta}`,
+        `• Stability: ${audit.volatility}`
+      ].join("\n"),
+
+      [
+        `🌐 HISTORICAL MODEL BENCHMARK`,
+        `• Lifetime Temp MAE: ${globalStats.tempMAE}`,
+        `• Lifetime Rain MAE: ${globalStats.rainMAE}`,
+        `• Reliability: ${globalStats.modelGrade}`,
+        `• Horizon: ${globalStats.leadCurve}`
+      ].join("\n"),
+
+      [
+        `📍 ${loc.name} · Verified Log`,
+        `📅 ${targetDateStr} (${Math.abs(offset)}d ago)`
+      ].join("\n")
+    ];
+
+    return { title, desc: descSections.join("\n\n"), color };
   }
 
   // --------------------------------------------------------
@@ -427,11 +430,11 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
   const renderRoadHazards = tempMinInC <= 7;
 
-  // Mobile-Optimized Layout (clean lines, compact cards, under 38 chars/line)
-  const descLines = [
-    `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
-    `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${targetDateStr}`,
-    ``,
+  // Sections structured with individual blocks for whitespace separation
+  const sections = [];
+
+  // 1. Temperature & Comfort (Top)
+  const tempLines = [
     `🌡️ TEMPERATURE & COMFORT`,
     `• High: ${currentMax}${sym} (${getThermalText(currentMax, isC)})`,
     `• Low: ${currentMin}${sym} · Feels: ~${apparentMax}${sym}`,
@@ -439,8 +442,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       ? `• Model Consensus: ±${spreadVal}${sym}`
       : `• Rain: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
     offset < CONFIG.deterministicDays ? `• Wind: ${currentWind} km/h` : ``,
-    offset < CONFIG.deterministicDays ? `• Barometer: ${pressure} hPa` : ``,
-    ``,
+    offset < CONFIG.deterministicDays ? `• Barometer: ${pressure} hPa` : ``
+  ].filter(Boolean);
+  sections.push(tempLines.join("\n"));
+
+  // 2. Sun & Celestial
+  const sunLines = [
     `☀️ SUN & CELESTIAL`,
     astroEvent ? `✨ ${astroEvent}` : ``,
     `• Sun: 🌅 ${sunriseStr} – 🌇 ${sunsetStr}`,
@@ -449,44 +456,66 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
     `• Stargazing: ${stargazing}`,
     uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
-    et0 > 0 ? `• Evaporation (ET₀): ${et0.toFixed(1)} mm` : ``,
-    ``,
+    et0 > 0 ? `• Evaporation (ET₀): ${et0.toFixed(1)} mm` : ``
+  ].filter(Boolean);
+  sections.push(sunLines.join("\n"));
+
+  // 3. Air Quality & Bio
+  const bioLines = [
     `🧪 AIR QUALITY & BIO`,
     aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal)} (${getAqiLabel(aqiVal)})` : `• AQI: Monitoring`,
     pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
-    pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low / Minimal`,
-    ``,
+    pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low / Minimal`
+  ].filter(Boolean);
+  sections.push(bioLines.join("\n"));
+
+  // 4. 7-Day Accumulated
+  const aggLines = [
     `📅 7-DAY ACCUMULATED`,
     `• Rain Sum: ${aggregates.sevenDayRain} mm`,
     `• Mean Temp: ${aggregates.sevenDayMeanTemp}${sym}`,
     `• Growing Degree Days: ${aggregates.sevenDayGDD} GDD`,
-    `• 7-Day Mean AQI: ${aggregates.sevenDayAqi}`,
-    ``,
+    `• 7-Day Mean AQI: ${aggregates.sevenDayAqi}`
+  ].filter(Boolean);
+  sections.push(aggLines.join("\n"));
+
+  // 5. Model Audit
+  const auditLines = [
     `📉 MODEL AUDIT`,
     `• Drift vs D-Anchor: ${drift.tempDelta}`,
     `• Rain Drift: ${drift.rainDelta}`,
     `• Lifetime MAE: ${globalStats.tempMAE}`,
     `• Reliability: ${globalStats.modelGrade}`
-  ];
+  ].filter(Boolean);
+  sections.push(auditLines.join("\n"));
 
+  // 6. Road Safety (Optional)
   if (renderRoadHazards) {
     const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC);
-    descLines.push(
-      ``,
+    const roadLines = [
       `🚗 ROAD SAFETY ADVISORY (<=7°C)`,
       `• Status: ${roadHazard.status}`,
       `• Ground Temp: ${Math.round(soilTempMin)}${sym}`,
       `• Advisory: ${roadHazard.advisory}`
-    );
+    ];
+    sections.push(roadLines.join("\n"));
   }
 
-  descLines.push(
-    ``,
+  // 7. Advice & Engine Info
+  const adviceLines = [
     `💡 ${getAdvice(currentMax, rainProb, currentRain, currentWind, aqiVal, isC)}`,
     `ℹ️ Engine: ${modelLabel}`
-  );
+  ];
+  sections.push(adviceLines.join("\n"));
 
-  return { title, desc: descLines.filter(Boolean).join("\n"), color };
+  // 8. Location & Date (Moved to Footer)
+  const metaLines = [
+    `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
+    `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${targetDateStr}`
+  ];
+  sections.push(metaLines.join("\n"));
+
+  return { title, desc: sections.join("\n\n"), color };
 }
 
 // ==========================================================
@@ -789,7 +818,7 @@ function norm(str) {
   if (!str) return "";
   return str
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // strip diacritics (e.g. Valparaíso -> valparaiso)
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
 }
