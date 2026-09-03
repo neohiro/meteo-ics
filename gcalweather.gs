@@ -1,14 +1,12 @@
 /**
  * Ultimate Personalized Weather, Astronomical & Ground-Truth Dashboard for Google Calendar
  * 
- * Fixes Applied:
- *  - Fixed Open-Meteo 400 Bad Request by separating hourly (pressure/soil) and daily variables.
- *  - Strict Model Isolation: Deterministic (<14d) is strictly protected from NOAA Ensemble overwrite.
- *  - Mobile View Overhaul: Clean, compact card layout formatted for narrow mobile phone viewports.
- *  - Generic globally distributed base locations + dynamic travel co-existence.
- *  - Atomic PropertiesService storage (9KB limit safe).
- *  - Hardened Deduplication: Timezone-safe all-day event date resolution & robust multi-field city detection.
- *  - Mobile Optimization: Headers start immediately at top; location/date metadata relocated to footer; category spacing.
+ * Fixes & Enhancements Applied:
+ *  - Added Humidity (mean), Dew Point (mean), Cloud Cover (mean), and Peak Wind Gusts.
+ *  - Smoothed thermal comfort display: avoids repeating the title's Max Temp while keeping the "Pleasant" descriptor.
+ *  - Enhanced Audit Engine: Trend glyphs (📈/📉/➡️), delta vs lead-time benchmark curve, and Calibrating status handling.
+ *  - Mobile-optimized layout: starts with TEMPERATURE & COMFORT, metadata in footer, whitespace separated.
+ *  - Timezone-safe deduplication and generic base locations.
  */
 
 const CONFIG = {
@@ -223,22 +221,31 @@ function computeGlobalModelAccuracy(sym) {
     } catch (e) {}
   });
 
-  if (verifiedSnapshots === 0) {
+  const isCalibrating = verifiedSnapshots < 5;
+
+  const bShortVal = buckets.short.c > 0 ? buckets.short.e / buckets.short.c : 0.8;
+  const bMidVal   = buckets.mid.c > 0 ? buckets.mid.e / buckets.mid.c : 1.7;
+  const bLongVal  = buckets.long.c > 0 ? buckets.long.e / buckets.long.c : 2.9;
+  const bNoaaVal  = buckets.noaa.c > 0 ? buckets.noaa.e / buckets.noaa.c : 4.3;
+
+  const bShort = bShortVal.toFixed(1);
+  const bMid   = bMidVal.toFixed(1);
+  const bLong  = bLongVal.toFixed(1);
+  const bNoaa  = bNoaaVal.toFixed(1);
+
+  if (isCalibrating) {
     return {
+      isCalibrating: true,
       tempMAE: "Calibrating",
       rainMAE: "Calibrating",
-      modelGrade: "A (Calibrating)",
-      leadCurve: "D-1..3: ±0.8° · D-4..7: ±1.7° · D-8..14: ±2.9° · D-15+: ±4.3°"
+      modelGrade: "Calibrating (Awaiting Data)",
+      leadCurve: `D-1..3: ±${bShort}${sym} · D-4..7: ±${bMid}${sym} · D-8..14: ±${bLong}${sym} · D-15+: ±${bNoaa}${sym}`,
+      expectedErrors: { short: bShortVal, mid: bMidVal, long: bLongVal, noaa: bNoaaVal }
     };
   }
 
   const avgTempMAE = (totalTempError / verifiedSnapshots).toFixed(1);
   const avgRainMAE = (totalRainError / verifiedSnapshots).toFixed(1);
-
-  const bShort = buckets.short.c > 0 ? (buckets.short.e / buckets.short.c).toFixed(1) : "0.8";
-  const bMid   = buckets.mid.c > 0 ? (buckets.mid.e / buckets.mid.c).toFixed(1) : "1.7";
-  const bLong  = buckets.long.c > 0 ? (buckets.long.e / buckets.long.c).toFixed(1) : "2.9";
-  const bNoaa  = buckets.noaa.c > 0 ? (buckets.noaa.e / buckets.noaa.c).toFixed(1) : "4.3";
 
   let grade = "A";
   if (avgTempMAE <= 1.5) grade = "A+ (Excellent)";
@@ -247,10 +254,12 @@ function computeGlobalModelAccuracy(sym) {
   else grade = "C (Divergent)";
 
   return {
+    isCalibrating: false,
     tempMAE: `±${avgTempMAE}${sym}`,
     rainMAE: `±${avgRainMAE} mm`,
     modelGrade: grade,
-    leadCurve: `D-1..3: ±${bShort}${sym} · D-4..7: ±${bMid}${sym} · D-8..14: ±${bLong}${sym} · D-15+: ±${bNoaa}${sym}`
+    leadCurve: `D-1..3: ±${bShort}${sym} · D-4..7: ±${bMid}${sym} · D-8..14: ±${bLong}${sym} · D-15+: ±${bNoaa}${sym}`,
+    expectedErrors: { short: bShortVal, mid: bMidVal, long: bLongVal, noaa: bNoaaVal }
   };
 }
 
@@ -300,12 +309,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     const color = getColor(actualMax, false, isC);
     const title = `${weatherGlyph} ${actualMax}${sym} ${loc.name}`;
 
-    const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym);
+    const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym, offset, globalStats);
 
     const descSections = [
       [
         `📊 GROUND TRUTH (MEASURED)`,
-        `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
+        `• Range: ${actualMin}${sym} ➔ ${actualMax}${sym} (${getThermalText(actualMax, isC)})`,
         `• Sky: ${weatherGlyph} ${getWeatherName(actualCode)}`,
         `• Rain: ${Number(actualRain).toFixed(1)} mm`,
         aqiVal !== null ? `• Air Quality: ${aqiVal} ${getAqiGlyph(aqiVal)} (${getAqiLabel(aqiVal)})` : ``,
@@ -314,8 +323,9 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       [
         `🎯 PREDICTION ACCURACY AUDIT`,
-        `• Temp Error: ${audit.tempDelta}`,
-        `• Rain Error: ${audit.rainDelta}`,
+        `• Trend: ${audit.trendGlyph} ${audit.trendText}`,
+        `• Temp Drift: ${audit.tempDelta}`,
+        `• Benchmark Comparison: ${audit.benchmarkDiff}`,
         `• Stability: ${audit.volatility}`
       ].join("\n"),
 
@@ -340,7 +350,8 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   // B. FUTURE & TODAY: FORECAST DASHBOARD
   // --------------------------------------------------------
   let currentMax = null, currentMin = null, apparentMax = null;
-  let currentRain = 0, currentWind = 0, rainProb = 0;
+  let currentRain = 0, currentWind = 0, windGusts = 0, rainProb = 0;
+  let humidity = null, dewPoint = null, cloudCover = null;
   let uvIndex = 0, et0 = 0, radiation = 0, pressure = 1015, soilTempMin = 10;
   let sunriseStr = "--:--", sunsetStr = "--:--", daylightFormatted = "--";
   let title = "", modelLabel = "", color = "2", certaintyGlyph = "", spreadVal = 0;
@@ -355,6 +366,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       currentRain = data.det.precipitation_sum ? data.det.precipitation_sum[idx] : 0;
       rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
       currentWind = data.det.windspeed_10m_max ? Math.round(data.det.windspeed_10m_max[idx]) : 0;
+      windGusts = data.det.windgusts_10m_max ? Math.round(data.det.windgusts_10m_max[idx]) : 0;
+      
+      humidity = data.det.relative_humidity_2m_mean ? Math.round(data.det.relative_humidity_2m_mean[idx]) : null;
+      dewPoint = data.det.dew_point_2m_mean ? Math.round(data.det.dew_point_2m_mean[idx]) : null;
+      cloudCover = data.det.cloudcover_mean ? Math.round(data.det.cloudcover_mean[idx]) : null;
+
       uvIndex = data.det.uv_index_max ? data.det.uv_index_max[idx] : 0;
       et0 = data.det.et0_fao_evapotranspiration ? data.det.et0_fao_evapotranspiration[idx] : 0;
       radiation = data.det.shortwave_radiation_sum ? data.det.shortwave_radiation_sum[idx] : 0;
@@ -422,26 +439,28 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     saveDayRecord(cityKey, targetDateStr, record);
   }
 
-  const drift = computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym);
+  const drift = computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym, offset, globalStats);
   const aggregates = computeMultiDayAggregates(data, offset, isC);
-  const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction);
+  const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, cloudCover);
 
   // Road Hazards Trigger (Threshold: <= 7°C)
   const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
   const renderRoadHazards = tempMinInC <= 7;
 
-  // Sections structured with individual blocks for whitespace separation
   const sections = [];
 
-  // 1. Temperature & Comfort (Top)
+  // 1. Temperature & Comfort (Top - No redundant Max Temp line, clean Range + Pleasant indicator)
   const tempLines = [
     `🌡️ TEMPERATURE & COMFORT`,
-    `• High: ${currentMax}${sym} (${getThermalText(currentMax, isC)})`,
-    `• Low: ${currentMin}${sym} · Feels: ~${apparentMax}${sym}`,
+    `• Range: ${currentMin}${sym} ➔ ${currentMax}${sym} (${getThermalText(currentMax, isC)})`,
+    `• Sensation: Feels ~${apparentMax}${sym}${dewPoint !== null ? ` · Dew: ${dewPoint}${sym}` : ""}`,
+    humidity !== null ? `• Humidity: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity)})` : ``,
     offset >= CONFIG.deterministicDays
       ? `• Model Consensus: ±${spreadVal}${sym}`
       : `• Rain: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
-    offset < CONFIG.deterministicDays ? `• Wind: ${currentWind} km/h` : ``,
+    offset < CONFIG.deterministicDays
+      ? `• Wind: ${currentWind} km/h${windGusts > currentWind ? ` (Gusts ${windGusts} km/h)` : ""}`
+      : ``,
     offset < CONFIG.deterministicDays ? `• Barometer: ${pressure} hPa` : ``
   ].filter(Boolean);
   sections.push(tempLines.join("\n"));
@@ -453,6 +472,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     `• Sun: 🌅 ${sunriseStr} – 🌇 ${sunsetStr}`,
     `• Daylight: ${daylightFormatted}`,
     `• Golden Hr: ~${getGoldenHourWindow(sunsetStr)}`,
+    cloudCover !== null ? `• Cloud Cover: ${cloudCover}%` : ``,
     `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
     `• Stargazing: ${stargazing}`,
     uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
@@ -479,11 +499,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   ].filter(Boolean);
   sections.push(aggLines.join("\n"));
 
-  // 5. Model Audit
+  // 5. Model Audit & Trend Tracking
   const auditLines = [
     `📉 MODEL AUDIT`,
-    `• Drift vs D-Anchor: ${drift.tempDelta}`,
-    `• Rain Drift: ${drift.rainDelta}`,
+    `• Horizon Drift: ${drift.tempDelta}`,
+    `• Trend Velocity: ${drift.trendGlyph} ${drift.trendText}`,
+    `• vs Usual Lead Drift: ${drift.benchmarkDiff}`,
     `• Lifetime MAE: ${globalStats.tempMAE}`,
     `• Reliability: ${globalStats.modelGrade}`
   ].filter(Boolean);
@@ -508,7 +529,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   ];
   sections.push(adviceLines.join("\n"));
 
-  // 8. Location & Date (Moved to Footer)
+  // 8. Location & Date (Footer)
   const metaLines = [
     `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
     `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${targetDateStr}`
@@ -526,8 +547,8 @@ function fetchComprehensiveAtmosphericData(loc) {
   const result = { det: null, ens: null, aq: null, hourlyAgg: {} };
   const u = CONFIG.temperatureUnit;
 
-  // 1. Weather Deterministic (Strictly Valid Daily Parameters)
-  const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weathercode,precipitation_sum,precipitation_probability_max,windspeed_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
+  // 1. Weather Deterministic (Added humidity, dew point, cloud cover, and wind gusts)
+  const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weathercode,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,relative_humidity_2m_mean,dew_point_2m_mean,cloudcover_mean,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
   
   // 2. Weather Deterministic Hourly (for Pressure and Ground Surface Temp)
   const dHourlyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
@@ -664,13 +685,14 @@ function getMoonPhaseDetails(date) {
   return { glyph, name, fraction, illumination: `${Math.round(fraction * 100)}%` };
 }
 
-function assessStargazingConditions(data, offset, moonFraction) {
+function assessStargazingConditions(data, offset, moonFraction, cloudCover) {
   if (offset >= CONFIG.deterministicDays || !data.det || !data.det.weathercode) {
     return moonFraction > 0.7 ? "🌕 Filtered by moonlight" : "🔭 Decent (Ensemble projected)";
   }
   const code = data.det.weathercode[offset] || 0;
   const rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[offset] : 0;
 
+  if (cloudCover !== null && cloudCover > 70) return "☁️ Obscured (High cloud cover)";
   if ([0].includes(code) && moonFraction <= 0.3) return "🔭 Exceptional (Clear & Dark)";
   if ([0, 1].includes(code) && moonFraction > 0.7) return "🌕 Good (Washed by Moon)";
   if ([0, 1, 2].includes(code)) return "🔭 Fair (Passing clouds)";
@@ -767,12 +789,19 @@ function computeMultiDayAggregates(data, startOffset, isC) {
   };
 }
 
-function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym) {
+function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym, offset, globalStats) {
   if (!snapshots || snapshots.length <= 1) {
-    return { tempDelta: "±0" + sym, rainDelta: "0.0 mm", volatility: "Stable" };
+    return {
+      tempDelta: `±0${sym}`,
+      rainDelta: "0.0 mm",
+      trendGlyph: "➡️",
+      trendText: "Baseline Initialized (Stable)",
+      benchmarkDiff: "Matches Horizon Benchmark",
+      volatility: "Stable"
+    };
   }
 
-  let maxTempDiff = 0, tempDeltaStr = "±0" + sym;
+  let maxTempDiff = 0, tempDeltaStr = `±0${sym}`;
   let maxRainDiff = 0, rainDeltaStr = "0.0 mm";
 
   snapshots.forEach(snap => {
@@ -782,18 +811,61 @@ function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym)
 
     if (Math.abs(tDiff) > Math.abs(maxTempDiff)) {
       maxTempDiff = tDiff;
-      tempDeltaStr = `${tDiff > 0 ? "+" : ""}${tDiff}${sym} (at ${label})`;
+      tempDeltaStr = `${tDiff > 0 ? "+" : ""}${tDiff}${sym} (from ${label})`;
     }
     const rDiff = (snap.predictedRain || 0) - baselineRain;
     if (Math.abs(rDiff) > Math.abs(maxRainDiff)) {
       maxRainDiff = rDiff;
-      rainDeltaStr = `${rDiff > 0 ? "+" : ""}${rDiff.toFixed(1)} mm (at ${label})`;
+      rainDeltaStr = `${rDiff > 0 ? "+" : ""}${rDiff.toFixed(1)} mm (from ${label})`;
     }
   });
 
+  // Trend direction across the last two consecutive forecast snapshots
+  const lastSnap = snapshots[snapshots.length - 1];
+  const prevSnap = snapshots[snapshots.length - 2];
+  const velocity = (lastSnap && prevSnap) ? lastSnap.predictedMax - prevSnap.predictedMax : 0;
+
+  let trendGlyph = "➡️";
+  let trendText = "Consistent";
+  if (velocity >= 1) {
+    trendGlyph = "📈";
+    trendText = `Warming (+${velocity}${sym}/day)`;
+  } else if (velocity <= -1) {
+    trendGlyph = "📉";
+    trendText = `Cooling (${velocity}${sym}/day)`;
+  }
+
+  // Compare actual horizon drift against expected lead-time error curve
   const absT = Math.abs(maxTempDiff);
+  const leadDays = Math.abs(offset || 0);
+  let expectedErr = 1.5;
+  if (globalStats && globalStats.expectedErrors) {
+    if (leadDays <= 3) expectedErr = globalStats.expectedErrors.short;
+    else if (leadDays <= 7) expectedErr = globalStats.expectedErrors.mid;
+    else if (leadDays <= 14) expectedErr = globalStats.expectedErrors.long;
+    else expectedErr = globalStats.expectedErrors.noaa;
+  }
+
+  const deltaBenchmark = absT - expectedErr;
+  let benchmarkDiff = "In Line with Expected Lead Drift";
+  if (globalStats && globalStats.isCalibrating) {
+    benchmarkDiff = `Calibrating Benchmark (Expected: ±${expectedErr.toFixed(1)}${sym})`;
+  } else if (deltaBenchmark > 1.2) {
+    benchmarkDiff = `⚠️ +${deltaBenchmark.toFixed(1)}${sym} Higher than Usual Lead Drift`;
+  } else if (deltaBenchmark < -0.8) {
+    benchmarkDiff = `🎯 ${Math.abs(deltaBenchmark).toFixed(1)}${sym} Lower Drift than Usual`;
+  }
+
   const volatility = absT >= 5 ? "🔴 High Drift" : (absT >= 3 ? "🟡 Moderate Shift" : "🟢 Stable");
-  return { tempDelta: tempDeltaStr, rainDelta: rainDeltaStr, volatility: volatility };
+
+  return {
+    tempDelta: tempDeltaStr,
+    rainDelta: rainDeltaStr,
+    trendGlyph: trendGlyph,
+    trendText: trendText,
+    benchmarkDiff: benchmarkDiff,
+    volatility: volatility
+  };
 }
 
 function isGeocodable(str) {
@@ -890,6 +962,19 @@ function getThermalText(t, isC) {
   if (c <= 26) return "Pleasant";
   if (c <= 32) return "Warm";
   return "Hot";
+}
+
+function getHumidityGlyph(h) {
+  if (h <= 30) return "🏜️";
+  if (h <= 60) return "💧";
+  return "🧖";
+}
+
+function getHumidityComfort(h) {
+  if (h <= 30) return "Dry Air";
+  if (h <= 60) return "Comfortable";
+  if (h <= 75) return "Humid";
+  return "Very Muggy";
 }
 
 function getAqiGlyph(aqi) {
