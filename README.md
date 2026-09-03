@@ -49,7 +49,7 @@ Advice based on weather summary, engine reliability info
 
 ## Base Endpoint
 
-[BASE_URL]
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec
 
 ---
 
@@ -90,16 +90,16 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### Quick Links
 - **British Isles (London & Edinburgh, 30 Days):**  
-[BASE_URL]?cities=London,Edinburgh
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=London,Edinburgh
 
 - **US Metro in Fahrenheit (New York, Chicago, Seattle, 14 Days):**  
-[BASE_URL]?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14
 
 - **No Road Hazard Warnings (Sydney & Melbourne):**  
-[BASE_URL]?cities=Sydney,Melbourne&hazards=false
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Sydney,Melbourne&hazards=false
 
 - **AI Telemetry Endpoint (JSON):**  
-[BASE_URL]?action=status
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?action=status
 
 ---
 
@@ -113,10 +113,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### 快捷链接
 - **京津冀与长三角 (北京与上海, 30天周期):**  
-[BASE_URL]?cities=Beijing,Shanghai&lang=zh
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Beijing,Shanghai&lang=zh
 
 - **华南及大湾区核心城市 (广州、深圳、香港、台北, 14天):**  
-[BASE_URL]?cities=Guangzhou,Shenzhen,Hong%20Kong,Taipei&lang=zh&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Guangzhou,Shenzhen,Hong%20Kong,Taipei&lang=zh&days=14
 
 ---
 
@@ -130,10 +130,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### तैयार लिंक
 - **उत्तर भारत मेट्रो (दिल्ली और लखनऊ, 30 दिन):**  
-[BASE_URL]?cities=Delhi,Lucknow&lang=hi
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Delhi,Lucknow&lang=hi
 
 - **भारतीय प्रमुख आर्थिक केंद्र (मुंबई, बेंगलुरु, हैदराबाद, कोलकाता, 14 दिन):**  
-[BASE_URL]?cities=Mumbai,Bengaluru,Hyderabad,Kolkata&lang=hi&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Mumbai,Bengaluru,Hyderabad,Kolkata&lang=hi&days=14
 
 ---
 
@@ -147,10 +147,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### Enlaces Directos
 - **Península Ibérica (Madrid y Barcelona, 30 Días):**  
-[BASE_URL]?cities=Madrid,Barcelona&lang=es
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Madrid,Barcelona&lang=es
 
 - **Hispanoamérica (Ciudad de México, Bogotá, Buenos Aires, Santiago, 14 Días):**  
-[BASE_URL]?cities=Mexico%20City,Bogota,Buenos%20Aires,Santiago&lang=es&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Mexico%20City,Bogota,Buenos%20Aires,Santiago&lang=es&days=14
 
 ---
 
@@ -164,10 +164,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### Liens Prêts à l'Emploi
 - **France Métropolitaine (Paris & Lyon, 30 Jours) :**  
-[BASE_URL]?cities=Paris,Lyon&lang=fr
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Paris,Lyon&lang=fr
 
 - **Espace Francophone (Marseille, Bruxelles, Genève, Montréal, 14 Jours) :**  
-[BASE_URL]?cities=Marseille,Brussels,Geneva,Montreal&lang=fr&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Marseille,Brussels,Geneva,Montreal&lang=fr&days=14
 
 ---
 
@@ -181,10 +181,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### روابط مباشرة
 - **الخليج العربي (الرياض وأبوظبي, 30 يوماً):**  
-[BASE_URL]?cities=Riyadh,Abu%20Dhabi&lang=ar
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Riyadh,Abu%20Dhabi&lang=ar
 
 - **عواصم عربية كبرى (القاهرة، دبي، الدوحة، عمّان, 14 يوماً):**  
-[BASE_URL]?cities=Cairo,Dubai,Doha,Amman&lang=ar&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Cairo,Dubai,Doha,Amman&lang=ar&days=14
 
 ---
 
@@ -198,10 +198,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### Sofort-Links
 - **Deutschland Achse (Berlin & München, 30 Tage):**  
-[BASE_URL]?cities=Berlin,Munich&lang=de
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Berlin,Munich&lang=de
 
 - **DACH-Großstädte (Hamburg, Frankfurt, Wien, Zürich, 14 Tage):**  
-[BASE_URL]?cities=Hamburg,Frankfurt,Vienna,Zurich&lang=de&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Hamburg,Frankfurt,Vienna,Zurich&lang=de&days=14
 
 ---
 
@@ -215,10 +215,10 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ### Directe Links
 - **Randstad Hart (Amsterdam & Rotterdam, 30 Dagen):**  
-[BASE_URL]?cities=Amsterdam,Rotterdam&lang=nl
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Amsterdam,Rotterdam&lang=nl
 
 - **Benelux Knooppunten (Utrecht, Eindhoven, Antwerpen, Gent, 14 Dagen):**  
-[BASE_URL]?cities=Utrecht,Eindhoven,Antwerp,Ghent&lang=nl&days=14
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=Utrecht,Eindhoven,Antwerp,Ghent&lang=nl&days=14
 
 - **Kustzone Zonder Gladheidswaarschuwingen (Den Haag & Vlissingen):**  
-[BASE_URL]?cities=The%20Hague,Vlissingen&lang=nl&hazards=false
+https://script.google.com/macros/s/AKfycbyrrEbLr-Rp_fTSKFGABC06P7sTDtDnpehLlDbxrE6zC9t6UlcqD6oScUh2RF0l2ebMjg/exec?cities=The%20Hague,Vlissingen&lang=nl&hazards=false
