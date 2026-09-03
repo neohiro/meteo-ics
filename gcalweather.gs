@@ -1,13 +1,13 @@
 /**
  * Ultimate Personalized Weather, Astronomical & Ground-Truth Dashboard for Google Calendar
  * 
- * Verified & Production-Ready:
+ * Verified & Bulletproof:
  *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
  *  - Clean single empty line (\n\n) separation between all category cards.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - 100% Guaranteed Deduplication: Keyed with [KEY:YYYY-MM-DD_city] + orphaned event sweep.
- *  - Timezone Drift Immunity: Calendar timezone-aligned dates (no 2-day spanning errors).
- *  - Continuous 7-Day Aggregates: Seamless bridge between Deterministic (<14d) and Ensemble (14d+) datasets.
+ *  - Timezone Drift Immunity: Calendar timezone-aligned dates anchored to local midday.
+ *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
  *  - Official EventColor Enum: Reliable temperature-based dynamic color coding.
  *  - Standard Atmosphere (atm) pressure scale (1013.25 hPa baseline).
  *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll.
@@ -361,7 +361,6 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const record = getDayRecord(cityKey, targetDateStr);
   const snapshots = record.snapshots || [];
 
-  // Parse Global Air Quality (European AQI with US EPA AQI fallback)
   let aqiVal = null, aqiType = "AQI", pm25Val = null, pm10Val = null, o3Val = null, pollenVal = null;
   if (data.aq && data.aq.time) {
     const idx = data.aq.time.indexOf(targetDateStr);
@@ -882,7 +881,7 @@ function getMoonPhaseDetails(date) {
   return { glyph, name, fraction, illumination: `${Math.round(fraction * 100)}%` };
 }
 
-function assessStargazingConditions(data, offset, moonFraction, targetDateStr) {
+function assessStargazingConditions(data, offset, moonFraction, targetDateStr, cloudCover) {
   if (offset >= CONFIG.deterministicDays || !data.det || !data.det.time) {
     return moonFraction > 0.7 ? "🌕 Filtered by Moon" : "🔭 Decent";
   }
@@ -893,6 +892,7 @@ function assessStargazingConditions(data, offset, moonFraction, targetDateStr) {
   const code = codes[idx] !== undefined ? codes[idx] : 0;
   const rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
 
+  if (cloudCover !== undefined && cloudCover !== null && cloudCover > 70) return "☁️ Obscured";
   if ([0].includes(code) && moonFraction <= 0.3) return "🔭 Exceptional";
   if ([0, 1].includes(code) && moonFraction > 0.7) return "🌕 Moonlit";
   if ([0, 1, 2].includes(code)) return "🔭 Fair";
