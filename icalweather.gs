@@ -227,6 +227,15 @@ function parseAqProvider(raw) {
   return "auto";
 }
 
+function parseAqRadius(raw) {
+  // OpenAQ v3 radius is in km. Clamp to [1, 100] — anything below 1 km
+  // returns no results for most locations; anything above 100 km starts
+  // pulling stations from neighbouring cities.
+  const v = Number(raw);
+  if (isNaN(v) || v <= 0) return 25; // sensible default per OpenAQ docs
+  return Math.max(1, Math.min(100, Math.round(v)));
+}
+
 function clamp(v, min, max) {
   v = Number(v);
   return isNaN(v) ? min : Math.max(min, Math.min(max, v));
@@ -292,6 +301,7 @@ function doGet(e) {
   const hazards = parseBoolParam(params.hazards, ICAL_CONFIG.hazardsEnabled);
   const dryRun = parseBoolParam(params.dryRun || params.dryrun, false);
   const aqProvider = parseAqProvider(params.aqProvider);
+  const aqRadius = parseAqRadius(params.aqRadius);
   const waqiTokenParam = params.waqiToken ? String(params.waqiToken).trim() : null;
   if (waqiTokenParam && /^[A-Za-z0-9]{8,128}$/.test(waqiTokenParam)) {
     PropertiesService.getScriptProperties().setProperty("WAQI_TOKEN", waqiTokenParam);
@@ -302,7 +312,7 @@ function doGet(e) {
   // 5. Generate ICS Feed
   let icsContent;
   try {
-    icsContent = generateIcsFeed(locations, temperatureUnit, { lang, days, hazards, dryRun, aqProvider });
+    icsContent = generateIcsFeed(locations, temperatureUnit, { lang, days, hazards, dryRun, aqProvider, aqRadius });
   } catch (e) {
     // Surface actionable errors as plain-text instead of a raw Apps Script exception.
     return ContentService.createTextOutput("Feed generation failed: " + String(e))
@@ -547,7 +557,7 @@ function parseLocationsFromParams(e) {
 }
 
 function generateIcsFeed(locations, temperatureUnit, opts) {
-  const options = Object.assign({ lang:"en", days:ICAL_CONFIG.forecastDays, hazards:true }, opts || {});
+  const options = Object.assign({ lang:"en", days:ICAL_CONFIG.forecastDays, hazards:true, aqRadius:25 }, opts || {});
   const lang = options.lang;
   const maxDays = clamp(options.days, ICAL_CONFIG.minForecastDays, ICAL_CONFIG.maxForecastDays);
   const showHazards = options.hazards !== false;
@@ -594,7 +604,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   locations.forEach(loc => {
     let data;
     try {
-      data = fetchIcsAtmosphericDataParallel(loc, temperatureUnit, options.aqProvider);
+      data = fetchIcsAtmosphericDataParallel(loc, temperatureUnit, options.aqProvider, options.aqRadius);
     } catch (e) {
       Logger.log(`generateIcsFeed: fetch failed for ${loc.name} — ${e}`);
       return;
@@ -875,8 +885,9 @@ function foldIcsLines(lines) {
   }).join("\r\n");
 }
 
-function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider) {
+function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
   const result = { det: null, ens: null, aq: null, hourlyAgg: {} };
+  const radius = Number.isFinite(aqRadius) ? aqRadius : 25;
   const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const hUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm,relative_humidity_2m,dew_point_2m,cloud_cover&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${ICAL_CONFIG.forecastDays}&temperature_unit=${unit}&timezone=auto`;
@@ -973,7 +984,7 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider) {
     : aqProvider === "openaq" || aqProvider === "waqi";
 
   if (needsGlobalFallback) {
-    const globalAqi = fetchGlobalAQI(loc, aqProvider);
+    const globalAqi = fetchGlobalAQI(loc, aqProvider, radius);
     if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
       if (result.aq && result.aq.time) {
         globalAqi.time.forEach((d, i) => {
@@ -1007,8 +1018,9 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider) {
   return result;
 }
 
-function fetchGlobalAQI(loc, aqProvider) {
+function fetchGlobalAQI(loc, aqProvider, aqRadius) {
   const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [], ozone: [], nitrogen_dioxide: [], dust: [] };
+  const radius = Number.isFinite(aqRadius) && aqRadius > 0 ? aqRadius : 25;
   const today = new Date();
   const dates = [];
   for (let i = 0; i < 7; i++) {
@@ -1019,7 +1031,7 @@ function fetchGlobalAQI(loc, aqProvider) {
   if (aqProvider === "auto" || aqProvider === "openaq") {
     try {
       const res = UrlFetchApp.fetch(
-        `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&limit=1`,
+        `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&radius=${radius}&limit=1`,
         { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
       );
       if (res.getResponseCode() === 200) {

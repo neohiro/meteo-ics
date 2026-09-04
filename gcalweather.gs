@@ -64,6 +64,7 @@ const CONFIG = {
   autoDetectFromEvents: true,
   dryRun: false,
   aqProvider: "auto",
+  aqRadius: 25,
   locations: [
     { name: "Kyoto" },
     { name: "Brunssum" }
@@ -415,7 +416,7 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     const openMeteoAqiMissing = !cacheObj.aq || !cacheObj.aq.time
       || (cacheObj.aq.european_aqi.every(v => v === null) && cacheObj.aq.us_aqi.every(v => v === null));
     if (openMeteoAqiMissing || forceGlobalAqi) {
-      const globalAqi = gcalFetchGlobalAQI(loc, aqProvider);
+      const globalAqi = gcalFetchGlobalAQI(loc, aqProvider, CONFIG.aqRadius);
       if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
         if (cacheObj.aq && cacheObj.aq.time) {
           globalAqi.time.forEach((d, i) => {
@@ -444,8 +445,9 @@ function fetchAllAtmosphericDataParallel(locationPool) {
   return weatherCache;
 }
 
-function gcalFetchGlobalAQI(loc, aqProvider) {
+function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
   const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [] };
+  const radius = Number.isFinite(aqRadius) && aqRadius > 0 ? aqRadius : (CONFIG.aqRadius || 25);
   const today = new Date();
   const dates = [];
   for (let i = 0; i < 7; i++) {
@@ -456,7 +458,7 @@ function gcalFetchGlobalAQI(loc, aqProvider) {
   if (aqProvider === "auto" || aqProvider === "openaq") {
     try {
       const res = UrlFetchApp.fetch(
-        `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&limit=1`,
+        `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&radius=${radius}&limit=1`,
         { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
       );
       if (res.getResponseCode() === 200) {

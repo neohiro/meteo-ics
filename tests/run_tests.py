@@ -2039,6 +2039,44 @@ def test_parseAqProvider_no_openmeteo_branch():
         'parseAqProvider must not return "openmeteo" — only auto/openaq/waqi are supported')
 
 
+def test_parseAqRadius_function_exists():
+    """parseAqRadius must exist and clamp to [1, 100] km."""
+    assert_true(re.search(r'function parseAqRadius\(', ICAL),
+        'parseAqRadius must be defined in icalweather.gs')
+    fn = re.search(r'function parseAqRadius\([^)]*\)\s*\{([\s\S]*?)\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(1)
+    # Must clamp to [1, 100]
+    assert_true(re.search(r'Math\.min\s*\(\s*100', body),
+        'parseAqRadius must cap at 100 km')
+    assert_true(re.search(r'Math\.max\s*\(\s*1', body),
+        'parseAqRadius must floor at 1 km')
+    # Must return a numeric default
+    assert_true(re.search(r'return\s+\d+', body),
+        'parseAqRadius must return a numeric default for invalid input')
+
+
+def test_doGet_reads_aqRadius():
+    """doGet must read the aqRadius URL param and pass it through to the fetcher."""
+    fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqRadius' in body,
+        'doGet must read aqRadius URL param')
+    assert_true('parseAqRadius' in body,
+        'doGet must call parseAqRadius to sanitize the value')
+
+
+def test_openaq_url_includes_radius():
+    """fetchGlobalAQI must include radius param in the OpenAQ URL."""
+    fn = re.search(r'function fetchGlobalAQI\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must have radius param in the OPENAQ URL
+    assert_true(re.search(r'radius=', body),
+        'fetchGlobalAQI must include radius parameter in the OpenAQ URL')
+
+
 def test_waqi_url_conditionally_includes_token():
     """WAQI URL must NOT append ?token= when no token is configured.
 
