@@ -1374,9 +1374,15 @@ const ADVICE_TEXTS = {
 function generatePrioritizedAdvices(ctx) {
   const isC = ctx.isC;
   const lang = ctx.lang || "en";
-  const maxC = isC ? ctx.tempMax : (ctx.tempMax - 32) * (5 / 9);
-  const minC = isC ? ctx.tempMin : (ctx.tempMin - 32) * (5 / 9);
-  const appC = isC ? ctx.apparentMax : (ctx.apparentMax - 32) * (5 / 9);
+  // Guard against null/undefined/NaN tempMax — fall back to neutral 20°C so
+  // subsequent comparisons (appC >= 35, maxC >= 30) don't silently all fail
+  // or trigger inappropriate freezing advice. Mirrors gcal's safe-default fix.
+  const safeMax = Number.isFinite(ctx.tempMax) ? ctx.tempMax : 20;
+  const safeMin = Number.isFinite(ctx.tempMin) ? ctx.tempMin : 15;
+  const safeApparent = Number.isFinite(ctx.apparentMax) ? ctx.apparentMax : safeMax;
+  const maxC = isC ? safeMax : (safeMax - 32) * (5 / 9);
+  const minC = isC ? safeMin : (safeMin - 32) * (5 / 9);
+  const appC = isC ? safeApparent : (safeApparent - 32) * (5 / 9);
   const uvMax = (typeof ctx.uv === "number") ? ctx.uv : ctx.uvMax;
 
   const pool = [];

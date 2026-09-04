@@ -1160,6 +1160,21 @@ def test_ical_statusEndpoint_includes_configHealth():
         'configHealth must expose deterministicDays cap status')
 
 
+def test_ical_generatePrioritizedAdvices_nan_safe():
+    """generatePrioritizedAdvices must guard ctx.tempMax/tempMin/apparentMax
+    against null/undefined/NaN. Without the guard, `null - 32 = NaN` poisons
+    all temperature comparisons (appC >= 35, maxC >= 30) and the function
+    either returns no advice or triggers inappropriate freezing advice."""
+    fn = re.search(r'function generatePrioritizedAdvices\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must extract safeMax/safeMin/safeApparent before arithmetic
+    assert_true('safeMax' in body or 'Number.isFinite(ctx.tempMax)' in body,
+        'generatePrioritizedAdvices must guard ctx.tempMax against NaN before arithmetic')
+    assert_true('Number.isFinite(ctx.tempMax)' in body,
+        'generatePrioritizedAdvices must use Number.isFinite (typeof NaN === "number")')
+
+
 def test_norm_handles_non_string():
     """norm() must not throw when called with null, undefined, or a Number."""
     fn = re.search(r'function norm\([\s\S]*?\n\}', ICAL)
