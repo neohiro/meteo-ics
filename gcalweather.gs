@@ -8,7 +8,7 @@
  *  - Clean single empty line (\n\n) separation between all category cards.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - 100% Guaranteed Deduplication: Keyed with [KEY:YYYY-MM-DD_city] + orphaned event sweep.
- *  - Timezone Drift Immunity: Calendar timezone-aligned dates anchored to local midday.
+ *  - Timezone Drift Immunity: UTC-anchored date keys (T00:00:00Z / Date.UTC) match Open-Meteo's UTC date strings, so server timezone never misclassifies past vs future days.
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
  *  - Official EventColor Enum: Reliable temperature-based dynamic color coding.
  *  - Standard Atmosphere (atm) pressure scale (1013.25 hPa baseline).
@@ -23,10 +23,15 @@
  *  - cleanupOldStorageKeys() validates YYYY-MM-DD format before comparison.
  *  - computeDayAudit() surfaces snapshotsTaken count for self-debugging.
  *  - norm() safely handles null/undefined/Number inputs.
+ *  - assessRoadConditions(), getEventColorEnum(), getThermalText(), getAqiLabel() guard null/NaN inputs.
+ *  - buildDashboardPayload() returns null on null-temperature_2m_max (no NaN in event title).
+ *  - generatePrioritizedAdvices() falls back to safe defaults for null ctx.tempMax/Min.
+ *  - fetchAllAtmosphericDataParallel() logs non-200 responses per endpoint (no silent drops).
+ *  - Ensemble key lists hoisted out of per-day loops in buildDashboardPayload + aggregates.
  *
  * Location Config Example:
  *   locations: [
- *     { name: "Brunnsum" },                          // auto-geocoded via Open-Meteo
+ *     { name: "Brunssum" },                          // auto-geocoded via Open-Meteo
  *     { name: "Cambridge", country: "UK" },          // disambiguated by country
  *     { name: "Kyoto", lat: 35.0116, lon: 135.7681 } // explicit coords still supported
  *   ]
@@ -58,7 +63,7 @@ const CONFIG = {
   dryRun: false,
   locations: [
     { name: "Kyoto" },
-    { name: "Brunnsum" }
+    { name: "Brunssum" }
   ]
 };
 
@@ -152,7 +157,8 @@ function syncWeatherToCalendar() {
           const cityKey = norm(city);
           if (!locationPool.has(cityKey)) {
             const geo = geocodeCity(city);
-            if (geo.name) locationPool.set(cityKey, { ...geo, isDynamic: true });
+            // geocodeCity returns null on failure; guard before property access.
+            if (geo && geo.name) locationPool.set(cityKey, { ...geo, isDynamic: true });
           }
           if (locationPool.has(cityKey)) dayLocKeys.add(cityKey);
         }
@@ -992,9 +998,11 @@ function getAstronomicalEventsForYear(dateStr, year) {
 }
 
 function getMoonPhaseDetails(date) {
+  if (date == null) return { glyph: "🌑", name: "New Moon", fraction: 0, illumination: "0%" };
   const lp = 2551443; // synodic month in seconds
   const newMoonRef = Date.UTC(1970, 0, 7, 20, 35, 0);
   const ms = (date instanceof Date) ? date.getTime() : Number(date);
+  if (!Number.isFinite(ms)) return { glyph: "🌑", name: "New Moon", fraction: 0, illumination: "0%" };
   let phase = ((ms - newMoonRef) / 1000) % lp;
   if (phase < 0) phase += lp;
   const dayOfCycle = phase / 86400;

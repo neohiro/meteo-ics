@@ -1588,6 +1588,74 @@ def test_gcal_reconcileGroundTruth_minT_null_guard():
 
 
 # =============================================================================
+# Pass 1/2 follow-up — moon null safety + sample-config spelling fix
+# =============================================================================
+
+def test_gcal_moon_phase_null_safe():
+    """getMoonPhaseDetails must not return NaN illumination when called with null/undefined.
+    Without the guard: Number(null)=0, (0-newMoonRef)%lp = negative, falls to "New Moon"
+    but illumination is NaN → "NaN%" string in calendar."""
+    fn = re.search(r'function getMoonPhaseDetails\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('date == null' in body and 'Number.isFinite' in body,
+        'getMoonPhaseDetails must guard against null date and non-finite ms')
+
+
+def test_ical_moon_phase_null_safe():
+    fn = re.search(r'function getMoonPhaseDetails\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('date == null' in body and 'Number.isFinite' in body,
+        'ical getMoonPhaseDetails must guard against null date and non-finite ms')
+
+
+def test_gcal_config_uses_geocodable_brunssum():
+    """Sample CONFIG.locations must use a name the Open-Meteo geocoder can resolve.
+    'Brunnsum' (typo) silently fails geocoding and trips the empty-array guard;
+    'Brunssum' is the correct spelling for the Dutch town in Limburg."""
+    assert_true('Brunssum' in GCAL, 'gcal CONFIG must use geocodable "Brunssum" (was "Brunnsum")')
+    assert_true('Brunnsum' not in GCAL, 'gcal CONFIG must NOT contain misspelled "Brunnsum"')
+
+
+def test_gcal_doc_header_timezone_claim_accurate():
+    """File header comment must reflect current UTC-anchored date logic,
+    not the old "anchored to local midday" wording."""
+    assert_true('UTC-anchored' in GCAL or 'UTC anchored' in GCAL,
+        'gcal file header must document UTC-anchored dates (Pass 4/7/8 fix)')
+    assert_true('anchored to local midday' not in GCAL,
+        'stale "anchored to local midday" claim must be removed from gcal header')
+
+
+def test_ical_doc_header_mentions_array_safety():
+    """ical header must document array-coerced URL params (Pass 6 fix)."""
+    assert_true('array-valued' in ICAL.lower() or 'Array-valued' in ICAL,
+        'ical header must document array-coerced URL params (Pass 6 fix)')
+
+
+def test_gcal_syncWeatherToCalendar_geo_null_guard():
+    """syncWeatherToCalendar must guard against geocodeCity returning null
+    before accessing .name. Without the guard: TypeError: Cannot read properties of null."""
+    fn = re.search(r'function syncWeatherToCalendar\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # The auto-detect path must guard: `if (geo && geo.name)`
+    assert_true(re.search(r'if\s*\(\s*geo\s*&&\s*geo\.name', body),
+        'syncWeatherToCalendar must check `geo && geo.name` after geocodeCity() call')
+
+
+def test_gcal_validateConfig_geo_null_guard():
+    """validateConfig must guard against geocodeCity returning null.
+    Currently checks `!geo || !geo.lat || !geo.lon` which is already safe —
+    this test pins that contract."""
+    fn = re.search(r'function validateConfig\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r'!geo\s*\|\|\s*!geo\.lat', body),
+        'validateConfig must guard against null geo result before .lat/.lon access')
+
+
+# =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================
 for name, fn in list(globals().items()):

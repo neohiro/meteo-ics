@@ -8,7 +8,7 @@ Run the Python test suite (requires Python 3.8+):
 python tests/run_tests.py
 ```
 
-Expected output: **128 passed, 0 failed**.
+Expected output: **135 passed, 0 failed**.
 
 The suite covers:
 - **URL parameter parsing**: `clamp`, `normalizeLang`, `parseBoolParam` (8 supported languages, defaults, coercion)

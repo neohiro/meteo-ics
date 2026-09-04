@@ -6,7 +6,7 @@
 |---|---|---|
 | `icalweather.gs` | ICS calendar feed generator (RFC 5545). Exposed as a Google Apps Script Web App URL; calendar clients subscribe to it. | `doGet(e)` |
 | `gcalweather.gs` | Google Calendar event syncer. Writes per-city, per-day all-day events to a configured Google Calendar. | `syncWeatherToCalendar()` |
-| `tests/run_tests.py` | 128-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
+| `tests/run_tests.py` | 135-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
 
 Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on:
 - **Open-Meteo API** (free, no key required) — deterministic forecast, ensemble forecast, air quality
@@ -113,6 +113,15 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 | 39 | gcal | **NaN propagation in advice**: `generatePrioritizedAdvices` used `ctx.apparentMax - 32` directly. If Open-Meteo returns no `apparent_temperature_max`, `null - 32 = NaN` → all `appC >= 38` comparisons false → no heat-advice fired even on hot day | Added `typeof` check; falls back to `safeMax` (default 20°C) when temp is null/non-number |
 | 40 | gcal | **NaN propagation in display helpers**: `getEventColorEnum`, `getThermalText`, `getAqiLabel` had no null/NaN check. Null input → `null - 32 = NaN` → falls through to wrong end of switch ("Hot" or "Hazardous") | Added `if (t == null \|\| isNaN(t))` early return with safe default |
 
+### Pass 1/2 follow-up: moon null safety + stale docs + config spelling
+
+| # | File | Bug / Item | Fix |
+|---|---|---|---|
+| 44 | both | **`getMoonPhaseDetails` NaN output**: called with `null` → `Number(null)=0` → `((0 - newMoonRef) % lp)` → negative phase → all comparisons false → returns "New Moon" glyph but `illumination = NaN` → `"NaN%"` in calendar. Silent wrong output | Added `if (date == null)` early return + `if (!Number.isFinite(ms))` guard; returns `{ fraction: 0, illumination: "0%" }` |
+| 45 | gcal | **Stale file-header comment**: "Timezone Drift Immunity: Calendar timezone-aligned dates anchored to local midday" — inconsistent with the actual UTC-anchored implementation (Pass 4/7/8) | Updated header to: "UTC-anchored date keys (T00:00:00Z / Date.UTC)" |
+| 46 | gcal | **Sample config unresolvable**: `CONFIG.locations` used `"Brunnsum"` (typo). Open-Meteo geocoder fails silently → `CONFIG.locations` becomes empty → `throw new Error` fires at every invocation. "Brunssum" is the correct Dutch town spelling | Fixed in both CONFIG block and header doc |
+| 47 | gcal | **`TypeError` in auto-detect**: `syncWeatherToCalendar` called `geocodeCity()` which can return `null`, then immediately accessed `.name` without a null check → `TypeError: Cannot read properties of null` on any calendar event with an unresolvable location | Added `if (geo && geo.name)` guard |
+
 ---
 
 ## Verification status
@@ -121,8 +130,8 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 |---|---|---|
 | Brace / paren / bracket structural balance | `validate3.py` (custom, reads `.gs` as text, counts delimiters) | 0/0/0 both files |
 | Source-content fix verification (54 checks) | `verify_fixes.py` (custom, regex on source) | ALL PASS |
-| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (128 Python tests) | 128 passed, 0 failed |
-| Test count documented | `tests/README.md` | 128 |
+| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (135 Python tests) | 135 passed, 0 failed |
+| Test count documented | `tests/README.md` | 135 |
 
 **What was NOT verified** (no Apps Script runtime available; Node.js not installed):
 - Live `doGet` execution — all paths verified structurally but not end-to-end

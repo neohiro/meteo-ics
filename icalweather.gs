@@ -21,6 +21,10 @@
  *  - handleStatusEndpoint() catches computeGlobalModelAccuracy errors and surfaces them.
  *  - URL params length-capped to defend against pathological inputs.
  *  - isValidLatLon() shared helper for both user-supplied coords and geocoder results.
+ *  - Array-valued URL params (e.g. ?cities=A&cities=B) coerced to comma-joined strings before .split().
+ *  - unitParam String-coerced before .toLowerCase() (array values would otherwise crash).
+ *  - fetchIcsAtmosphericDataParallel() logs per-endpoint non-200 responses (deterministic/ensemble/air-quality).
+ *  - Ensemble key lists hoisted out of per-offset and per-day loops in generateIcsFeed + aggregates.
  *
  * URL Parameters:
  *   cities=X,Y,Z        — city names, auto-geocoded via Open-Meteo (e.g. ?cities=London,Paris) (max 4)
@@ -1383,10 +1387,12 @@ function getAstronomicalEventsForYear(dateStr, year) {
 }
 
 function getMoonPhaseDetails(date) {
+  if (date == null) return { glyph: "🌑", name: "New Moon", fraction: 0, illumination: "0%" };
   const lp = 2551443; // synodic month in seconds
   // UTC reference epoch for new moon near 1970-01-07.
   const newMoonRef = Date.UTC(1970, 0, 7, 20, 35, 0);
   const ms = (date instanceof Date) ? date.getTime() : Number(date);
+  if (!Number.isFinite(ms)) return { glyph: "🌑", name: "New Moon", fraction: 0, illumination: "0%" };
   let phase = ((ms - newMoonRef) / 1000) % lp;
   if (phase < 0) phase += lp; // defensive for pre-1970
   const dayOfCycle = phase / 86400; // days into current cycle
