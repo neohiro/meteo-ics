@@ -6,7 +6,7 @@
 |---|---|---|
 | `icalweather.gs` | ICS calendar feed generator (RFC 5545). Exposed as a Google Apps Script Web App URL; calendar clients subscribe to it. | `doGet(e)` |
 | `gcalweather.gs` | Google Calendar event syncer. Writes per-city, per-day all-day events to a configured Google Calendar. | `syncWeatherToCalendar()` |
-| `tests/run_tests.py` | 152-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
+| `tests/run_tests.py` | 155-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
 
 Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on:
 - **Open-Meteo API** (free, no key required) — deterministic forecast, ensemble forecast, air quality
@@ -132,6 +132,9 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 | 56 | ical | **ICS feed had no self-describing metadata**: Subscribers and dashboard tools had no way to verify which script version and AQI pipeline generated a given feed — forced support back-and-forth to debug version mismatches | Added `X-META-SCRIPTVERSION`, `X-META-FETCHEDAT`, `X-META-AQISOURCE:hourly-aggregated`, `X-META-BUILD:v${version} · ${fetchedAt} · open-meteo-hourly` to ICS header; updated `X-WR-CALDESC` to note AQI source. Subscribers can now self-inspect pipeline version without asking the operator |
 | 57 | ical | **Duplicate `X-META-AQISOURCE` property**: A verbose second `X-META-AQISOURCE:open-meteo-hourly · v…` was added alongside the clean `X-META-AQISOURCE:hourly-aggregated` — two properties with the same name but different values confuses ICS consumers | Split into `X-META-AQISOURCE:hourly-aggregated` (semantic label) and `X-META-BUILD:v${version} · ${fetchedAt} · open-meteo-hourly` (version+timestamp+source) |
 | 58 | gcal | **Dead parameter `calTz` in `buildDashboardPayload` and `computeContinuousMultiDayAggregates`**: `calTz` was passed from `syncWeatherToCalendar` through `buildDashboardPayload` to `computeContinuousMultiDayAggregates` but neither function used it — both use `Date.UTC()` internally | Removed `calTz` from both function signatures and all call sites. `calTz` is still computed in `syncWeatherToCalendar` (line 137) for use in `Utilities.formatDate` and `Utilities.parseDate` there |
+| 59 | ical | **Dead `dryRun` in `generateIcsFeed` default**: `Object.assign({ dryRun:false }, opts)` seeded `options.dryRun` but the function body never read it — `doGet` handles the `dryRun` flag at the call site instead | Removed `dryRun` from `generateIcsFeed`'s `Object.assign` default. The param is still parsed and used in `doGet` |
+| 60 | ical | **Silent data truncation on `deterministicDays > 16`**: Open-Meteo's deterministic API caps `forecast_days` at 16. If `ICAL_CONFIG.deterministicDays` is set above 16, the API silently returns 16-day data and the deterministic/ensemble event split is wrong — no error, just missing or mislabeled events | Added `if (ICAL_CONFIG.deterministicDays > 16)` assertion at the top of `generateIcsFeed` with an actionable error message |
+| 61 | ical | **Status endpoint had no config health visibility**: `handleStatusEndpoint` exposed accuracy metrics and version but not the critical `deterministicDays` cap, `maxForecastDays`, or `maxCities` — operators had no way to check whether the config was within Open-Meteo's API limits without running the full feed | Added `configHealth` block to status endpoint JSON: `deterministicDays`, `deterministicDaysWarning` (null when ok, warning string when >16), `maxForecastDays`, `maxCities`, `fetcherTimeouts` |
 
 ---
 
@@ -141,8 +144,8 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 |---|---|---|
 | Brace / paren / bracket structural balance | `validate3.py` (custom, reads `.gs` as text, counts delimiters) | 0/0/0 both files |
 | Source-content fix verification (54 checks) | `verify_fixes.py` (custom, regex on source) | ALL PASS |
-| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (152 Python tests) | 152 passed, 0 failed |
-| Test count documented | `tests/README.md` | 152 |
+| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (155 Python tests) | 155 passed, 0 failed |
+| Test count documented | `tests/README.md` | 155 |
 
 **What was NOT verified** (no Apps Script runtime available; Node.js not installed):
 - Live `doGet` execution — all paths verified structurally but not end-to-end

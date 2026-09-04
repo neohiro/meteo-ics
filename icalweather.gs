@@ -395,6 +395,16 @@ function handleStatusEndpoint(params) {
     stats = { tempMAE: "Error", rainMAE: String(e), modelGrade: "N/A", leadCurve: "N/A", verifiedDays: 0, verifiedSnapshots: 0 };
   }
 
+  const configHealth = {
+    deterministicDays: ICAL_CONFIG.deterministicDays,
+    deterministicDaysWarning: ICAL_CONFIG.deterministicDays > 16
+      ? "EXCEEDS Open-Meteo max (16) — deterministic events will be truncated"
+      : null,
+    maxForecastDays: ICAL_CONFIG.maxForecastDays,
+    maxCities: ICAL_CONFIG.maxCities,
+    fetcherTimeouts: { deterministic: FETCH_TIMEOUT_MS }
+  };
+
   const statusPayload = {
     scriptVersion: ICAL_CONFIG.version,
     status: "healthy",
@@ -410,6 +420,7 @@ function handleStatusEndpoint(params) {
       calibrationDaysTracked: stats.verifiedDays || 0,
       snapshotsEvaluated: stats.verifiedSnapshots || 0
     },
+    configHealth: configHealth,
     supportedLanguages: SUPPORTED_LANGS,
     endpoints: {
       calendarFeed: "?cities=City1,City2&days=14&lang=en",
@@ -496,13 +507,22 @@ function parseLocationsFromParams(e) {
 }
 
 function generateIcsFeed(locations, temperatureUnit, opts) {
-  const options = Object.assign({ lang:"en", days:ICAL_CONFIG.forecastDays, hazards:true, dryRun:false }, opts || {});
+  const options = Object.assign({ lang:"en", days:ICAL_CONFIG.forecastDays, hazards:true }, opts || {});
   const lang = options.lang;
   const maxDays = clamp(options.days, ICAL_CONFIG.minForecastDays, ICAL_CONFIG.maxForecastDays);
   const showHazards = options.hazards !== false;
 
   if (!Array.isArray(locations) || locations.length === 0) {
     throw new Error("generateIcsFeed: locations array is empty — cannot generate feed");
+  }
+
+  // Open-Meteo's forecast_api caps deterministic forecast_days at 16.
+  // If deterministicDays is set above 16, the API returns 16-day data and the
+  // split between deterministic and ensemble events is silently wrong. Fail fast.
+  if (ICAL_CONFIG.deterministicDays > 16) {
+    throw new Error("generateIcsFeed: ICAL_CONFIG.deterministicDays (" +
+      ICAL_CONFIG.deterministicDays + ") exceeds Open-Meteo's max of 16 — " +
+      "deterministic events will be truncated. Reduce deterministicDays or accept ensemble-only forecast.");
   }
 
   const unitSymbol = temperatureUnit === "celsius" ? "°" : "°F";

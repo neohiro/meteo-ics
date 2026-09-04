@@ -1117,6 +1117,49 @@ def test_gcal_buildDashboardPayload_no_calTz_param():
         'computeContinuousMultiDayAggregates must not have calTz parameter (uses Date.UTC)')
 
 
+def test_ical_generateIcsFeed_no_dryRun_default():
+    """generateIcsFeed Object.assign default must not include dryRun.
+    The function never reads options.dryRun; doGet handles dryRun at the call site.
+    Including it in the default invites future drift if someone adds dryRun logic
+    inside generateIcsFeed that reads from opts but opts.dryRun is never passed."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # The Object.assign default must not have dryRun
+    assert_true(re.search(r'Object\.assign\(\{\s*lang:[^}]*\}\s*,\s*opts', body) is not None,
+        'generateIcsFeed must have a clean Object.assign default without dryRun')
+    # And the function body must never reference options.dryRun
+    assert_true('options.dryRun' not in body,
+        'generateIcsFeed must not reference options.dryRun (dead param)')
+
+
+def test_ical_generateIcsFeed_asserts_deterministicDays_cap():
+    """generateIcsFeed must throw early if ICAL_CONFIG.deterministicDays > 16.
+    Open-Meteo's deterministic forecast API caps forecast_days at 16; above that
+    the API returns 16-day data and the deterministic/ensemble split is silently wrong."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('deterministicDays > 16' in body or 'deterministicDays > 16' in body,
+        'generateIcsFeed must assert deterministicDays <= 16 and throw with actionable message')
+
+
+def test_ical_statusEndpoint_includes_configHealth():
+    """handleStatusEndpoint must return a configHealth block so operators can
+    inspect deterministicDays cap, maxForecastDays, maxCities, and timeout
+    without running the full feed. This also surfaces the deterministicDays
+    warning if the cap is exceeded."""
+    fn = re.search(r'function handleStatusEndpoint\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('configHealth' in body,
+        'handleStatusEndpoint must return configHealth block')
+    assert_true('deterministicDays' in body,
+        'configHealth must include deterministicDays value')
+    assert_true('deterministicDaysWarning' in body or 'deterministicDays' in body,
+        'configHealth must expose deterministicDays cap status')
+
+
 def test_norm_handles_non_string():
     """norm() must not throw when called with null, undefined, or a Number."""
     fn = re.search(r'function norm\([\s\S]*?\n\}', ICAL)
