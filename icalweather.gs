@@ -293,8 +293,10 @@ function doGet(e) {
   const dryRun = parseBoolParam(params.dryRun || params.dryrun, false);
   const aqProvider = parseAqProvider(params.aqProvider);
   const waqiTokenParam = params.waqiToken ? String(params.waqiToken).trim() : null;
-  if (waqiTokenParam && waqiTokenParam.length >= 8) {
+  if (waqiTokenParam && /^[A-Za-z0-9]{8,128}$/.test(waqiTokenParam)) {
     PropertiesService.getScriptProperties().setProperty("WAQI_TOKEN", waqiTokenParam);
+  } else if (params.waqiToken) {
+    Logger.log("doGet: rejected waqiToken (must be 8-128 alphanumeric chars)");
   }
 
   // 5. Generate ICS Feed
@@ -1056,8 +1058,8 @@ function fetchGlobalAQI(loc, aqProvider) {
           const iaqi = json.data.iaqi || {};
           const pm25v = iaqi.pm25 ? Math.round(Number(iaqi.pm25.v)) : null;
           const pm10v = iaqi.pm10 ? Math.round(Number(iaqi.pm10.v)) : null;
-          dates.forEach(() => {
-            r.time.push(dates[0]);
+          dates.forEach(d => {
+            r.time.push(d);
             r.european_aqi.push(aqi);
             r.us_aqi.push(aqi);
             r.pm2_5.push(pm25v);

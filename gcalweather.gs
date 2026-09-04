@@ -407,43 +407,39 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     Logger.log("Parallel atmospheric fetch error: " + e);
   }
 
-  const needsGlobalFallback = aqProvider === "auto"
-    ? false
-    : aqProvider === "openaq" || aqProvider === "waqi";
+  const forceGlobalAqi = aqProvider === "openaq" || aqProvider === "waqi";
 
-  if (needsGlobalFallback || aqProvider === "auto") {
-    locationPool.forEach((loc, key) => {
-      const cacheObj = weatherCache.get(key);
-      if (!cacheObj) return;
-      const noAqi = !cacheObj.aq || !cacheObj.aq.time ||
-        (cacheObj.aq.european_aqi.every(v => v === null) && cacheObj.aq.us_aqi.every(v => v === null));
-      if (noAqi || needsGlobalFallback) {
-        const globalAqi = gcalFetchGlobalAQI(loc, aqProvider);
-        if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
-          if (cacheObj.aq && cacheObj.aq.time) {
-            globalAqi.time.forEach((d, i) => {
-              const exIdx = cacheObj.aq.time.indexOf(d);
-              if (exIdx === -1) {
-                cacheObj.aq.time.push(d);
-                cacheObj.aq.european_aqi.push(globalAqi.european_aqi[i]);
-                cacheObj.aq.us_aqi.push(globalAqi.us_aqi[i]);
-                cacheObj.aq.pm2_5.push(globalAqi.pm2_5[i]);
-                cacheObj.aq.pm10.push(globalAqi.pm10[i]);
-              }
-            });
-            const sorted = cacheObj.aq.time.map((d, i) => ({ d, i })).sort((a, b) => a.d.localeCompare(b.d));
-            cacheObj.aq.time = sorted.map(x => x.d);
-            cacheObj.aq.european_aqi = sorted.map(x => cacheObj.aq.european_aqi[x.i]);
-            cacheObj.aq.us_aqi = sorted.map(x => cacheObj.aq.us_aqi[x.i]);
-            cacheObj.aq.pm2_5 = sorted.map(x => cacheObj.aq.pm2_5[x.i]);
-            cacheObj.aq.pm10 = sorted.map(x => cacheObj.aq.pm10[x.i]);
-          } else {
-            cacheObj.aq = globalAqi;
-          }
+  locationPool.forEach((loc, key) => {
+    const cacheObj = weatherCache.get(key);
+    if (!cacheObj) return;
+    const openMeteoAqiMissing = !cacheObj.aq || !cacheObj.aq.time
+      || (cacheObj.aq.european_aqi.every(v => v === null) && cacheObj.aq.us_aqi.every(v => v === null));
+    if (openMeteoAqiMissing || forceGlobalAqi) {
+      const globalAqi = gcalFetchGlobalAQI(loc, aqProvider);
+      if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
+        if (cacheObj.aq && cacheObj.aq.time) {
+          globalAqi.time.forEach((d, i) => {
+            const exIdx = cacheObj.aq.time.indexOf(d);
+            if (exIdx === -1) {
+              cacheObj.aq.time.push(d);
+              cacheObj.aq.european_aqi.push(globalAqi.european_aqi[i]);
+              cacheObj.aq.us_aqi.push(globalAqi.us_aqi[i]);
+              cacheObj.aq.pm2_5.push(globalAqi.pm2_5[i]);
+              cacheObj.aq.pm10.push(globalAqi.pm10[i]);
+            }
+          });
+          const sorted = cacheObj.aq.time.map((d, i) => ({ d, i })).sort((a, b) => a.d.localeCompare(b.d));
+          cacheObj.aq.time = sorted.map(x => x.d);
+          cacheObj.aq.european_aqi = sorted.map(x => cacheObj.aq.european_aqi[x.i]);
+          cacheObj.aq.us_aqi = sorted.map(x => cacheObj.aq.us_aqi[x.i]);
+          cacheObj.aq.pm2_5 = sorted.map(x => cacheObj.aq.pm2_5[x.i]);
+          cacheObj.aq.pm10 = sorted.map(x => cacheObj.aq.pm10[x.i]);
+        } else {
+          cacheObj.aq = globalAqi;
         }
       }
-    });
-  }
+    }
+  });
 
   return weatherCache;
 }

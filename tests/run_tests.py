@@ -2085,10 +2085,52 @@ def test_ical_openaq_fallback_in_fetch():
         'fetchIcsAtmosphericDataParallel must compute needsGlobalFallback flag')
 
 
+def test_ical_waqi_time_array_populated_with_iterated_dates():
+    """WAQI branch of fetchGlobalAQI must push one date per iteration, not dates[0].
+
+    Bug: r.time.push(dates[0]) inside dates.forEach(() => ...) pushed the same
+    first date 7 times instead of iterating. The fix uses dates.forEach(d => ...).
+    """
+    fn = re.search(r'function fetchGlobalAQI\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # The WAQI branch contains: dates.forEach(d => { r.time.push(d); ...
+    # The buggy pattern was: dates.forEach(() => { r.time.push(dates[0]); ...
+    # Verify the WAQI section does NOT contain the buggy push of dates[0]
+    assert_true(
+        re.search(r'waqi\)|WAQI', body, re.I),
+        'fetchGlobalAQI WAQI branch must exist')
+    # Confirm dates[0] does not appear as an r.time.push() argument in the WAQI section
+    # (if it does, it means the time array is being filled with a hardcoded index)
+    assert_true(
+        not re.search(r'r\.time\.push\s*\(\s*dates\[0\]\s*\)', body),
+        'r.time.push(dates[0]) must not appear — use r.time.push(d) iterating over dates')
+
+
 def test_ical_openaq_endpoints_in_source():
     """OpenAQ and WAQI endpoints must be defined as constants."""
     assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT\s*=', ICAL))
     assert_true(re.search(r'WAQI_BASE_ENDPOINT\s*=', ICAL))
+
+
+def test_gcal_force_global_aqi_semantics():
+    """gcal must always run the global-AQ fallback branch when aqProvider is openaq or waqi,
+    OR when Open-Meteo AQ data is missing. The simplified control flow uses forceGlobalAqi
+    to make the intent explicit.
+    """
+    fn = re.search(r'function fetchAllAtmosphericDataParallel\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must call gcalFetchGlobalAQI
+    assert_true('gcalFetchGlobalAQI' in body,
+        'fetchAllAtmosphericDataParallel must call gcalFetchGlobalAQI for global fallback')
+    # Must contain a condition that checks for openaq|waqi force or missing OM AQ data
+    assert_true(re.search(r'forceGlobalAqi|aqProvider === "openaq".*aqProvider === "waqi"', body, re.S),
+        'fetchAllAtmosphericDataParallel must gate the fallback on forceGlobalAqi or equivalent')
+    # Must not have the dead `if (aqProvider === "auto") ? false :` pattern anymore
+    assert_true(
+        not re.search(r'aqProvider === "auto"\s*\?\s*false', body),
+        'The old `aqProvider === "auto" ? false : ...` pattern is dead — use explicit forceGlobalAqi')
 
 
 def test_gcal_openaq_endpoints_in_source():
@@ -2104,21 +2146,55 @@ def test_gcal_config_aqProvider():
 
 
 def test_ical_waqi_token_stored_in_script_props():
-    """doGet must persist waqiToken to ScriptProperties."""
+    """doGet must persist waqiToken to ScriptProperties and validate it.
+
+    Token must be 8-128 alphanumeric characters (defence against script-property
+    abuse via arbitrarily large strings and injection of special characters into
+    the WAQI URL).
+    """
     fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)
     assert_true(fn is not None)
     body = fn.group(0)
     assert_true('setProperty' in body and 'WAQI_TOKEN' in body,
         'waqiToken must be stored to ScriptProperties under WAQI_TOKEN key')
+    # Guard: token must be validated before storage (check via regex, not just truthy).
+    # The fix uses: waqiTokenParam && /^[A-Za-z0-9]{8,128}$/.test(waqiTokenParam)
+    # Simple string search covers the intent without fragile regex.
+    assert_true(
+        'waqiTokenParam && /' in body and '.test(waqiTokenParam)' in body,
+        'waqiTokenParam must be validated via regex .test() before ScriptProperties storage')
+    # When validation fails, the code should log/reject (not silently accept)
+    assert_true(re.search(r'reject|invalid|rejected', body, re.I),
+        'doGet must log/reject invalid waqiToken rather than silently ignore')
 
 
 def test_ical_aqi_display_includes_source_context():
-    """AQI display labels must show correct context for OpenAQ/WAQI values."""
-    # When no European/US AQI is available but OpenAQ or WAQI fills in, the value
-    # is stored in european_aqi or us_aqi and the existing label helpers must still work.
-    # The existing getAqiLabel/getAqiGlyph tests already cover the numeric path.
-    assert_true(re.search(r'getAqiLabel', ICAL))
-    assert_true(re.search(r'getAqiGlyph', ICAL))
+    """AQI display labels must show correct context for OpenAQ/WAQI values.
+
+    When the OpenAQ/WAQI fallback fills european_aqi or us_aqi arrays with a
+    constant value (e.g. WAQI returns a single AQI broadcast across 7 days),
+    getAqiLabel / getAqiGlyph must still be called with the correct aqiType so
+    the user sees the right bucket. We verify:
+      1. The function bodies exist (smoke).
+      2. getAqiLabel signature accepts aqiType.
+      3. getAqiGlyph signature accepts aqiType.
+      4. generateIcsFeed (the one place that renders AQ into calendar events)
+         actually calls these helpers — not just has the names as substrings.
+    """
+    assert_true(re.search(r'function getAqiLabel\([^)]*aqiType', ICAL),
+        'getAqiLabel must accept aqiType as a parameter')
+    assert_true(re.search(r'function getAqiGlyph\([^)]*aqiType', ICAL),
+        'getAqiGlyph must accept aqiType as a parameter')
+    # generateIcsFeed is the function that produces the actual calendar events.
+    # It must invoke both helpers (not merely mention them as substrings).
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Word-boundary search: must call the function, not have a string like 'fooGetAqiLabelXxx'.
+    assert_true(re.search(r'\bgetAqiLabel\s*\(', body),
+        'generateIcsFeed must call getAqiLabel() to render the bucket label')
+    assert_true(re.search(r'\bgetAqiGlyph\s*\(', body),
+        'generateIcsFeed must call getAqiGlyph() to render the bucket emoji')
 
 
 def test_lint_balance_helper_ok():
