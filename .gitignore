@@ -1,0 +1,5 @@
+# Apps Script / opencode artifacts
+icalweather_test.py
+tests/run_tests.js
+*.log
+.DS_Store
