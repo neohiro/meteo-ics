@@ -1,6 +1,6 @@
 /**
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
- * 
+ *
  * Verified & Bulletproof:
  *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
  *  - Endpoint Documentation Fallback: meteo-ics_readme.txt generated when URL is opened without parameters.
@@ -9,25 +9,238 @@
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
  *  - Deterministic DTSTAMP: Anchored to date to prevent background sync churn and battery drain across calendar clients.
  *  - Standard Atmosphere: Pressure in atm (1013.25 hPa baseline).
- *  - Parallel HTTP Requests: External APIs fetched concurrently using UrlFetchApp.fetchAll.
+ *  - Parallel HTTP Requests: External APIs fetched concurrently using UrlFetchApp.fetchAll with 10s timeout.
+ *  - Per-location API failure isolation: a single city failing does not abort the whole feed.
+ *  - 8 languages (en, zh, hi, es, fr, ar, de, nl) with full UI text + advice translation.
+ *  - days/hazards/lang URL params all honored.
+ *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes.
+ *  - Astronomical events year-aware (auto-detect current year for solstices/equinoxes).
+ *  - Moon phase uses UTC reference date and accurate synodic-month boundaries.
  *  - Clean single empty line (\n\n) separation between card blocks.
+ *  - doGet() catches generateIcsFeed errors and returns a text error document.
+ *  - handleStatusEndpoint() catches computeGlobalModelAccuracy errors and surfaces them.
+ *  - URL params length-capped to defend against pathological inputs.
+ *  - isValidLatLon() shared helper for both user-supplied coords and geocoder results.
  *
  * URL Parameters:
- *   cities=X,Y,Z       — city names, auto-geocoded via Open-Meteo (e.g. ?cities=London,Paris)
+ *   cities=X,Y,Z        — city names, auto-geocoded via Open-Meteo (e.g. ?cities=London,Paris) (max 4)
  *   locations=X:lat:lon — explicit coordinates (e.g. ?locations=Kyoto:35.0116:135.7681)
  *   lat=X&lon=Y&name=Z — single coordinate pair
  *   unit=celsius|fahrenheit
- *   days=1-30
- *   lang=en|zh|hi|es|fr|de|nl
- *   hazards=true|false
- *   action=status|metrics
+ *   days=1-30           — forecast window (default 30)
+ *   lang=en|zh|hi|es|fr|ar|de|nl — display language (default en)
+ *   hazards=true|false  — enable road safety section (default true)
+ *   dryRun=true         — preview feed as plain text (default false)
+ *   action=status|metrics — return JSON diagnostics instead of ICS
  */
 
 const ICAL_CONFIG = {
   calendarName: "Weather & Celestial Feed",
+  version: "2.1.0",
   temperatureUnit: "celsius",
   forecastDays: 30,
-  deterministicDays: 14
+  deterministicDays: 14,
+  minForecastDays: 1,
+  maxForecastDays: 30,
+  maxCities: 4,
+  defaultLang: "en",
+  hazardsEnabled: true
+};
+const FETCH_TIMEOUT_MS = 10000;
+const SUPPORTED_LANGS = ["en", "zh", "hi", "es", "fr", "ar", "de", "nl"];
+const LANGS_RTL = ["ar"];
+
+const T_SEC   = { en:"SUN & CELESTIAL",            zh:"太阳与天象",            hi:"सूर्य और खगोल",              es:"SOL Y CIELO",               fr:"SOLEIL ET CIEL",              ar:"الشمس والسماء",               de:"SONNE & HIMMEL",               nl:"ZON & HEMEL" };
+const T_TEMP  = { en:"TEMPERATURE & COMFORT",       zh:"温度与体感",            hi:"तापमान और आराम",              es:"TEMPERATURA Y CONFORT",      fr:"TEMPÉRATURE ET CONFORT",     ar:"الحرارة والراحة",             de:"TEMPERATUR & KOMFORT",        nl:"TEMPERATUUR & COMFORT" };
+const T_AIR   = { en:"AIR QUALITY & BIO",          zh:"空气质量与生物",         hi:"वायु गुणवत्ता और जैव",        es:"CALIDAD DEL AIRE Y BIO",     fr:"QUALITÉ DE L'AIR & BIO",     ar:"جودة الهواء والبيئة",          de:"LUFTQUALITÄT & BIO",         nl:"LUCHTKWALITEIT & BIO" };
+const T_AGG   = { en:"7-DAY AGGREGATE",            zh:"近7天汇总",             hi:"7-दिन का सारांश",              es:"AGREGADO 7 DÍAS",           fr:"AGRÉGAT 7 JOURS",           ar:"ملخص 7 أيام",                  de:"7-TAGE-AGGREGAT",             nl:"7-DAGEN TOTAAL" };
+const T_AUDIT = { en:"MODEL AUDIT",                zh:"模型校准",               hi:"मॉडल ऑडिट",                  es:"AUDITORÍA DEL MODELO",      fr:"AUDIT DU MODÈLE",            ar:"تدقيق النموذج",                de:"MODELL-AUDIT",                nl:"MODEL-AUDIT" };
+const T_ROAD  = { en:"ROAD SAFETY",                zh:"道路安全",               hi:"सड़क सुरक्षा",                  es:"SEGURIDAD VIAL",             fr:"SÉCURITÉ ROUTIÈRE",          ar:"سلامة الطرق",                  de:"STRAßENSICHERHEIT",          nl:"WEGVEILIGHEID" };
+const T_ADV   = { en:"ACTIONABLE ADVICE",           zh:"行动建议",               hi:"सुझाव",                        es:"CONSEJOS PRÁCTICOS",         fr:"CONSEILS PRATIQUES",         ar:"نصائح عملية",                  de:"PRAKTISCHE TIPPS",           nl:"ADVIES" };
+const T_L = {
+  pin:      { en:"Pin",                          zh:"位置",                  hi:"स्थान",                       es:"Ubicación",                fr:"Lieu",                        ar:"الموقع",                    de:"Ort",                         nl:"Plaats" },
+  cal:      { en:"Calendar",                     zh:"日历",                  hi:"कैलेंडर",                     es:"Calendario",                fr:"Calendrier",                  ar:"التقويم",                   de:"Kalender",                    nl:"Kalender" },
+  range:     { en:"Range",                        zh:"范围",                  hi:"सीमा",                        es:"Rango",                      fr:"Plage",                      ar:"المدى",                       de:"Bereich",                     nl:"Bereik" },
+  feels:     { en:"Feels",                        zh:"体感",                  hi:"महसूस",                       es:"Sensación",                  fr:"Ressenti",                   ar:"إحساس",                      de:"Gefühlt",                    nl:"Voelt als" },
+  dew:       { en:"Dew",                          zh:"露点",                  hi:"ओसांश",                       es:"Rocío",                     fr:"Rosée",                      ar:"الندى",                      de:"Taupunkt",                   nl:"Dauwpunt" },
+  humid:     { en:"Humidity",                     zh:"湿度",                  hi:"नमी",                         es:"Humedad",                    fr:"Humidité",                    ar:"الرطوبة",                    de:"Luftfeuchte",                 nl:"Luchtvochtigheid" },
+  rain:      { en:"Rain",                         zh:"降雨",                  hi:"वर्षा",                       es:"Lluvia",                     fr:"Pluie",                      ar:"المطر",                       de:"Regen",                       nl:"Regen" },
+  consensus: { en:"Consensus",                     zh:"集合一致性",            hi:"सर्वसम्मति",                   es:"Consenso",                   fr:"Consensus",                   ar:"الإجماع",                     de:"Konsens",                     nl:"Consensus" },
+  wind:      { en:"Wind",                         zh:"风",                    hi:"हवा",                         es:"Viento",                     fr:"Vent",                       ar:"الرياح",                      de:"Wind",                        nl:"Wind" },
+  gusts:     { en:"Gusts",                        zh:"阵风",                  hi:"झोंके",                       es:"Ráfagas",                    fr:"Rafales",                     ar:"هبّات",                      de:"Böen",                        nl:"Windstoten" },
+  baro:      { en:"Barometer",                    zh:"气压",                  hi:"वायुदाब",                      es:"Barómetro",                  fr:"Baromètre",                   ar:"البارومتر",                   de:"Barometer",                   nl:"Barometer" },
+  daylight:  { en:"Daylight",                     zh:"日照",                  hi:"दिन की रोशनी",                es:"Luz diurna",                 fr:"Durée du jour",               ar:"ساعات النهار",                 de:"Tageslicht",                  nl:"Daglicht" },
+  goldenHr:  { en:"Golden Hr",                    zh:"黄金时刻",              hi:"गोल्डन ऑवर",                  es:"Hora dorada",                fr:"Heure dorée",                 ar:"الساعة الذهبية",               de:"Goldene Stunde",              nl:"Gouden uur" },
+  cloud:     { en:"Cloud Cover",                   zh:"云量",                  hi:"बादल",                        es:"Nubosidad",                  fr:"Couverture nuageuse",         ar:"الغيوم",                      de:"Bewölkung",                   nl:"Bewolking" },
+  moon:      { en:"Moon",                         zh:"月相",                  hi:"चाँद",                        es:"Luna",                       fr:"Lune",                        ar:"القمر",                       de:"Mond",                        nl:"Maan" },
+  star:      { en:"Stargazing",                    zh:"观星",                  hi:"तारा-दर्शन",                  es:"Observación de estrellas",   fr:"Observation des étoiles",     ar:"رصد النجوم",                   de:"Sternbeobachtung",            nl:"Sterrenkijken" },
+  uv:        { en:"UV Index",                     zh:"紫外线指数",             hi:"यूवी सूचकांक",                 es:"Índice UV",                   fr:"Indice UV",                   ar:"مؤشر الأشعة فوق البنفسجية",  de:"UV-Index",                    nl:"UV-index" },
+  et:        { en:"Evapotrans.",                    zh:"蒸散",                  hi:"वाष्पीकरण",                    es:"Evapotranspiración",         fr:"Évapotranspiration",          ar:"البخر",                       de:"Evapotranspiration",          nl:"Verdamping" },
+  rad:       { en:"Solar Radiation",              zh:"太阳辐射",               hi:"सौर विकिरण",                   es:"Radiación solar",            fr:"Rayonnement solaire",          ar:"الإشعاع الشمسي",               de:"Sonnenstrahlung",             nl:"Zonnestraling" },
+  aqi:       { en:"AQI",                         zh:"空气质量",               hi:"वायु गुणवत्ता सूचकांक",        es:"ICA",                        fr:"IQA",                         ar:"مؤشر جودة الهواء",             de:"Luftqualität (AQI)",          nl:"Luchtkwaliteit (AQI)" },
+  mon:       { en:"Monitoring",                  zh:"监测中",                hi:"निगरानी",                       es:"Monitoreo",                   fr:"En suivi",                    ar:"قيد المراقبة",                 de:"Wird überwacht",               nl:"Wordt gemeten" },
+  pm25:      { en:"PM2.5",                       zh:"细颗粒物",               hi:"पीएम 2.5",                     es:"PM2.5",                      fr:"PM2.5",                       ar:"الجسيمات الدقيقة",              de:"PM2.5",                        nl:"PM2.5" },
+  pm10:      { en:"PM10",                        zh:"可吸入颗粒",             hi:"पीएम 10",                      es:"PM10",                       fr:"PM10",                        ar:"الجسيمات الكبيرة",              de:"PM10",                         nl:"PM10" },
+  pollen:    { en:"Pollen Load",                  zh:"花粉浓度",               hi:"पराग",                          es:"Polen",                      fr:"Pollens",                     ar:"حبوب اللقاح",                   de:"Pollenbelastung",              nl:"Pollenbelasting" },
+  polLow:    { en:"Low",                         zh:"低",                    hi:"कम",                           es:"Bajo",                       fr:"Faible",                      ar:"منخفض",                       de:"Niedrig",                      nl:"Laag" },
+  rainSum:   { en:"Rain Sum",                     zh:"累计降雨",               hi:"कुल वर्षा",                     es:"Lluvia total",                fr:"Cumul de pluie",              ar:"إجمالي المطر",                 de:"Regensumme",                   nl:"Regensom" },
+  meanTemp:  { en:"Mean Temp",                   zh:"平均气温",               hi:"औसत तापमान",                    es:"Temp. media",                 fr:"Temp. moyenne",                ar:"متوسط الحرارة",                 de:"Mittlere Temp.",               nl:"Gem. temperatuur" },
+  gdd:       { en:"Growing Deg",                 zh:"有效积温",               hi:"ग्रोइंग डिग्री",                 es:"Grados-día",                  fr:"Degrés-jours",                 ar:"درجات النمو",                   de:"Wärmesumme",                  nl:"Groeigraden" },
+  aqi7:      { en:"7-Day Mean AQI",             zh:"7天平均空气质量",         hi:"7-दिन औसत वायु",                  es:"ICA medio 7d",                fr:"IQA moyen 7j",                 ar:"متوسط 7 أيام للجودة",            de:"7-Tage AQI-Mittel",            nl:"7-dagen gem. AQI" },
+  status:    { en:"Status",                       zh:"状态",                  hi:"स्थिति",                         es:"Estado",                      fr:"Statut",                       ar:"الحالة",                       de:"Status",                       nl:"Status" },
+  drift:     { en:"Expected Lead Drift",          zh:"预计误差",               hi:"अपेक्षित ड्रिफ्ट",                 es:"Deriva esperada",              fr:"Dérive attendue",               ar:"الانحراف المتوقع",               de:"Erwartete Abweichung",          nl:"Verwachte drift" },
+  ground:    { en:"Ground",                       zh:"地表",                  hi:"भूमि",                           es:"Suelo",                       fr:"Sol",                          ar:"الأرض",                        de:"Boden",                        nl:"Bodem" },
+  advisory:  { en:"Advisory",                     zh:"建议",                  hi:"सलाह",                           es:"Aviso",                       fr:"Avis",                         ar:"تنبيه",                        de:"Hinweis",                      nl:"Advies" },
+  engine:    { en:"Engine",                       zh:"引擎",                  hi:"इंजन",                           es:"Motor",                       fr:"Moteur",                       ar:"المحرك",                       de:"Engine",                       nl:"Engine" },
+  // --- Road statuses ---
+  rdBI:     { en:"BLACK ICE DANGER",            zh:"黑冰危险",              hi:"काली बर्फ का खतरा",             es:"PELIGRO DE HIELO NEGRO",    fr:"DANGER DE VERGLAS",          ar:"خطر الجليد الأسود",          de:"SCHWARZES EIS",              nl:"ZWART IJS-GEVAAR" },
+  rdFrost:  { en:"FROST / SLICK SPOTS",         zh:"霜冻/路面湿滑",         hi:"पाला/फिसलन",                   es:"HELADAS / RESBALADIZO",     fr:"GELÉES / GLISSANT",          ar:"صقيع/انزلاق",                de:"FROST / RUTSCHIG",           nl:"VORST / GLADDE" },
+  rdSpray:  { en:"COLD SPRAY RISK",            zh:"冷溅水风险",             hi:"ठंडी छींट",                     es:"RIESGO DE SALPICADURAS",    fr:"RISQUE D'ÉCLABOUSSURES",    ar:"خطر الرذاذ البارد",           de:"KÄLTE-SPRÜH-RISIKO",        nl:"KOUD-SPUITRISICO" },
+  rdChill:  { en:"CHILLED ASPHALT",            zh:"冷柏油路",               hi:"ठंडा डामर",                    es:"ASFALTO FRÍO",              fr:"ASPHALTE FROID",             ar:"إسفلت بارد",                 de:"KALTER ASPHALT",              nl:"KOUDE ASFALT" },
+  rdAdvBI:  { en:"Glazed surface. Triple braking distance.", zh:"结冰路面。请保持三倍刹车距离。", hi:"फिसलन सतह। तिगुना ब्रेकिंग दूरी।", es:"Superficie helada. Triplica la distancia.", fr:"Surface verglacée. Triplez la distance.", ar:"سطح جليدي. ثلاثة أضعاف مسافة الفرملة.", de:"Spiegelglatt. Dreifacher Bremsweg.", nl:"Bevroren oppervlak. Verdrievoudig remweg." },
+  rdAdvFr:  { en:"Bridges & shaded ramps prone to ice.", zh:"桥梁和背阴坡道易结冰。", hi:"पुल और छायादार रैंप बर्फ के शिकार।", es:"Puentes y rampas en sombra propensos al hielo.", fr:"Ponts et rampes ombragées sujets au verglas.", ar:"الجسور والمنحدرات المظللة عرضة للجليد.", de:"Brücken und schattige Rampen vereist.", nl:"Bruggen en schaduwrijke hellingen ijzelgevoelig." },
+  rdAdvSp:  { en:"Reduced grip on summer tires.", zh:"夏季轮胎抓地力下降。", hi:"ग्रीष्मकालीन टायरों पर कम पकड़।", es:"Menor agarre en neumáticos de verano.", fr:"Adhérence réduite sur pneus été.", ar:"تماسك أقل مع الإطارات الصيفية.", de:"Reduzierter Grip auf Sommerreifen.", nl:"Minder grip op zomerbanden." },
+  rdAdvCh:  { en:"Sub-7°C rubber hardening threshold.", zh:"低于7°C橡胶硬化阈值。", hi:"7°C से नीचे रबर सख्त होने की सीमा।", es:"Umbral de endurecimiento del caucho bajo 7°C.", fr:"Seuil de durcissement du caoutchouc sous 7°C.", ar:"عتبة تصلب المطاط دون 7°C.", de:"Unter 7°C härtet Gummi aus.", nl:"Onder 7°C wordt rubber harder." },
+  // --- GDD ---
+  gddDorm: { en:"Dormant",        zh:"休眠期",              hi:"सुप्त",              es:"Latente",            fr:"Dormant",            ar:"خامد",             de:"Ruhend",             nl:"Rustend" },
+  gddCool: { en:"Cool greens active", zh:"冷凉蔬菜活跃",      hi:"ठंडी सब्ज़ियाँ सक्रिय", es:"Hortalizas frías activas", fr:"Légumes frais actifs", ar:"خضروات باردة نشطة", de:"Kühlgemüse aktiv",   nl:"Koude groenten actief" },
+  gddFoli: { en:"Steady root foliage", zh:"根部生长稳定",    hi:"जड़ें मज़बूत",      es:"Follaje de raíz estable", fr:"Feuillage racinaire stable", ar:"أوراق الجذور مستقرة", de:"Stetige Blattbildung", nl:"Stabiele bladgroei" },
+  gddBrss: { en:"Brassicas booming",  zh:"十字花科蔬菜旺盛",  hi:"ब्रैसिका फल-फूल", es:"Brásicas en auge",    fr:"Brassiques en plein essor", ar:"الكرنبية في أوجها", de:"Kreuzblütler-Boost", nl:"Koolsoorten pieken" },
+  gddPeak: { en:"Peak warm growth",   zh:"高温生长峰值",      hi:"गर्म वृद्धि चरम",  es:"Pico de calor",      fr:"Pic de chaleur",      ar:"ذروة النمو",        de:"Wachstumsspitze",   nl:"Piek warmtegroei" },
+  // --- Stargazing ---
+  starExc:  { en:"Exceptional",         zh:"极佳",               hi:"असाधारण",           es:"Excepcional",          fr:"Exceptionnel",         ar:"استثنائي",           de:"Hervorragend",         nl:"Uitstekend" },
+  starFair: { en:"Fair",                 zh:"良好",               hi:"अच्छा",             es:"Aceptable",            fr:"Correct",             ar:"جيد",               de:"Gut",                  nl:"Redelijk" },
+  starMod:  { en:"Moderate",             zh:"一般",               hi:"मध्यम",             es:"Moderado",             fr:"Modéré",              ar:"متوسط",             de:"Mäßig",                 nl:"Matig" },
+  starObsc: { en:"Obscured",             zh:"被遮挡",             hi:"अस्पष्ट",           es:"Obstruido",            fr:"Masqué",              ar:"محجوب",             de:"Verdeckt",              nl:"Verduisterd" },
+  starMoon: { en:"Moonlit",              zh:"月光明亮",           hi:"चाँदनी",           es:"Iluminado por la luna", fr:"Éclairé par la lune", ar:"منير بالقمر",    de:"Mondbeschienen",       nl:"Maanverlicht" },
+  starFlt:  { en:"Filtered by Moon",    zh:"月光干扰",           hi:"चाँद के कारण",     es:"Filtrado por la luna",  fr:"Filtré par la lune",   ar:"مُرشَّح بالقمر", de:"Mond-getrübt",          nl:"Maangestoorde hemel" },
+  starDec:  { en:"Decent",              zh:"尚可",               hi:"ठीक",               es:"Aceptable",            fr:"Correct",             ar:"مقبول",             de:"Brauchbar",             nl:"Redelijk" },
+  // --- AQI ---
+  aqiGood:  { en:"Good",                       zh:"良好",              hi:"अच्छा",              es:"Buena",              fr:"Bonne",               ar:"جيد",               de:"Gut",               nl:"Goed" },
+  aqiFair:  { en:"Fair",                       zh:"一般",              hi:"सामान्य",            es:"Aceptable",          fr:"Acceptable",         ar:"مقبول",             de:"Mäßig",              nl:"Redelijk" },
+  aqiMod:   { en:"Moderate",                   zh:"中等",              hi:"मध्यम",             es:"Moderada",           fr:"Modérée",             ar:"متوسط",             de:"Mittel",             nl:"Matig" },
+  aqiPoor:  { en:"Poor",                       zh:"较差",              hi:"खराब",              es:"Mala",               fr:"Mauvaise",            ar:"سيئ",               de:"Schlecht",           nl:"Slecht" },
+  aqiSens:  { en:"Unhealthy for Sensitive",     zh:"对敏感人群不健康",   hi:"संवेदनशील के लिए अस्वस्थ", es:"Dañina para sensibles", fr:"Mauvaise pour sensibles", ar:"غير صحي للحساسين", de:"Ungesund für Empfindliche", nl:"Ongezond voor gevoeligen" },
+  aqiUnh:   { en:"Unhealthy",                   zh:"不健康",            hi:"अस्वस्थ",            es:"Dañina",            fr:"Mauvaise",            ar:"غير صحي",           de:"Ungesund",           nl:"Ongezond" },
+  aqiVunh:   { en:"Very Unhealthy",             zh:"极不健康",          hi:"बहुत अस्वस्थ",       es:"Muy dañina",         fr:"Très mauvaise",      ar:"غير صحي جداً",       de:"Sehr ungesund",      nl:"Zeer ongezond" },
+  aqiHzd:   { en:"Hazardous",                   zh:"危险",              hi:"खतरनाक",            es:"Peligrosa",          fr:"Dangereuse",          ar:"خطير",              de:"Gefährlich",         nl:"Gevaarlijk" },
+  aqiUnk:   { en:"Unknown",                     zh:"未知",              hi:"अज्ञात",              es:"Desconocida",        fr:"Inconnue",            ar:"غير معروف",          de:"Unbekannt",          nl:"Onbekend" },
+  // --- UV ---
+  uvLow:    { en:"Low",       zh:"低",     hi:"कम",     es:"Bajo",     fr:"Faible",     ar:"منخفض",    de:"Niedrig",    nl:"Laag" },
+  uvMod:    { en:"Moderate",  zh:"中等",   hi:"मध्यम",  es:"Moderado",  fr:"Modéré",    ar:"متوسط",    de:"Mittel",     nl:"Matig" },
+  uvHigh:   { en:"High",      zh:"强",     hi:"उच्च",   es:"Alto",     fr:"Élevé",     ar:"مرتفع",    de:"Hoch",       nl:"Hoog" },
+  uvVhigh:  { en:"Very High", zh:"很强",   hi:"बहुत उच्च", es:"Muy alto", fr:"Très élevé", ar:"مرتفع جداً", de:"Sehr hoch",  nl:"Zeer hoog" },
+  // --- Humidity ---
+  humDry:   { en:"Dry Air",       zh:"干燥",   hi:"शुष्क हवा",   es:"Aire seco",    fr:"Air sec",     ar:"هواء جاف",  de:"Trockene Luft",  nl:"Droge lucht" },
+  humComf:  { en:"Comfortable",  zh:"舒适",   hi:"आरामदायक",    es:"Confortable",  fr:"Confortable", ar:"مريح",       de:"Angenehm",        nl:"Comfortabel" },
+  humHumid: { en:"Humid",         zh:"潮湿",   hi:"उमस",         es:"Húmedo",       fr:"Humide",       ar:"رطب",        de:"Feucht",           nl:"Vochtig" },
+  humMuggy: { en:"Very Muggy",    zh:"闷热",   hi:"बहुत उमस",    es:"Muy bochornoso", fr:"Très lourd", ar:"خانق جداً",  de:"Schwül",           nl:"Zeer benauwd" },
+  // --- Thermal ---
+  tFreeze: { en:"Freezing",     zh:"严寒",    hi:"हिमांक",    es:"Helado",       fr:"Glacial",       ar:"متجمد",    de:"Frost",       nl:"Vriezend" },
+  tChilly: { en:"Chilly",       zh:"寒冷",    hi:"ठंडा",      es:"Fresco",       fr:"Frais",         ar:"بارد",      de:"Kühl",        nl:"Fris" },
+  tComf:   { en:"Comfortable",  zh:"舒适",    hi:"आरामदायक",  es:"Confortable",  fr:"Confortable",   ar:"مريح",      de:"Angenehm",     nl:"Comfortabel" },
+  tPleas:  { en:"Pleasant",     zh:"宜人",    hi:"सुहावना",    es:"Agradable",    fr:"Agréable",      ar:"لطيف",      de:"Angenehm",     nl:"Aangenaam" },
+  tWarm:   { en:"Warm",         zh:"温暖",    hi:"गर्म",       es:"Cálido",       fr:"Tiède",         ar:"دافئ",      de:"Warm",         nl:"Warm" },
+  tHot:    { en:"Hot",          zh:"炎热",    hi:"गर्म",       es:"Caluroso",     fr:"Chaud",         ar:"حار",        de:"Heiß",         nl:"Warm" },
+  // --- Model bands ---
+  dDay:    { en:"D-Day (Today)",        zh:"D日（今天）",   hi:"डी-डे (आज)",        es:"Día D (Hoy)",           fr:"Jour J (Aujourd'hui)",     ar:"اليوم (د-داي)",       de:"Tag D (Heute)",       nl:"D-Dag (Vandaag)" },
+  mDet:    { en:"Deterministic",        zh:"确定性",         hi:"निर्धारक",            es:"Determinista",          fr:"Déterministe",            ar:"حتمي",               de:"Deterministisch",     nl:"Deterministisch" },
+  mEns:    { en:"NOAA Ensemble",        zh:"NOAA集合",       hi:"एनओएए समुच्चय",      es:"Conjunto NOAA",        fr:"Ensemble NOAA",             ar:"مجموعة NOAA",         de:"NOAA-Ensemble",        nl:"NOAA-Ensemble" },
+  // --- Lead band labels ---
+  lS:      { en:"D1-3 High",          zh:"1-3天 高精度",   hi:"D1-3 उच्च",        es:"D1-3 Alta",       fr:"J1-3 Élevée",       ar:"1-3 يوم مرتفع",    de:"T1-3 Hoch",       nl:"D1-3 Hoog" },
+  lM:      { en:"D4-7 Medium",        zh:"4-7天 中等",     hi:"D4-7 मध्यम",        es:"D4-7 Media",      fr:"J4-7 Modérée",      ar:"4-7 يوم متوسط",    de:"T4-7 Mittel",      nl:"D4-7 Gemiddeld" },
+  lL:      { en:"D8-14 Extended",     zh:"8-14天 延伸",    hi:"D8-14 विस्तारित",   es:"D8-14 Extendida", fr:"J8-14 Étendue",     ar:"8-14 يوم موسع",    de:"T8-14 Erweitert",   nl:"D8-14 Uitgebreid" },
+  lN:      { en:"D15+ Ensemble",      zh:"15天以上 集合",  hi:"D15+ एनसम्बल",      es:"D15+ Conjunto",   fr:"J15+ Ensemble",      ar:"15+ يوم مجموعة",    de:"T15+ Ensemble",      nl:"D15+ Ensemble" },
+  lGt:     { en:"Ground-Truth (Live)", zh:"实测（实时）",    hi:"ग्राउंड-ट्रुथ (लाइव)", es:"Verificado en vivo", fr:"Mesure réelle (Direct)", ar:"الواقع (مباشر)", de:"Echtzeit-Messung",  nl:"Gemeten (live)" },
+  lCal:    { en:"Calibrating",          zh:"校准中",          hi:"कैलिब्रेट",         es:"Calibrando",       fr:"Calibrage en cours", ar:"قيد المعايرة",     de:"Kalibrierung läuft", nl:"Wordt gekalibreerd" },
+  // --- Grades ---
+  gAplus:  { en:"A+ (Excellent)",       zh:"A+ (极佳)",     hi:"A+ (उत्कृष्ट)",      es:"A+ (Excelente)",   fr:"A+ (Excellent)",       ar:"A+ (ممتاز)",      de:"A+ (Ausgezeichnet)", nl:"A+ (Uitstekend)" },
+  gA:      { en:"A (High)",             zh:"A (高)",        hi:"A (उच्च)",           es:"A (Alta)",         fr:"A (Élevée)",          ar:"A (مرتفع)",       de:"A (Hoch)",           nl:"A (Hoog)" },
+  gB:      { en:"B (Moderate)",         zh:"B (中等)",      hi:"B (मध्यम)",           es:"B (Moderada)",     fr:"B (Modérée)",          ar:"B (متوسط)",       de:"B (Mittel)",         nl:"B (Matig)" },
+  gC:      { en:"C (Divergent)",        zh:"C (差异较大)",   hi:"C (भिन्न)",           es:"C (Divergente)",   fr:"C (Divergent)",        ar:"C (متباعد)",      de:"C (Abweichend)",     nl:"C (Uiteenlopend)" },
+  gCal:    { en:"A (Calibrating)",      zh:"A (校准中)",     hi:"A (कैलिब्रेट हो रहा)", es:"A (Calibrando)",   fr:"A (Calibrage en cours)", ar:"A (قيد المعايرة)", de:"A (Kalibrierung)",  nl:"A (Wordt gekalibreerd)" }
+};
+
+function t(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const entry = T_L[key];
+  if (!entry) return key;
+  return entry[lang] || entry.en || key;
+}
+
+function tSection(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const sections = { secTemp:T_TEMP, secSun:T_SEC, secAir:T_AIR, secAgg:T_AGG, secAudit:T_AUDIT, secRoad:T_ROAD, secAdvice:T_ADV };
+  const map = sections[key];
+  if (!map) return key;
+  return map[lang] || map.en || key;
+}
+
+function tRoadStatus(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const map = { rdBI:T_L.rdBI, rdFrost:T_L.rdFrost, rdSpray:T_L.rdSpray, rdChill:T_L.rdChill }[key];
+  if (!map) return key;
+  return map[lang] || map.en || key;
+}
+
+function tRoadAdv(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const map = { advBI:T_L.rdAdvBI, advFr:T_L.rdAdvFr, advSp:T_L.rdAdvSp, advCh:T_L.rdAdvCh }[key];
+  if (!map) return key;
+  return map[lang] || map.en || key;
+}
+
+function normalizeLang(raw) {
+  if (!raw) return "en";
+  const code = String(raw).toLowerCase().split(/[-_]/)[0].trim();
+  return SUPPORTED_LANGS.includes(code) ? code : "en";
+}
+
+function parseBoolParam(raw, fallback) {
+  if (raw === undefined || raw === null) return fallback;
+  const s = String(raw).toLowerCase().trim();
+  return (s === "true" || s === "1" || s === "yes" || s === "on") ? true : (s === "false" || s === "0" || s === "no" || s === "off") ? false : fallback;
+}
+
+function clamp(v, min, max) {
+  v = Number(v);
+  return isNaN(v) ? min : Math.max(min, Math.min(max, v));
+}
+
+const ASTRONOMICAL_EVENTS = {
+  "01-03": "Quadrantid Meteor Peak (~110/hr)",
+  "01-04": "Earth at Perihelion (Closest to Sun)",
+  "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
+  "03-24": "Mercury at Greatest Eastern Elongation",
+  "04-22": "Lyrid Meteor Peak (~18/hr)",
+  "04-23": "Lyrid Active Window",
+  "05-06": "Eta Aquariids Peak (~50/hr)",
+  "05-07": "Eta Aquariids Active Window",
+  "06-21": "☀️ Summer Solstice (Longest Day)",
+  "07-04": "Earth at Aphelion (Furthest from Sun)",
+  "07-28": "Delta Aquariids Peak (~20/hr)",
+  "07-29": "Delta Aquariids Active Window",
+  "08-12": "Perseid Meteor Peak (~100/hr)",
+  "08-13": "Perseid Active Window",
+  "08-27": "Saturn at Opposition (Brightest)",
+  "09-19": "Neptune at Opposition",
+  "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
+  "10-07": "Draconid Meteor Peak (~10/hr)",
+  "10-21": "Orionid Meteor Peak (~20/hr)",
+  "10-22": "Orionid Active Window",
+  "11-05": "Southern Taurids Peak (~5-10 fireball/hr)",
+  "11-12": "Northern Taurids Peak (~5 fireball/hr)",
+  "11-17": "Leonid Meteor Peak (~15/hr)",
+  "11-18": "Leonid Active Window",
+  "12-07": "Jupiter at Opposition (Brightest)",
+  "12-13": "Geminid Meteor Ramp-up (~60/hr)",
+  "12-14": "Geminid Meteor Peak (~120/hr)",
+  "12-21": "❄️ Winter Solstice (Shortest Day)",
+  "12-22": "Ursid Meteor Peak (~10/hr)"
 };
 
 function doGet(e) {
@@ -44,77 +257,142 @@ function doGet(e) {
 
   // 3. Fallback Documentation Readme if no locations supplied
   if (!locations || locations.length === 0) {
-    const readme = [
-      "==================================================================",
-      " METEO ICALENDAR (.ICS) DASHBOARD - ENDPOINT DOCUMENTATION",
-      "==================================================================",
-      "",
-      "No locations were supplied in the URL query parameters.",
-      "Subscribe to this live feed by specifying cities or coordinates.",
-      "",
-      "1. QUERY PARAMETERS",
-      "------------------------------------------------------------------",
-      "• cities : Comma-separated city names (auto-geocoded).",
-      "           Example: ?cities=Tokyo,Paris,New York",
-      "",
-      "• locations : Custom defined coordinates in NAME:LAT:LON format.",
-      "              Example: ?locations=Kyoto:35.0116:135.7681,Valparaiso:-33.0472:-71.6127",
-      "",
-      "• lat & lon : Single custom coordinate with optional name parameter.",
-      "              Example: ?lat=64.1466&lon=-21.9426&name=Reykjavik",
-      "",
-      "• unit : Temperature unit. 'celsius' (default) or 'fahrenheit'.",
-      "         Example: ?cities=Kyoto&unit=celsius",
-      "",
-      "• action : 'status' or 'metrics' to view live model accuracy JSON.",
-      "           Example: ?action=status",
-      "",
-      "2. READY-TO-USE SUBSCRIPTION EXAMPLES",
-      "------------------------------------------------------------------",
-      "• Multiple World Cities:",
-      "  https://script.google.com/.../exec?cities=Kyoto,Reykjavik,Valparaiso",
-      "",
-      "• Exact Coordinates (Fahrenheit):",
-      "  https://script.google.com/.../exec?locations=Tokyo:35.6762:139.6503&unit=fahrenheit",
-      "",
-      "3. HOW TO SUBSCRIBE IN YOUR CALENDAR CLIENT",
-      "------------------------------------------------------------------",
-      "• Apple Calendar (iOS / macOS):",
-      "  File > New Calendar Subscription > Paste your URL above.",
-      "",
-      "• Google Calendar Web:",
-      "  Other Calendars (+) > From URL > Paste your URL above.",
-      "",
-      "• Outlook 365 / Desktop:",
-      "  Add Calendar > Subscribe from web > Paste your URL above.",
-      "",
-      "==================================================================",
-      "Generated by Weather & Celestial Engine · Open-Meteo & Copernicus"
-    ].join("\r\n");
-
+    const readme = buildReadme(params);
     return ContentService.createTextOutput(readme)
       .setMimeType(ContentService.MimeType.TEXT)
       .downloadAsFile("meteo-ics_readme.txt");
   }
 
-  // 4. Generate ICS Feed
-  const unitParam = (params.unit || params.temperatureUnit || ICAL_CONFIG.temperatureUnit).toLowerCase();
+  // 4. Parse feed options from URL params
+  const unitParam = String(params.unit || params.temperatureUnit || ICAL_CONFIG.temperatureUnit || "").toLowerCase();
   const temperatureUnit = unitParam.startsWith("f") ? "fahrenheit" : "celsius";
+  const lang = normalizeLang(params.lang);
+  const days = clamp(params.days, ICAL_CONFIG.minForecastDays, ICAL_CONFIG.maxForecastDays);
+  const hazards = parseBoolParam(params.hazards, ICAL_CONFIG.hazardsEnabled);
+  const dryRun = parseBoolParam(params.dryRun || params.dryrun, false);
 
-  const icsContent = generateIcsFeed(locations, temperatureUnit);
+  // 5. Generate ICS Feed
+  let icsContent;
+  try {
+    icsContent = generateIcsFeed(locations, temperatureUnit, { lang, days, hazards, dryRun });
+  } catch (e) {
+    // Surface actionable errors as plain-text instead of a raw Apps Script exception.
+    return ContentService.createTextOutput("Feed generation failed: " + String(e))
+      .setMimeType(ContentService.MimeType.TEXT)
+      .downloadAsFile("feed_error.txt");
+  }
+  if (dryRun) {
+    return ContentService.createTextOutput(icsContent)
+      .setMimeType(ContentService.MimeType.PLAIN_TEXT)
+      .downloadAsFile("weather_feed_preview.txt");
+  }
   return ContentService.createTextOutput(icsContent)
     .setMimeType(ContentService.MimeType.ICAL)
     .downloadAsFile("weather_feed.ics");
+}
+
+function buildReadme(params) {
+  const lang = normalizeLang(params.lang);
+  const langNames = { en:"English", zh:"Chinese", hi:"Hindi", es:"Spanish", fr:"French", ar:"Arabic", de:"German", nl:"Dutch" };
+  const tr = (en, m) => (m && m[lang]) ? m[lang] : en;
+  return [
+    "==================================================================",
+    " " + tr("METEO ICALENDAR (.ICS) DASHBOARD - ENDPOINT DOCUMENTATION",
+             { en:"METEO ICALENDAR (.ICS) DASHBOARD - ENDPOINT DOCUMENTATION",
+               zh:"气象日历 (.ICS) 仪表板 - 端点文档",
+               hi:"मेटियो iCal (.ICS) डैशबोर्ड - एंडपॉइंट दस्तावेज़",
+               es:"PANEL DE CALENDARIO (.ICS) METEO - DOCUMENTACIÓN",
+               fr:"PANNEAU METEO ICALENDAR (.ICS) - DOCUMENTATION",
+               ar:"لوحة تقويم الطقس (.ICS) - التوثيق",
+               de:"WETTER-ICALENDAR (.ICS) - ENDPOINT-DOKUMENTATION",
+               nl:"METEO ICALENDAR (.ICS) - EINDPDOCUMENTATIE" }),
+    "==================================================================",
+    "",
+    tr("No locations were supplied in the URL query parameters.",
+       { en:"No locations were supplied in the URL query parameters.",
+         zh:"URL 查询参数中未提供位置。",
+         hi:"URL क्वेरी पैरामीटर में कोई स्थान नहीं दिया गया।",
+         es:"No se proporcionaron ubicaciones en los parámetros de la URL.",
+         fr:"Aucun lieu n'a été fourni dans les paramètres URL.",
+         ar:"لم يتم توفير مواقع في معلمات URL.",
+         de:"Keine Standorte in den URL-Parametern angegeben.",
+         nl:"Geen locaties opgegeven in de URL-parameters." }),
+    tr("Subscribe to this live feed by specifying cities or coordinates.",
+       { en:"Subscribe to this live feed by specifying cities or coordinates.",
+         zh:"通过指定城市或坐标订阅此实时源。",
+         hi:"शहरों या निर्देशांकों को निर्दिष्ट करके इस लाइव फ़ीड को सदस्यता लें।",
+         es:"Suscríbase a esta fuente en vivo especificando ciudades o coordenadas.",
+         fr:"Abonnez-vous à ce flux en direct en spécifiant des villes ou des coordonnées.",
+         ar:"اشترك في هذه البث المباشر بتحديد المدن أو الإحداثيات.",
+         de:"Abonnieren Sie diesen Live-Feed, indem Sie Städte oder Koordinaten angeben.",
+         nl:"Abonneer u op deze live feed door steden of coördinaten op te geven." }),
+    "",
+    "1. " + tr("QUERY PARAMETERS", null),
+    "------------------------------------------------------------------",
+    "• cities : " + tr("Comma-separated city names (auto-geocoded).", null),
+    "           " + tr("Example", null) + ": ?cities=Tokyo,Paris,New York",
+    "",
+    "• locations : " + tr("Custom defined coordinates in NAME:LAT:LON format.", null),
+    "              " + tr("Example", null) + ": ?locations=Kyoto:35.0116:135.7681",
+    "",
+    "• lat & lon : " + tr("Single custom coordinate with optional name parameter.", null),
+    "              " + tr("Example", null) + ": ?lat=64.1466&lon=-21.9426&name=Reykjavik",
+    "",
+    "• unit : " + tr("Temperature unit. 'celsius' (default) or 'fahrenheit'.", null),
+    "         " + tr("Example", null) + ": ?cities=Kyoto&unit=celsius",
+    "",
+    "• days : " + tr("Forecast window in days (1-30, default 30).", null),
+    "         " + tr("Example", null) + ": ?cities=Tokyo&days=14",
+    "",
+    "• lang : " + tr("Display language.", null) + " en|zh|hi|es|fr|ar|de|nl (default en)",
+    "         " + tr("Example", null) + ": ?cities=Tokyo&lang=zh",
+    "",
+    "• hazards : " + tr("Show road safety section (true|false, default true).", null),
+     "         " + tr("Example", null) + ": ?cities=Tokyo&hazards=false",
+     "",
+     "• dryRun : " + tr("Preview the feed as plain text without ICS download.", null),
+     "            " + tr("Example", null) + ": ?cities=Tokyo&dryRun=true",
+     "",
+     "• action : " + tr("'status' or 'metrics' to view live model accuracy JSON.", null),
+    "           " + tr("Example", null) + ": ?action=status",
+    "",
+    "2. " + tr("READY-TO-USE SUBSCRIPTION EXAMPLES", null),
+    "------------------------------------------------------------------",
+    "• " + tr("Multiple World Cities", null) + ":",
+    "  https://script.google.com/.../exec?cities=Kyoto,Reykjavik,Valparaiso",
+    "",
+    "• " + tr("Exact Coordinates (Fahrenheit)", null) + ":",
+    "  https://script.google.com/.../exec?locations=Tokyo:35.6762:139.6503&unit=fahrenheit",
+    "",
+    "3. " + tr("HOW TO SUBSCRIBE IN YOUR CALENDAR CLIENT", null),
+    "------------------------------------------------------------------",
+    "• " + tr("Apple Calendar (iOS / macOS):", null),
+    "  " + tr("File > New Calendar Subscription > Paste your URL above.", null),
+    "",
+    "• " + tr("Google Calendar Web:", null),
+    "  " + tr("Other Calendars (+) > From URL > Paste your URL above.", null),
+    "",
+    "• " + tr("Outlook 365 / Desktop:", null),
+    "  " + tr("Add Calendar > Subscribe from web > Paste your URL above.", null),
+    "",
+    "==================================================================",
+    "Generated by Weather & Celestial Engine · Open-Meteo & Copernicus · " + (langNames[lang] || lang)
+  ].join("\r\n");
 }
 
 function handleStatusEndpoint(params) {
   const unitParam = (params.unit || ICAL_CONFIG.temperatureUnit).toLowerCase();
   const isC = !unitParam.startsWith("f");
   const sym = isC ? "°C" : "°F";
-
-  const stats = computeGlobalModelAccuracy(sym);
+  let stats;
+  try {
+    stats = computeGlobalModelAccuracy(sym);
+  } catch (e) {
+    stats = { tempMAE: "Error", rainMAE: String(e), modelGrade: "N/A", leadCurve: "N/A", verifiedDays: 0, verifiedSnapshots: 0 };
+  }
 
   const statusPayload = {
+    scriptVersion: ICAL_CONFIG.version,
     status: "healthy",
     timestamp: new Date().toISOString(),
     engine: "Deterministic (<14d) + NOAA GFS Ensemble (15-30d) + Copernicus CAMS",
@@ -128,10 +406,12 @@ function handleStatusEndpoint(params) {
       calibrationDaysTracked: stats.verifiedDays || 0,
       snapshotsEvaluated: stats.verifiedSnapshots || 0
     },
+    supportedLanguages: SUPPORTED_LANGS,
     endpoints: {
-      calendarFeed: "?cities=City1,City2",
+      calendarFeed: "?cities=City1,City2&days=14&lang=en",
       customCoordinates: "?locations=Name:Lat:Lon",
-      liveMetrics: "?action=status"
+      liveMetrics: "?action=status",
+      dryRun: "?cities=City&dryRun=true"
     }
   };
 
@@ -143,15 +423,23 @@ function parseLocationsFromParams(e) {
   if (!e || !e.parameter) return [];
   const p = e.parameter;
   const list = [];
+  const failedGeocodes = [];
+  const MAX_INPUT_LEN = 1000;
 
-  if (p.locations) {
-    p.locations.split(",").forEach(entry => {
+  // Apps Script may deliver a query param as an array (e.g. ?cities=A&cities=B).
+  // Coerce to string so downstream .split() and .length are always well-defined.
+  const asString = v => (v == null) ? "" : (Array.isArray(v) ? v.join(",") : String(v));
+
+  if (p.locations && asString(p.locations).length <= MAX_INPUT_LEN) {
+    asString(p.locations).split(",").forEach(entry => {
       const parts = entry.split(":");
       if (parts.length >= 3) {
         const name = parts[0].trim();
         const lat = parseFloat(parts[1]);
         const lon = parseFloat(parts[2]);
-        if (!isNaN(lat) && !isNaN(lon) && name) list.push({ name, lat, lon });
+        if (isValidLatLon(lat, lon) && name) {
+          list.push({ name, lat, lon });
+        }
       }
     });
   }
@@ -159,27 +447,38 @@ function parseLocationsFromParams(e) {
   if (p.lat && p.lon) {
     const lat = parseFloat(p.lat);
     const lon = parseFloat(p.lon);
-    if (!isNaN(lat) && !isNaN(lon)) {
-      list.push({ name: p.name ? p.name.trim() : "Custom Location", lat, lon });
+    if (isValidLatLon(lat, lon)) {
+      const name = (p.name && asString(p.name).trim()) || "Custom Location";
+      list.push({ name, lat, lon });
     }
   }
 
-  if (p.cities) {
-    p.cities.split(",").forEach(cityName => {
-      const trimmed = cityName.trim();
-      if (trimmed) {
-        const geo = geocodeCity(trimmed);
-        if (geo) list.push(geo);
-      }
-    });
+  const geocodeOne = (raw) => {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return;
+    const geo = geocodeCity(trimmed);
+    if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lon)) {
+      list.push(geo);
+    } else {
+      failedGeocodes.push(trimmed);
+    }
+  };
+
+  if (p.cities && asString(p.cities).length <= MAX_INPUT_LEN) {
+    asString(p.cities).split(",").forEach(geocodeOne);
+  }
+  if (p.city && !p.cities && asString(p.city).length <= MAX_INPUT_LEN) {
+    geocodeOne(p.city);
   }
 
-  if (p.city && !p.cities) {
-    const trimmed = p.city.trim();
-    if (trimmed) {
-      const geo = geocodeCity(trimmed);
-      if (geo) list.push(geo);
-    }
+  if (failedGeocodes.length > 0) {
+    Logger.log("parseLocationsFromParams: geocoding failed for: " + failedGeocodes.join(", "));
+  }
+  if (p.locations && asString(p.locations).length > MAX_INPUT_LEN) {
+    Logger.log("parseLocationsFromParams: 'locations' param exceeded " + MAX_INPUT_LEN + " chars — ignored");
+  }
+  if (p.cities && asString(p.cities).length > MAX_INPUT_LEN) {
+    Logger.log("parseLocationsFromParams: 'cities' param exceeded " + MAX_INPUT_LEN + " chars — ignored");
   }
 
   const seen = new Set();
@@ -189,31 +488,60 @@ function parseLocationsFromParams(e) {
     seen.add(key);
     return true;
   });
-  return deduped.slice(0, 4);
+  return deduped.slice(0, ICAL_CONFIG.maxCities);
 }
 
-function generateIcsFeed(locations, temperatureUnit) {
+function generateIcsFeed(locations, temperatureUnit, opts) {
+  const options = Object.assign({ lang:"en", days:ICAL_CONFIG.forecastDays, hazards:true, dryRun:false }, opts || {});
+  const lang = options.lang;
+  const maxDays = clamp(options.days, ICAL_CONFIG.minForecastDays, ICAL_CONFIG.maxForecastDays);
+  const showHazards = options.hazards !== false;
+
+  if (!Array.isArray(locations) || locations.length === 0) {
+    throw new Error("generateIcsFeed: locations array is empty — cannot generate feed");
+  }
+
   const unitSymbol = temperatureUnit === "celsius" ? "°" : "°F";
   const isC = temperatureUnit === "celsius";
   const today = new Date();
   const todayStr = Utilities.formatDate(today, "UTC", "yyyy-MM-dd");
   const todayRef = Utilities.parseDate(todayStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
 
+  const calName = t("calName", lang) || ICAL_CONFIG.calendarName;
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Weather Astronomical Dashboard//EN",
+    "PRODID:-//Weather Astronomical Dashboard//" + lang.toUpperCase(),
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    `X-WR-CALNAME:${escapeIcsText(ICAL_CONFIG.calendarName)}`,
-    "X-WR-TIMEZONE:UTC"
+    `X-WR-CALNAME:${escapeIcsText(calName)}`,
+    "X-WR-TIMEZONE:UTC",
+    `X-WR-CALDESC:Weather + astronomical · v${ICAL_CONFIG.version}`,
+    `X-WR-LANG:${lang}`
   ];
 
-  locations.forEach(loc => {
-    const data = fetchIcsAtmosphericDataParallel(loc, temperatureUnit);
-    if (!data || !data.det || !data.det.time) return;
+  let eventCount = 0;
 
-    for (let offset = 0; offset < ICAL_CONFIG.forecastDays; offset++) {
+  locations.forEach(loc => {
+    let data;
+    try {
+      data = fetchIcsAtmosphericDataParallel(loc, temperatureUnit);
+    } catch (e) {
+      Logger.log(`generateIcsFeed: fetch failed for ${loc.name} — ${e}`);
+      return;
+    }
+    if (!data || !data.det || !data.det.time) {
+      Logger.log(`generateIcsFeed: no daily data for ${loc.name}; skipping`);
+      return;
+    }
+
+    // Hoist ensemble key lists so the per-offset loop doesn't re-scan Object.keys
+    // and re-filter for every day (saves O(offsets × modelKeys) work per location).
+    const ensMaxKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max")) : [];
+    const ensMinKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min")) : [];
+
+    const offsetLimit = Math.min(maxDays, data.det.time.length);
+    for (let offset = 0; offset < offsetLimit; offset++) {
       const targetDate = new Date(todayRef.getTime() + offset * 24 * 60 * 60 * 1000);
       const dateKey = Utilities.formatDate(targetDate, "UTC", "yyyy-MM-dd");
       const icsDate = Utilities.formatDate(targetDate, "UTC", "yyyyMMdd");
@@ -261,39 +589,40 @@ function generateIcsFeed(locations, temperatureUnit) {
           sunsetStr = data.det.sunset[idx].slice(11, 16);
           const rDate = new Date(data.det.sunrise[idx]);
           const sDate = new Date(data.det.sunset[idx]);
-          const dMins = Math.round((sDate - rDate) / 60000);
+          const dMins = Math.max(0, Math.round((sDate - rDate) / 60000));
           daylightFormatted = `${Math.floor(dMins / 60)}h ${dMins % 60}m`;
         }
 
         const certaintyGlyph = getWeatherGlyph(weatherCode);
         title = `${certaintyGlyph} ${currentMax}${unitSymbol} ${loc.name}`;
-        modelLabel = `Deterministic (D-${offset === 0 ? "0" : offset})`;
-      } else if (data.ens && data.ens.time) {
+        modelLabel = `${t("mDet", lang)} (D-${offset === 0 ? "0" : offset})`;
+      } else if (data.ens && data.ens.time && ensMaxKeys.length > 0) {
         const ensIdx = data.ens.time.indexOf(dateKey);
         if (ensIdx !== -1) {
-          const maxKeys = Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max"));
-          const minKeys = Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min"));
-          const maxVals = maxKeys.map(k => data.ens[k][ensIdx]).filter(v => v !== null && !isNaN(v));
-          const minVals = minKeys.map(k => data.ens[k][ensIdx]).filter(v => v !== null && !isNaN(v));
+          const maxVals = ensMaxKeys.map(k => data.ens[k][ensIdx]).filter(v => v !== null && !isNaN(v));
+          const minVals = ensMinKeys.map(k => data.ens[k][ensIdx]).filter(v => v !== null && !isNaN(v));
 
           if (maxVals.length > 0) {
-            currentMax = Math.round(maxVals.reduce((a, b) => a + b, 0) / maxVals.length);
-            currentMin = Math.round(minVals.reduce((a, b) => a + b, 0) / minVals.length);
+            const meanMax = maxVals.reduce((a, b) => a + b, 0) / maxVals.length;
+            const meanMin = minVals.reduce((a, b) => a + b, 0) / minVals.length;
+            currentMax = Math.round(meanMax);
+            currentMin = Math.round(meanMin);
             apparentMax = currentMax;
-            const variance = maxVals.reduce((a, b) => a + Math.pow(b - currentMax, 2), 0) / maxVals.length;
+            // Variance must use the unrounded mean; rounding first biases the result
+            // (a quantized mean shrinks the squared deviation toward zero).
+            const variance = maxVals.reduce((a, b) => a + Math.pow(b - meanMax, 2), 0) / maxVals.length;
             spreadVal = Math.max(1, Math.round(Math.sqrt(variance)));
             const certaintyGlyph = spreadVal <= 2 ? "🎯" : (spreadVal <= 4 ? "⚖️" : "🎲");
             currentRain = (data.ens.precipitation_sum ? data.ens.precipitation_sum[ensIdx] : 0) || 0;
             soilTempMin = currentMin;
             title = `${certaintyGlyph} ~${currentMax}${unitSymbol} ${loc.name} (±${spreadVal}${unitSymbol})`;
-            modelLabel = `NOAA Ensemble (D-${offset})`;
+            modelLabel = `${t("mEns", lang)} (D-${offset})`;
           }
         }
       }
 
       if (currentMax === null) continue;
 
-      // Parse Global Air Quality
       let aqiVal = null, aqiType = "AQI", pm25Val = null, pm10Val = null, pollenVal = null;
       if (data.aq && data.aq.time) {
         const aqIdx = data.aq.time.indexOf(dateKey);
@@ -314,109 +643,100 @@ function generateIcsFeed(locations, temperatureUnit) {
           pollenVal = Math.round(Math.max(birch, grass, alder));
         }
       }
+      const aqiTypeKey = aqiType === "USAQI" ? "USAQI" : (aqiType === "EAQI" ? "EAQI" : "AQI");
 
-      const astroEvent = getAstronomicalEvents(dateKey);
+      const astroEvent = getAstronomicalEventsForYear(dateKey, targetDate.getUTCFullYear());
       const moonInfo = getMoonPhaseDetails(targetDate);
-      const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, dateKey, cloudCover);
+      const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, dateKey, cloudCover, lang);
       const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
 
       const pressureAtm = (pressure / 1013.25).toFixed(2);
       const aggregates = computeContinuousMultiDayAggregates(data, dateKey, isC);
-      const gddNote = getGddAction(aggregates.sevenDayGDD);
+      const gddNote = getGddAction(aggregates.sevenDayGDD, lang);
 
       const lead = offset;
       const expectedErr = lead <= 3 ? 0.8 : (lead <= 7 ? 1.7 : (lead <= 14 ? 2.9 : 4.3));
-      const modelAuditStatus = lead === 0 
-        ? "🎯 Ground-Truth (Live)" 
-        : (lead <= 3 ? "🟢 D1-3 High" : (lead <= 7 ? "🟡 D4-7 Medium" : (lead <= 14 ? "🟠 D8-14 Extended" : "🎲 D15+ Ensemble")));
+      const modelAuditStatus = lead === 0
+        ? t("lGt", lang)
+        : (lead <= 3 ? t("lS", lang) : (lead <= 7 ? t("lM", lang) : (lead <= 14 ? t("lL", lang) : t("lN", lang))));
 
       const adviceContext = {
-        tempMax: currentMax,
-        tempMin: currentMin,
-        apparentMax: apparentMax,
-        rainProb: rainProb,
-        rainVol: currentRain,
-        wind: currentWind,
-        aqi: aqiVal,
-        aqiType: aqiType,
-        uv: uvIndex,
-        pollen: pollenVal,
-        weatherCode: weatherCode,
-        et0: et0,
-        isC: isC
+        tempMax: currentMax, tempMin: currentMin, apparentMax: apparentMax,
+        rainProb: rainProb, rainVol: currentRain, wind: currentWind,
+        aqi: aqiVal, aqiType: aqiType, uv: uvIndex, pollen: pollenVal,
+        weatherCode: weatherCode, et0: et0, isC: isC, lang: lang
       };
       const prioritizedAdvice = generatePrioritizedAdvices(adviceContext);
 
-      const sections = [
-        [
-          `📍 ${loc.name}`,
-          `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${dateKey}`
-        ].join("\n"),
+      const header = `${t("pin", lang) || "📍"} ${loc.name}\n${t("cal", lang) || "📅"} ${offset === 0 ? t("dDay", lang) : `D-${offset}`} · ${dateKey}`;
 
-        [
-          `🌡️ TEMPERATURE & COMFORT`,
-          `• Range: ${currentMin}${unitSymbol} ➔ ${currentMax}${unitSymbol} (${getThermalText(currentMax, isC)})`,
-          `• Sensation: Feels ~${apparentMax}${unitSymbol}${dewPoint !== null ? ` · Dew: ${dewPoint}${unitSymbol}` : ""}`,
-          humidity !== null ? `• Humidity: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity)})` : ``,
-          offset >= ICAL_CONFIG.deterministicDays
-            ? `• Consensus: ±${spreadVal}${unitSymbol}`
-            : `• Rain: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
-          offset < ICAL_CONFIG.deterministicDays
-            ? `• Wind: ${currentWind} km/h${windGusts > currentWind ? ` (Gusts ${windGusts} km/h)` : ""}`
-            : ``,
-          offset < ICAL_CONFIG.deterministicDays ? `• Barometer: ${pressureAtm} atm` : ``
-        ].filter(Boolean).join("\n"),
+      const tempSec = [
+        `🌡️ ${tSection("secTemp", lang)}`,
+        `• ${t("range", lang)}: ${currentMin}${unitSymbol} ➔ ${currentMax}${unitSymbol} (${getThermalText(currentMax, isC, lang)})`,
+        `• ${t("feels", lang)}: ~${apparentMax}${unitSymbol}${dewPoint !== null ? ` · ${t("dew", lang)}: ${dewPoint}${unitSymbol}` : ""}`,
+        humidity !== null ? `• ${t("humid", lang)}: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity, lang)})` : ``,
+        offset >= ICAL_CONFIG.deterministicDays
+          ? `• ${t("consensus", lang)}: ±${spreadVal}${unitSymbol}`
+          : `• ${t("rain", lang)}: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
+        offset < ICAL_CONFIG.deterministicDays && windGusts > 0
+          ? `• ${t("wind", lang)}: ${currentWind} km/h (${t("gusts", lang)} ${windGusts} km/h)`
+          : (offset < ICAL_CONFIG.deterministicDays ? `• ${t("wind", lang)}: ${currentWind} km/h` : ``),
+        offset < ICAL_CONFIG.deterministicDays ? `• ${t("baro", lang)}: ${pressureAtm} atm` : ``
+      ].filter(Boolean).join("\n");
 
-        [
-          `☀️ SUN & CELESTIAL`,
-          astroEvent ? `• ${astroEvent}` : ``,
-          `• Daylight: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
-          `• Golden Hr: ~${getGoldenHourWindow(sunsetStr)}`,
-          cloudCover !== null ? `• Cloud Cover: ${cloudCover}%` : ``,
-          `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
-          `• Stargazing: ${stargazing}`,
-          uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
-          et0 > 0 ? `• Evapotranspiration: ${et0.toFixed(1)} mm` : ``,
-          radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
-        ].filter(Boolean).join("\n"),
+      const sunSec = [
+        `☀️ ${tSection("secSun", lang)}`,
+        astroEvent ? `• ${astroEvent}` : ``,
+        `• ${t("daylight", lang)}: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
+        `• ${t("goldenHr", lang)}: ~${getGoldenHourWindow(sunsetStr)}`,
+        cloudCover !== null ? `• ${t("cloud", lang)}: ${cloudCover}%` : ``,
+        `• ${t("moon", lang)}: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
+        `• ${t("star", lang)}: ${stargazing}`,
+        uvIndex > 0 ? `• ${t("uv", lang)}: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex, lang)})` : ``,
+        et0 > 0 ? `• ${t("et", lang)}: ${et0.toFixed(1)} mm` : ``,
+        radiation > 0 ? `• ${t("rad", lang)}: ${radiation.toFixed(1)} MJ/m²` : ``
+      ].filter(Boolean).join("\n");
 
-        [
-          `🧪 AIR QUALITY & BIO`,
-          aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)})` : `• AQI: Monitoring`,
-          pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
-          pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
-        ].filter(Boolean).join("\n"),
+      const airSec = [
+        `🧪 ${tSection("secAir", lang)}`,
+        aqiVal !== null
+          ? `• ${t("aqi", lang)}: ${aqiVal} ${getAqiGlyph(aqiVal, aqiTypeKey)} (${getAqiLabel(aqiVal, aqiTypeKey, lang)}) [${aqiTypeKey}]`
+          : `• ${t("aqi", lang)}: ${t("mon", lang)}`,
+        pm25Val !== null ? `• ${t("pm25", lang)}: ${pm25Val} · ${t("pm10", lang)}: ${pm10Val || "--"} µg/m³` : ``,
+        pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³` : `• ${t("pollen", lang)}: ${t("polLow", lang)}`
+      ].filter(Boolean).join("\n");
 
-        [
-          `📅 7-DAY AGGREGATE`,
-          `• Rain Sum: ${aggregates.sevenDayRain} mm`,
-          `• Mean Temp: ${aggregates.sevenDayMeanTemp}${unitSymbol}`,
-          `• Growing Deg: ${aggregates.sevenDayGDD} GDD (${gddNote})`,
-          `• 7-Day Mean AQI: ${aggregates.sevenDayAqi}`
-        ].join("\n"),
+      const aggSec = [
+        `📅 ${tSection("secAgg", lang)}`,
+        `• ${t("rainSum", lang)}: ${aggregates.sevenDayRain} mm`,
+        `• ${t("meanTemp", lang)}: ${aggregates.sevenDayMeanTemp}${unitSymbol}`,
+        `• ${t("gdd", lang)}: ${aggregates.sevenDayGDD} (${gddNote})`,
+        `• ${t("aqi7", lang)}: ${aggregates.sevenDayAqi}`
+      ].join("\n");
 
-        [
-          `📉 MODEL AUDIT`,
-          `• Status: ${modelAuditStatus}`,
-          `• Expected Lead Drift: ±${expectedErr.toFixed(1)}${unitSymbol}`,
-          `• Lead Curve: D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°`
-        ].join("\n")
-      ];
+      const auditSec = [
+        `📉 ${tSection("secAudit", lang)}`,
+        `• ${t("status", lang)}: ${modelAuditStatus}`,
+        `• ${t("drift", lang)}: ±${expectedErr.toFixed(1)}${unitSymbol}`,
+        `• ${t("lS", lang).split(" ")[0]}:±0.8° · ${t("lM", lang).split(" ")[0]}:±1.7° · ${t("lL", lang).split(" ")[0]}:±2.9° · ${t("lN", lang).split(" ")[0]}:±4.3°`
+      ].join("\n");
 
-      if (tempMinInC <= 7) {
-        const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC);
+      const sections = [header, tempSec, sunSec, airSec, aggSec, auditSec];
+
+      if (showHazards && tempMinInC <= 7) {
+        const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC, lang);
         sections.push([
-          `🚗 ROAD SAFETY (<=7°C)`,
-          `• Status: ${roadHazard.status}`,
-          `• Ground: ${Math.round(soilTempMin)}${unitSymbol} (${roadHazard.advisory})`
+          `🚗 ${tSection("secRoad", lang)} (<=7°C)`,
+          `• ${t("status", lang)}: ${roadHazard.status}`,
+          `• ${t("ground", lang)}: ${Math.round(soilTempMin)}${unitSymbol} (${roadHazard.advisory})`
         ].join("\n"));
       }
 
       sections.push([
-        `💡 ACTIONABLE ADVICE`,
+        `💡 ${tSection("secAdvice", lang)}`,
         prioritizedAdvice.map(adv => `• ${adv}`).join("\n"),
         ``,
-        `ℹ️ Engine: ${modelLabel}`
+        `ℹ️ ${t("engine", lang)}: ${modelLabel}`
       ].join("\n"));
 
       const fullDesc = sections.join("\n\n");
@@ -432,8 +752,16 @@ function generateIcsFeed(locations, temperatureUnit) {
       lines.push("STATUS:CONFIRMED");
       lines.push("TRANSP:TRANSPARENT");
       lines.push("END:VEVENT");
+      eventCount++;
     }
   });
+
+  if (eventCount === 0) {
+    throw new Error(
+      "generateIcsFeed: no events generated for " + locations.length + " location(s). " +
+      "Check API responses, geocoding results, and date filters."
+    );
+  }
 
   lines.push("END:VCALENDAR");
   return foldIcsLines(lines);
@@ -445,19 +773,25 @@ function escapeIcsText(str) {
     .replace(/\\/g, "\\\\")
     .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
-    .replace(/\r?\n/g, "\\n");
+    .replace(/\r/g, "");
 }
 
 function foldIcsLines(lines) {
+  // RFC 5545 §3.1: lines must not exceed 75 octets. Handle UTF-8 by counting
+  // each code unit; non-ASCII characters use 2-4 octets so we estimate conservatively.
+  const octets = (s) => { let n = 0; for (let i = 0; i < s.length; i++) n += s.charCodeAt(i) < 128 ? 1 : 2; return n; };
   return lines.map(line => {
-    if (line.length <= 75) return line;
+    if (octets(line) <= 75) return line;
     let out = "";
     let rest = line;
     let first = true;
     while (rest.length > 0) {
-      const limit = first ? 75 : 74;
-      out += (first ? "" : "\r\n ") + rest.slice(0, limit);
-      rest = rest.slice(limit);
+      let budget = first ? 75 : 74;
+      let used = 0;
+      let oct = 0;
+      while (used < rest.length && oct < budget) { oct += rest.charCodeAt(used) < 128 ? 1 : 2; used++; }
+      out += (first ? "" : "\r\n ") + rest.slice(0, used);
+      rest = rest.slice(used);
       first = false;
     }
     return out;
@@ -473,15 +807,18 @@ function fetchIcsAtmosphericDataParallel(loc, unit) {
 
   try {
     const responses = UrlFetchApp.fetchAll([
-      { url: dUrl, muteHttpExceptions: true },
-      { url: hUrl, muteHttpExceptions: true },
-      { url: eUrl, muteHttpExceptions: true },
-      { url: aqUrl, muteHttpExceptions: true }
+      { url: dUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS },
+      { url: hUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS },
+      { url: eUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS },
+      { url: aqUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
     ]);
 
     if (responses[0].getResponseCode() === 200) result.det = JSON.parse(responses[0].getContentText()).daily;
+    else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} deterministic returned HTTP ${responses[0].getResponseCode()}`);
     if (responses[2].getResponseCode() === 200) result.ens = JSON.parse(responses[2].getContentText()).daily;
+    else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} ensemble returned HTTP ${responses[2].getResponseCode()}`);
     if (responses[3].getResponseCode() === 200) result.aq = JSON.parse(responses[3].getContentText()).daily;
+    else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} air-quality returned HTTP ${responses[3].getResponseCode()}`);
 
     if (responses[1].getResponseCode() === 200) {
       const hData = JSON.parse(responses[1].getContentText()).hourly;
@@ -521,7 +858,10 @@ function fetchIcsAtmosphericDataParallel(loc, unit) {
 
 function geocodeCity(name) {
   try {
-    const res = UrlFetchApp.fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`, { muteHttpExceptions: true });
+    const res = UrlFetchApp.fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`,
+      { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
+    );
     const data = JSON.parse(res.getContentText()).results;
     if (data && data.length) {
       return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
@@ -531,31 +871,42 @@ function geocodeCity(name) {
 }
 
 function norm(str) {
-  if (!str) return "";
-  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (str == null) return "";
+  return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
-function getGddAction(gdd) {
+function isValidLatLon(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon) &&
+         Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+}
+
+function getGddAction(gdd, lang) {
+  lang = lang || "en";
   const g = Number(gdd) || 0;
-  if (g === 0) return "Dormant";
-  if (g < 25) return "Cool greens active";
-  if (g < 60) return "Steady root foliage";
-  if (g < 100) return "Brassicas booming";
-  return "Peak warm growth";
+  if (g === 0) return t("gddDorm", lang);
+  if (g < 25) return t("gddCool", lang);
+  if (g < 60) return t("gddFoli", lang);
+  if (g < 100) return t("gddBrss", lang);
+  return t("gddPeak", lang);
 }
 
-function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
+function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
   let totalRain = 0, totalMax = 0, totalMin = 0, gddSum = 0, wDays = 0;
   const base10 = isC ? 10 : 50;
 
-  const baseDate = Utilities.parseDate(baseDateStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
+  const tz = calTz || "UTC";
+  const baseDate = Utilities.parseDate(baseDateStr + " 12:00:00", tz, "yyyy-MM-dd HH:mm:ss");
 
   // Build the 7-day date list once and reuse for both temp and AQI lookups.
   const dateKeys = [];
   for (let d = 0; d < 7; d++) {
     const curDate = new Date(baseDate.getTime() + d * 24 * 60 * 60 * 1000);
-    dateKeys.push(Utilities.formatDate(curDate, "UTC", "yyyy-MM-dd"));
+    dateKeys.push(Utilities.formatDate(curDate, tz, "yyyy-MM-dd"));
   }
+
+  // Hoist ensemble key lists out of the per-day loop.
+  const ensMaxKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max")) : [];
+  const ensMinKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min")) : [];
 
   dateKeys.forEach(dStr => {
     let maxT = null, minT = null, r = 0;
@@ -569,13 +920,11 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
       }
     }
 
-    if (maxT === null && data.ens && data.ens.time) {
+    if (maxT === null && ensMaxKeys.length > 0 && data.ens && data.ens.time) {
       const idx = data.ens.time.indexOf(dStr);
       if (idx !== -1) {
-        const maxKeys = Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max"));
-        const minKeys = Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min"));
-        const maxVals = maxKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
-        const minVals = minKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
+        const maxVals = ensMaxKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
+        const minVals = ensMinKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
 
         if (maxVals.length > 0) {
           maxT = maxVals.reduce((a, b) => a + b, 0) / maxVals.length;
@@ -638,8 +987,11 @@ function computeGlobalModelAccuracy(sym) {
         const actRain = record.actual.rain;
 
         record.snapshots.forEach(snap => {
+          // Defensive: skip snapshots with missing predicted values rather than
+          // poisoning the running error totals with NaN.
+          if (typeof snap.predictedMax !== "number" || typeof actMax !== "number") return;
           const tErr = Math.abs(snap.predictedMax - actMax);
-          const rErr = Math.abs((snap.predictedRain || 0) - actRain);
+          const rErr = Math.abs((typeof snap.predictedRain === "number" ? snap.predictedRain : 0) - (typeof actRain === "number" ? actRain : 0));
           totalTempError += tErr;
           totalRainError += rErr;
           verifiedSnapshots++;
@@ -689,200 +1041,406 @@ function computeGlobalModelAccuracy(sym) {
   };
 }
 
+const ADVICE_TEXTS = {
+  "allergyHigh": {
+    "en": "Pollen burst — antihistamines advised",
+    "zh": "花粉高发 — 建议服用抗组胺药",
+    "hi": "पराग कण — एंटीहिस्टामाइन लें",
+    "es": "Polen alto — tomar antihistamínicos",
+    "fr": "Pic de pollen — antihistaminiques",
+    "ar": "ذروة حبوب اللقاح — مضادات الهيستامين",
+    "de": "Pollen-Belastung — Antihistaminika",
+    "nl": "Pollenexplosie — antihistaminica",
+  },
+  "allergyMod": {
+    "en": "Moderate pollen — sensitive groups take care",
+    "zh": "中度花粉 — 敏感人群请注意",
+    "hi": "मध्यम पराग — संवेदनशील लोग सावधान",
+    "es": "Polen moderado — sensibles con cuidado",
+    "fr": "Pollen modéré — groupes sensibles",
+    "ar": "حبوب لقاح معتدلة — احذر",
+    "de": "Mäßiger Pollen — Empfindliche achten",
+    "nl": "Matig pollen — gevoeligen opgelet",
+  },
+  "uvExtreme": {
+    "en": "UV extreme — SPF 50+, hat essential",
+    "zh": "紫外线极强 — SPF 50+ 与遮阳帽必备",
+    "hi": "UV अत्यधिक — SPF 50+ और टोपी ज़रूरी",
+    "es": "UV extremo — SPF 50+ y sombrero",
+    "fr": "UV extrême — SPF 50+ et chapeau",
+    "ar": "UV شديد — SPF 50+ وقبعة",
+    "de": "UV extrem — LSF 50+ und Hut",
+    "nl": "UV extreem — SPF 50+ en hoed",
+  },
+  "uvHigh": {
+    "en": "UV high — sunscreen & sunglasses",
+    "zh": "紫外线强 — 防晒霜与墨镜",
+    "hi": "UV उच्च — सनस्क्रीन और धूप का चश्मा",
+    "es": "UV alto — protector y gafas",
+    "fr": "UV élevé — crème solaire",
+    "ar": "UV مرتفع — واقي شمس",
+    "de": "UV hoch — Sonnencreme",
+    "nl": "UV hoog — zonnebrand",
+  },
+  "uvMod": {
+    "en": "UV moderate — cover-up midday",
+    "zh": "紫外线中等 — 正午遮阳",
+    "hi": "UV मध्यम — दोपहर छाया लें",
+    "es": "UV moderado — cubrirse al mediodía",
+    "fr": "UV modéré — couvrir midi",
+    "ar": "UV معتدل — غطّ نفسك",
+    "de": "UV mäßig — Mittag beschatten",
+    "nl": "UV matig — bedekken",
+  },
+  "aqiHazard": {
+    "en": "Air hazardous — N95 mask, indoor only",
+    "zh": "空气危险 — 戴 N95 口罩并留在室内",
+    "hi": "हवा खतरनाक — N95 मास्क, अंदर ही रहें",
+    "es": "Aire peligroso — N95, en interiores",
+    "fr": "Air dangereux — masque N95",
+    "ar": "هواء خطير — كمامة N95",
+    "de": "Luft gefährlich — N95",
+    "nl": "Lucht gevaarlijk — N95",
+  },
+  "aqiUnh": {
+    "en": "Air unhealthy — limit outdoor time",
+    "zh": "空气不健康 — 减少户外活动",
+    "hi": "हवा अस्वस्थ — बाहर कम रहें",
+    "es": "Aire no saludable — limita salidas",
+    "fr": "Air malsain — limiter le dehors",
+    "ar": "هواء غير صحي — قلّل الخروج",
+    "de": "Luft ungesund — draußen reduzieren",
+    "nl": "Lucht ongezond — beperk buiten",
+  },
+  "aqiSens": {
+    "en": "Air unhealthy for sensitive — reduce exertion",
+    "zh": "敏感人群不健康 — 减少运动",
+    "hi": "संवेदनशीलों के लिए अस्वस्थ — कम परिश्रम",
+    "es": "Malsano para sensibles — menos esfuerzo",
+    "fr": "Malsain pour sensibles — moins d'effort",
+    "ar": "غير صحي للحساسين — أقل جهد",
+    "de": "Ungesund für Sensitive — weniger Anstrengung",
+    "nl": "Ongezond voor gevoeligen",
+  },
+  "humidHigh": {
+    "en": "Muggy — stay hydrated, light clothes",
+    "zh": "闷热 — 多喝水，穿轻薄衣物",
+    "hi": "उमस भरा — पानी पीएँ, हल्के कपड़े",
+    "es": "Bochornoso — hidrátate, ropa ligera",
+    "fr": "Lourd — hydrater, vêtements légers",
+    "ar": "رطب — اشرب الماء",
+    "de": "Schwül — trinken, leichte Kleidung",
+    "nl": "Zwoel — drink water",
+  },
+  "humidLow": {
+    "en": "Dry air — lip balm & moisturize",
+    "zh": "空气干燥 — 润唇与保湿",
+    "hi": "सूखी हवा — लिप बाम और मॉइस्चराइज़र",
+    "es": "Aire seco — bálsamo e hidratación",
+    "fr": "Air sec — baume et crème",
+    "ar": "هواء جاف — بلسم ومرطب",
+    "de": "Trockene Luft — Balsam",
+    "nl": "Droge lucht — balsem",
+  },
+  "windStrong": {
+    "en": "Strong winds — secure loose items",
+    "zh": "大风 — 固定松散物品",
+    "hi": "तेज़ हवा — ढीली चीज़ें सुरक्षित करें",
+    "es": "Viento fuerte — asegura objetos",
+    "fr": "Vent fort — fixer les objets",
+    "ar": "رياح قوية — ثبّت الأشياء",
+    "de": "Starker Wind — sichern",
+    "nl": "Harde wind — bevestig losse spullen",
+  },
+  "windGust": {
+    "en": "Gusty — cycle/pedestrian caution",
+    "zh": "阵风 — 骑车与行人请小心",
+    "hi": "हवा के झोंके — सावधानी",
+    "es": "Ráfagas — precaución",
+    "fr": "Rafales — prudence",
+    "ar": "هبّات — حذر",
+    "de": "Böen — Vorsicht",
+    "nl": "Windstoten — voorzichtig",
+  },
+  "frost": {
+    "en": "Frost likely — cover plants, icy roads",
+    "zh": "可能出现霜冻 — 覆盖植物，路面结冰",
+    "hi": "पाला संभव — पौधे ढकें, सड़क बर्फ़ीली",
+    "es": "Helada probable — cubre plantas",
+    "fr": "Gel probable — couvrir plantes",
+    "ar": "صقيع محتمل — غطّ النباتات",
+    "de": "Frost möglich — Pflanzen abdecken",
+    "nl": "Vorst mogelijk — planten bedekken",
+  },
+  "freezeHard": {
+    "en": "Hard freeze — disconnect hoses, protect pipes",
+    "zh": "严寒 — 断开水管，保护管道",
+    "hi": "कठोर पाला — पाइप सुरक्षित करें",
+    "es": "Helada fuerte — desconecta mangueras",
+    "fr": "Grand gel — débrancher tuyaux",
+    "ar": "صقيع قاسٍ — افصل الخراطيم",
+    "de": "Starkfrost — Schläuche trennen",
+    "nl": "Harde vorst — slangen los",
+  },
+  "heat": {
+    "en": "Hot — shade, electrolytes",
+    "zh": "炎热 — 阴凉处，电解质饮料",
+    "hi": "गर्मी — छाया, इलेक्ट्रोलाइट्स",
+    "es": "Calor — sombra, electrolitos",
+    "fr": "Chaud — ombre, électrolytes",
+    "ar": "حار — ظلّ",
+    "de": "Hitze — Schatten, Elektrolyte",
+    "nl": "Warmte — schaduw",
+  },
+  "heatWarn": {
+    "en": "Heat warning — check on elderly/pets",
+    "zh": "高温警报 — 关注老人与宠物",
+    "hi": "गर्मी चेतावनी — बुज़ुर्ग/पालतू देखें",
+    "es": "Aviso de calor — revisa mayores",
+    "fr": "Alerte chaleur — personnes âgées",
+    "ar": "تحذير حرارة — اهتم بكبار السن",
+    "de": "Hitzewarnung — Senioren/Tiere",
+    "nl": "Hittewaarschuwing — ouderen",
+  },
+  "stormSevere": {
+    "en": "Severe storms — stay indoors, charge devices",
+    "zh": "强风暴 — 留在室内，给设备充电",
+    "hi": "भीषण तूफ़ान — अंदर रहें",
+    "es": "Tormentas severas — en interior",
+    "fr": "Orages violents — rester à l'intérieur",
+    "ar": "عواصف شديدة — ابق بالداخل",
+    "de": "Schwere Stürme — drinnen bleiben",
+    "nl": "Zware storm — binnen blijven",
+  },
+  "snowHeavy": {
+    "en": "Heavy snow — avoid non-essential travel",
+    "zh": "大雪 — 避免非必要出行",
+    "hi": "भारी बर्फ़ — अनावश्यक यात्रा टालें",
+    "es": "Nieve fuerte — evita viajes",
+    "fr": "Forte neige — éviter les voyages",
+    "ar": "ثلج كثيف — تجنّب السفر",
+    "de": "Starker Schnee — Reisen meiden",
+    "nl": "Zware sneeuw — reis vermijden",
+  },
+  "ice": {
+    "en": "Ice — slow commute, layered grip",
+    "zh": "结冰 — 减速慢行",
+    "hi": "बर्फ़ — धीमी ड्राइविंग",
+    "es": "Hielo — conduce despacio",
+    "fr": "Verglas — conduire lentement",
+    "ar": "جليد — قُد ببطء",
+    "de": "Eis — langsam fahren",
+    "nl": "Ijs — langzaam rijden",
+  },
+  "fog": {
+    "en": "Fog — low-beam, extra following distance",
+    "zh": "大雾 — 近光灯，保持车距",
+    "hi": "कोहरा — लो-बीम, दूरी",
+    "es": "Niebla — luces cortas",
+    "fr": "Brouillard — feux de croisement",
+    "ar": "ضباب — أضواء منخفضة",
+    "de": "Nebel — Abblendlicht",
+    "nl": "Mist — dimlicht",
+  },
+  "airQualPoor": {
+    "en": "Poor air — postpone outdoor exercise",
+    "zh": "空气质量差 — 推迟户外运动",
+    "hi": "ख़राब हवा — बाहर व्यायाम टालें",
+    "es": "Aire pobre — posponer ejercicio",
+    "fr": "Air mauvais — reporter l'exercice",
+    "ar": "هواء سيئ — أجّل الرياضة",
+    "de": "Schlechte Luft — Sport verschieben",
+    "nl": "Slechte lucht — sport uitstellen",
+  },
+  "pollenHigh": {
+    "en": "Tree pollen high — allergy meds advised",
+    "zh": "树花粉高 — 建议服用过敏药",
+    "hi": "वृक्ष पराग उच्च — एलर्जी दवा",
+    "es": "Polen de árbol alto",
+    "fr": "Pollen d'arbre élevé",
+    "ar": "حبوب أشجار مرتفعة",
+    "de": "Baumpollen hoch",
+    "nl": "Boompollen hoog",
+  },
+  "moonFull": {
+    "en": "Full moon — vivid stargazing pre-dawn",
+    "zh": "满月 — 黎明前观星佳",
+    "hi": "पूर्णिमा — भोर में तारे",
+    "es": "Luna llena — observación pre-amanecer",
+    "fr": "Pleine lune — observation",
+    "ar": "بدر — مراقبة النجوم",
+    "de": "Vollmond — Sternbeobachtung",
+    "nl": "Volle maan — sterren kijken",
+  },
+  "moonNew": {
+    "en": "New moon — peak stargazing",
+    "zh": "新月 — 最佳观星",
+    "hi": "अमावस्या — उत्तम तारा",
+    "es": "Luna nueva — observación óptima",
+    "fr": "Nouvelle lune — observation optimale",
+    "ar": "محاق — ذروة المراقبة",
+    "de": "Neumond — optimale Beobachtung",
+    "nl": "Nieuwe maan — optimaal",
+  },
+  "uvLow": {
+    "en": "UV low — no protection needed",
+    "zh": "紫外线低 — 无需防护",
+    "hi": "UV कम — सुरक्षा ज़रूरी नहीं",
+    "es": "UV bajo — sin protección",
+    "fr": "UV bas — pas de protection",
+    "ar": "UV منخفض",
+    "de": "UV niedrig",
+    "nl": "UV laag",
+  },
+};
+function adv(key, lang) {
+  const entry = ADVICE_TEXTS[key];
+  if (!entry) return key;
+  return entry[lang] || entry.en || key;
+}
 function generatePrioritizedAdvices(ctx) {
   const isC = ctx.isC;
+  const lang = ctx.lang || "en";
   const maxC = isC ? ctx.tempMax : (ctx.tempMax - 32) * (5 / 9);
   const minC = isC ? ctx.tempMin : (ctx.tempMin - 32) * (5 / 9);
   const appC = isC ? ctx.apparentMax : (ctx.apparentMax - 32) * (5 / 9);
+  const uvMax = (typeof ctx.uv === "number") ? ctx.uv : ctx.uvMax;
 
   const pool = [];
 
-  if ([95, 96, 99].includes(ctx.weatherCode)) {
-    pool.push({ p: 100, text: "Thunderstorm warning: seek sturdy shelter ⚡" });
-  }
-  if (ctx.wind >= 60) {
-    pool.push({ p: 98, text: "Gale force winds: secure loose outdoor items 🚩" });
-  } else if (ctx.wind >= 40) {
-    pool.push({ p: 85, text: "Strong crosswinds: hold two-wheelers steady 💨" });
-  }
-  if (ctx.rainVol >= 25) {
-    pool.push({ p: 95, text: "Torrential rain: watch for road ponding 🌊" });
-  } else if (ctx.rainVol >= 8 || ctx.rainProb >= 70) {
-    pool.push({ p: 75, text: "Sustained rainfall: waterproof footwear & umbrella ☔" });
-  } else if (ctx.rainProb >= 40 || ctx.rainVol >= 1.5) {
-    pool.push({ p: 60, text: "Scattered showers expected: keep umbrella handy 🌂" });
+  if (ctx.aqi !== null && ctx.aqiType === "USAQI" && ctx.aqi > 200) {
+    pool.push({ p: 95, text: adv("aqiHazard", lang) });
+  } else if (ctx.aqi !== null && ctx.aqiType === "USAQI" && ctx.aqi > 150) {
+    pool.push({ p: 90, text: adv("aqiUnh", lang) });
+  } else if (ctx.aqi !== null && ctx.aqiType === "USAQI" && ctx.aqi > 100) {
+    pool.push({ p: 80, text: adv("aqiSens", lang) });
   }
 
-  if (appC >= 38 || maxC >= 36) {
-    pool.push({ p: 92, text: "Dangerously extreme heat: stay indoors in AC 🚨" });
+  if (typeof uvMax === "number" && uvMax >= 8) {
+    pool.push({ p: 90, text: adv("uvExtreme", lang) });
+  } else if (typeof uvMax === "number" && uvMax >= 6) {
+    pool.push({ p: 70, text: adv("uvHigh", lang) });
+  } else if (typeof uvMax === "number" && uvMax >= 3) {
+    pool.push({ p: 40, text: adv("uvMod", lang) });
+  } else if (typeof uvMax === "number" && uvMax < 2) {
+    pool.push({ p: 5, text: adv("uvLow", lang) });
+  }
+
+  if (minC <= 0) {
+    pool.push({ p: 85, text: adv("freezeHard", lang) });
+  } else if (minC <= 2) {
+    pool.push({ p: 60, text: adv("frost", lang) });
+  }
+  if (appC >= 35) {
+    pool.push({ p: 88, text: adv("heatWarn", lang) });
   } else if (maxC >= 30) {
-    pool.push({ p: 78, text: "Elevated heat stress: hydrate regularly & seek shade 🥤" });
+    pool.push({ p: 60, text: adv("heat", lang) });
   }
-  if (minC <= -5) {
-    pool.push({ p: 90, text: "Deep sub-zero freeze: protect outdoor pipes & taps 🧊" });
-  } else if (minC <= 0) {
-    pool.push({ p: 82, text: "Overnight frost: cover sensitive patio plants 🪴" });
+  if (typeof ctx.wind === "number" && ctx.wind >= 12) {
+    pool.push({ p: 50, text: adv("windGust", lang) });
   }
-
-  const isAqiHazard = ctx.aqiType === "USAQI" ? ctx.aqi >= 150 : ctx.aqi >= 75;
-  const isAqiElevated = ctx.aqiType === "USAQI" ? ctx.aqi >= 100 : ctx.aqi >= 50;
-
-  if (ctx.aqi && isAqiHazard) {
-    pool.push({ p: 88, text: "Hazardous air: wear N95/mask & run indoor filters 😷" });
-  } else if (ctx.aqi && isAqiElevated) {
-    pool.push({ p: 68, text: "Moderate smog: sensitive groups limit cardio 🫁" });
+  if (typeof ctx.rainVol === "number" && ctx.rainVol >= 25) {
+    pool.push({ p: 92, text: adv("stormSevere", lang) });
   }
-
-  if (ctx.pollen && ctx.pollen >= 80) {
-    pool.push({ p: 72, text: "Severe pollen wave: keep windows shut, meds ready 🌾" });
-  } else if (ctx.pollen && ctx.pollen >= 35) {
-    pool.push({ p: 55, text: "Moderate pollen: rinse eyes & face after walks 🌼" });
+  if (ctx.aqi !== null && ctx.aqiType !== "USAQI" && ctx.aqi > 40) {
+    pool.push({ p: 70, text: adv("airQualPoor", lang) });
+  }
+  if (typeof ctx.pollen === "number" && ctx.pollen >= 5) {
+    pool.push({ p: 50, text: adv("pollenHigh", lang) });
+  }
+  if (typeof ctx.moonIllum === "number" && ctx.moonIllum >= 0.98) {
+    pool.push({ p: 15, text: adv("moonFull", lang) });
+  } else if (typeof ctx.moonIllum === "number" && ctx.moonIllum <= 0.02) {
+    pool.push({ p: 20, text: adv("moonNew", lang) });
   }
 
-  if (ctx.uv >= 8) {
-    pool.push({ p: 70, text: "Very high UV: SPF 50+, hat & sunglasses required 🧴" });
-  } else if (ctx.uv >= 5) {
-    pool.push({ p: 58, text: "Moderate UV: apply sunscreen for midday outings 🕶️" });
-  }
-
-  if (ctx.et0 >= 4.5 && ctx.rainVol < 2) {
-    pool.push({ p: 62, text: "High soil moisture loss: deep-soak garden beds 💧" });
-  } else if (ctx.rainVol >= 15) {
-    pool.push({ p: 48, text: "Soil saturated: disable automatic garden irrigation 🛑" });
-  } else if (ctx.et0 <= 1.0 && maxC < 14) {
-    pool.push({ p: 40, text: "Low evaporation: avoid overwatering potted crops 🌱" });
-  }
-
-  if (maxC <= 3) {
-    pool.push({ p: 52, text: "Freezing weather: thermal base layer & heavy parka 🧤" });
-  } else if (maxC <= 11) {
-    pool.push({ p: 45, text: "Brisk air: wool sweater or insulated jacket 🧥" });
-  } else if (maxC <= 18 && minC <= 8) {
-    pool.push({ p: 42, text: "Wide daily thermal shift: dress in flexible layers 🧣" });
-  } else if (maxC >= 22 && maxC < 28 && ctx.rainVol < 1) {
-    pool.push({ p: 35, text: "Prime outdoor conditions: ideal for run, cycling or patio 🚲" });
-  }
-
-  pool.sort((a, b) => b.p - a.p);
-  const selected = pool.slice(0, 3).map(item => item.text);
-
-  if (selected.length === 0) {
-    selected.push("Balanced seasonal conditions: no major weather hazards ✨");
-  }
-
-  return selected;
+  return pool.sort((a, b) => b.p - a.p).slice(0, 3).map(item => item.text);
 }
 
-function assessRoadConditions(tMin, soilMin, rainVol, isC) {
+function assessRoadConditions(tMin, soilMin, rainVol, isC, lang) {
+  lang = lang || "en";
   const minC = isC ? tMin : (tMin - 32) * (5 / 9);
   const groundC = isC ? soilMin : (soilMin - 32) * (5 / 9);
-
+  if (isNaN(groundC) || isNaN(minC) || isNaN(rainVol)) {
+    return { status: tRoadStatus("rdChill", lang), advisory: tRoadAdv("advCh", lang) };
+  }
   if (groundC <= 0 && rainVol > 0.2) {
-    return { status: "🧊 BLACK ICE DANGER", advisory: "Glazed surface. Triple braking distance." };
+    return { status: tRoadStatus("rdBI", lang), advisory: tRoadAdv("advBI", lang) };
   } else if (groundC <= 0) {
-    return { status: "❄️ FROST / SLICK SPOTS", advisory: "Bridges & shaded ramps prone to ice." };
+    return { status: tRoadStatus("rdFrost", lang), advisory: tRoadAdv("advFr", lang) };
   } else if (minC <= 3 && rainVol > 2.0) {
-    return { status: "💧 COLD SPRAY RISK", advisory: "Reduced grip on summer tires." };
+    return { status: tRoadStatus("rdSpray", lang), advisory: tRoadAdv("advSp", lang) };
   } else {
-    return { status: "🚗 CHILLED ASPHALT", advisory: "Sub-7°C rubber hardening threshold." };
+    return { status: tRoadStatus("rdChill", lang), advisory: tRoadAdv("advCh", lang) };
   }
 }
 
-function getAstronomicalEvents(dateStr) {
-  const md = dateStr.slice(5);
-  const events = {
-    "01-03": "Quadrantid Meteor Peak (~110/hr)",
-    "01-04": "Earth at Perihelion (Closest to Sun)",
-    "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
-    "03-24": "Mercury at Greatest Eastern Elongation",
-    "04-22": "Lyrid Meteor Peak (~18/hr)",
-    "04-23": "Lyrid Active Window",
-    "05-06": "Eta Aquariids Peak (~50/hr)",
-    "05-07": "Eta Aquariids Active Window",
-    "06-21": "☀️ Summer Solstice (Longest Day)",
-    "07-04": "Earth at Aphelion (Furthest from Sun)",
-    "07-28": "Delta Aquariids Peak (~20/hr)",
-    "07-29": "Delta Aquariids Active Window",
-    "08-12": "Perseid Meteor Peak (~100/hr)",
-    "08-13": "Perseid Active Window",
-    "08-27": "Saturn at Opposition (Brightest)",
-    "09-19": "Neptune at Opposition",
-    "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
-    "10-07": "Draconid Meteor Peak (~10/hr)",
-    "10-21": "Orionid Meteor Peak (~20/hr)",
-    "10-22": "Orionid Active Window",
-    "11-05": "Southern Taurids Peak (~5-10 fireball/hr)",
-    "11-12": "Northern Taurids Peak (~5 fireball/hr)",
-    "11-17": "Leonid Meteor Peak (~15/hr)",
-    "11-18": "Leonid Active Window",
-    "12-07": "Jupiter at Opposition (Brightest)",
-    "12-13": "Geminid Meteor Ramp-up (~60/hr)",
-    "12-14": "Geminid Meteor Peak (~120/hr)",
-    "12-21": "❄️ Winter Solstice (Shortest Day)",
-    "12-22": "Ursid Meteor Peak (~10/hr)"
-  };
-  return events[md] || null;
+function getAstronomicalEventsForYear(dateStr, year) {
+  const ev = ASTRONOMICAL_EVENTS[dateStr.slice(5)];
+  if (!ev) return null;
+  if (year && /Meteor Peak/i.test(ev)) return ev + " (" + year + ")";
+  return ev;
 }
 
 function getMoonPhaseDetails(date) {
-  const lp = 2551443;
-  const now = date.getTime();
-  const newMoonRef = new Date(1970, 0, 7, 20, 35, 0).getTime();
-  const phase = ((now - newMoonRef) / 1000) % lp;
-  const dayOfCycle = phase / (24 * 3600);
-  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / lp)) / 2;
-
+  const lp = 2551443; // synodic month in seconds
+  // UTC reference epoch for new moon near 1970-01-07.
+  const newMoonRef = Date.UTC(1970, 0, 7, 20, 35, 0);
+  const ms = (date instanceof Date) ? date.getTime() : Number(date);
+  let phase = ((ms - newMoonRef) / 1000) % lp;
+  if (phase < 0) phase += lp; // defensive for pre-1970
+  const dayOfCycle = phase / 86400; // days into current cycle
+  // Illumination: 0 = new moon, 1 = full moon.
+  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / (lp / 86400))) / 2;
   let glyph, name;
-  if (dayOfCycle <= 1.5) {
-    glyph = "🌑"; name = "New Moon";
-  } else if (dayOfCycle <= 5.5) {
-    glyph = "🌒"; name = "Waxing Crescent";
-  } else if (dayOfCycle <= 9.5) {
-    glyph = "🌓"; name = "1st Quarter";
-  } else if (dayOfCycle <= 13.5) {
-    glyph = "🌔"; name = "Waxing Gibbous";
-  } else if (dayOfCycle <= 17.5) {
-    glyph = "🌕"; name = "Full Moon";
-  } else if (dayOfCycle <= 21.5) {
-    glyph = "🌖"; name = "Waning Gibbous";
-  } else if (dayOfCycle <= 25.5) {
-    glyph = "🌗"; name = "Last Quarter";
-  } else {
-    glyph = "🌘"; name = "Waning Crescent";
-  }
-  return { glyph, name, fraction: illumination, illumination: `${Math.round(illumination * 100)}%` };
+  if (dayOfCycle < 1.85)       { glyph = "🌑"; name = "New Moon"; }
+  else if (dayOfCycle < 5.55)  { glyph = "🌒"; name = "Waxing Crescent"; }
+  else if (dayOfCycle < 9.25)  { glyph = "🌓"; name = "1st Quarter"; }
+  else if (dayOfCycle < 12.95) { glyph = "🌔"; name = "Waxing Gibbous"; }
+  else if (dayOfCycle < 16.60) { glyph = "🌕"; name = "Full Moon"; }
+  else if (dayOfCycle < 20.30) { glyph = "🌖"; name = "Waning Gibbous"; }
+  else if (dayOfCycle < 24.00) { glyph = "🌗"; name = "Last Quarter"; }
+  else if (dayOfCycle < 27.70) { glyph = "🌘"; name = "Waning Crescent"; }
+  else                         { glyph = "🌑"; name = "New Moon"; }
+  return { glyph, name, fraction: illumination, illumination: Math.round(illumination * 100) + "%" };
 }
 
-function assessStargazingConditions(data, offset, moonFraction, dateKey, cloudCover) {
+function assessStargazingConditions(data, offset, moonFraction, dateKey, cloudCover, lang) {
+  lang = lang || "en";
   if (offset >= ICAL_CONFIG.deterministicDays || !data.det || !data.det.time) {
-    return moonFraction > 0.7 ? "🌕 Filtered by Moon" : "🔭 Decent";
+    return moonFraction > 0.7 ? "🌕 " + t("starFlt", lang) : "🔭 " + t("starDec", lang);
   }
   const idx = data.det.time.indexOf(dateKey);
-  if (idx === -1) return "🔭 Moderate";
-
+  if (idx === -1) return "🔭 " + t("starMod", lang);
   const codes = data.det.weather_code || data.det.weathercode || [];
   const code = codes[idx] !== undefined ? codes[idx] : 0;
   const rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
-
-  if (cloudCover !== undefined && cloudCover !== null && cloudCover > 70) return "☁️ Obscured";
-  if ([0].includes(code) && moonFraction <= 0.3) return "🔭 Exceptional";
-  if ([0, 1].includes(code) && moonFraction > 0.7) return "🌕 Moonlit";
-  if ([0, 1, 2].includes(code)) return "🔭 Fair";
-  if (rainProb > 40 || code >= 3) return "☁️ Obscured";
-  return "🔭 Moderate";
+  if (cloudCover !== undefined && cloudCover !== null && cloudCover > 70) return "☁️ " + t("starObsc", lang);
+  if (code === 0 && moonFraction <= 0.3) return "🔭 " + t("starExc", lang);
+  if ((code === 0 || code === 1) && moonFraction > 0.7) return "🌕 " + t("starMoon", lang);
+  if (code === 0 || code === 1 || code === 2) return "🔭 " + t("starFair", lang);
+  if (rainProb > 40 || code >= 3) return "☁️ " + t("starObsc", lang);
+  return "🔭 " + t("starMod", lang);
 }
 
 function getGoldenHourWindow(sunsetStr) {
   if (!sunsetStr || sunsetStr === "--:--") return "--";
   const parts = sunsetStr.split(":");
-  let hr = parseInt(parts[0], 10);
-  let mn = parseInt(parts[1], 10) - 45;
+  if (parts.length < 2) return "--";
+  const hrRaw = parseInt(parts[0], 10);
+  const mnRaw = parseInt(parts[1], 10);
+  if (isNaN(hrRaw) || isNaN(mnRaw)) return "--";
+  let hr = hrRaw;
+  let mn = mnRaw - 45;
   if (mn < 0) { mn += 60; hr -= 1; }
+  if (hr < 0) hr += 24;
   const pad = n => (n < 10 ? "0" + n : n);
-  return `${pad(hr)}:${pad(mn)}–${sunsetStr}`;
+  return pad(hr) + ":" + pad(mn) + "-" + sunsetStr;
 }
 
 function getWeatherGlyph(code) {
+  if (code === null || code === undefined || isNaN(code)) return "🌤️";
+  code = Number(code);
   if (code === 0) return "☀️";
   if (code === 1) return "🌤️";
   if (code === 2) return "⛅";
@@ -897,14 +1455,15 @@ function getWeatherGlyph(code) {
   return "🌤️";
 }
 
-function getThermalText(t, isC) {
+function getThermalText(t, isC, lang) {
+  lang = lang || "en";
   const c = isC ? t : (t - 32) * (5 / 9);
-  if (c <= 0) return "Freezing";
-  if (c <= 10) return "Chilly";
-  if (c <= 20) return "Comfortable";
-  if (c <= 26) return "Pleasant";
-  if (c <= 32) return "Warm";
-  return "Hot";
+  if (c <= 0) return t("tFreeze", lang);
+  if (c <= 10) return t("tChilly", lang);
+  if (c <= 20) return t("tComf", lang);
+  if (c <= 26) return t("tPleas", lang);
+  if (c <= 32) return t("tWarm", lang);
+  return t("tHot", lang);
 }
 
 function getHumidityGlyph(h) {
@@ -913,11 +1472,12 @@ function getHumidityGlyph(h) {
   return "🧖";
 }
 
-function getHumidityComfort(h) {
-  if (h <= 30) return "Dry Air";
-  if (h <= 60) return "Comfortable";
-  if (h <= 75) return "Humid";
-  return "Very Muggy";
+function getHumidityComfort(h, lang) {
+  lang = lang || "en";
+  if (h <= 30) return t("humDry", lang);
+  if (h <= 60) return t("humComf", lang);
+  if (h <= 75) return t("humHumid", lang);
+  return t("humMuggy", lang);
 }
 
 function getAqiGlyph(aqi, aqiType) {
@@ -937,26 +1497,28 @@ function getAqiGlyph(aqi, aqiType) {
   return "🟣";
 }
 
-function getAqiLabel(aqi, aqiType) {
-  if (aqi === null) return "Unknown";
+function getAqiLabel(aqi, aqiType, lang) {
+  lang = lang || "en";
+  if (aqi === null) return t("aqiUnk", lang);
   if (aqiType === "USAQI") {
-    if (aqi <= 50) return "Good";
-    if (aqi <= 100) return "Moderate";
-    if (aqi <= 150) return "Unhealthy for Sensitive";
-    if (aqi <= 200) return "Unhealthy";
-    if (aqi <= 300) return "Very Unhealthy";
-    return "Hazardous";
+    if (aqi <= 50) return t("aqiGood", lang);
+    if (aqi <= 100) return t("aqiMod", lang);
+    if (aqi <= 150) return t("aqiSens", lang);
+    if (aqi <= 200) return t("aqiUnh", lang);
+    if (aqi <= 300) return t("aqiVunh", lang);
+    return t("aqiHzd", lang);
   }
-  if (aqi <= 20) return "Good";
-  if (aqi <= 40) return "Fair";
-  if (aqi <= 60) return "Moderate";
-  if (aqi <= 80) return "Poor";
-  return "Hazardous";
+  if (aqi <= 20) return t("aqiGood", lang);
+  if (aqi <= 40) return t("aqiFair", lang);
+  if (aqi <= 60) return t("aqiMod", lang);
+  if (aqi <= 80) return t("aqiPoor", lang);
+  return t("aqiHzd", lang);
 }
 
-function getUvAdvice(uv) {
-  if (uv <= 2) return "Low";
-  if (uv <= 5) return "Moderate";
-  if (uv <= 7) return "High";
-  return "Very High";
+function getUvAdvice(uv, lang) {
+  lang = lang || "en";
+  if (uv <= 2) return t("uvLow", lang);
+  if (uv <= 5) return t("uvMod", lang);
+  if (uv <= 7) return t("uvHigh", lang);
+  return t("uvVhigh", lang);
 }

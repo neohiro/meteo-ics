@@ -1,6 +1,6 @@
 /**
  * Ultimate Personalized Weather, Astronomical & Ground-Truth Dashboard for Google Calendar
- * 
+ *
  * Verified & Bulletproof:
  *  - City-name geocoding: locations can be configured with name only (no lat/lon required).
  *    Optional 'country' field narrows the geocoder query.
@@ -12,7 +12,17 @@
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
  *  - Official EventColor Enum: Reliable temperature-based dynamic color coding.
  *  - Standard Atmosphere (atm) pressure scale (1013.25 hPa baseline).
- *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll.
+ *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll with explicit 10s timeouts.
+ *  - Calendar resolution: resolveCalendar() throws an explicit error when no calendar matches,
+ *    preventing NullPointerException cascades in cal.getTimeZone() / createAllDayEvent().
+ *  - Storage cleanup gracefully falls back to UTC if calendar resolution fails.
+ *  - Empty CONFIG.locations (post-geocoding) raises a clear, actionable error.
+ *  - ASTRONOMICAL_EVENTS hoisted to a module-level const for fast lookup across hot paths.
+ *  - CONFIG.dryRun = true skips all calendar writes (log-only mode for validation).
+ *  - saveDayRecord() defensively catches JSON.stringify failures (won't crash the sync).
+ *  - cleanupOldStorageKeys() validates YYYY-MM-DD format before comparison.
+ *  - computeDayAudit() surfaces snapshotsTaken count for self-debugging.
+ *  - norm() safely handles null/undefined/Number inputs.
  *
  * Location Config Example:
  *   locations: [
@@ -24,21 +34,28 @@
 
 function geocodeCity(name) {
   try {
-    const res = UrlFetchApp.fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`, { muteHttpExceptions: true });
+    const res = UrlFetchApp.fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`,
+      { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
+    );
     const data = JSON.parse(res.getContentText()).results;
-    if (data && data.length) return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
+    if (data && data.length) {
+      return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
+    }
   } catch (e) {}
-  return { name: "", lat: 0, lon: 0 };
+  return null;
 }
 
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
+  version: "2.1.0",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
   historyDays: 5,
   autoDetectFromEvents: true,
+  dryRun: false,
   locations: [
     { name: "Kyoto" },
     { name: "Brunnsum" }
@@ -47,22 +64,66 @@ const CONFIG = {
 
 const KEY_REGEX = /\[KEY:([a-zA-Z0-9_\-]+)\]/;
 const MAX_SNAPSHOTS_PER_DAY = 5;
+const FETCH_TIMEOUT_MS = 10000;
+const ASTRONOMICAL_EVENTS = {
+  "01-03": "Quadrantid Meteor Peak (~110/hr)",
+  "01-04": "Earth at Perihelion (Closest to Sun)",
+  "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
+  "03-24": "Mercury at Greatest Eastern Elongation",
+  "04-22": "Lyrid Meteor Peak (~18/hr)",
+  "04-23": "Lyrid Active Window",
+  "05-06": "Eta Aquariids Peak (~50/hr)",
+  "05-07": "Eta Aquariids Active Window",
+  "06-21": "☀️ Summer Solstice (Longest Day)",
+  "07-04": "Earth at Aphelion (Furthest from Sun)",
+  "07-28": "Delta Aquariids Peak (~20/hr)",
+  "07-29": "Delta Aquariids Active Window",
+  "08-12": "Perseid Meteor Peak (~100/hr)",
+  "08-13": "Perseid Active Window",
+  "08-27": "Saturn at Opposition (Brightest)",
+  "09-19": "Neptune at Opposition",
+  "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
+  "10-07": "Draconid Meteor Peak (~10/hr)",
+  "10-21": "Orionid Meteor Peak (~20/hr)",
+  "10-22": "Orionid Active Window",
+  "11-05": "Southern Taurids Peak (~5-10 fireball/hr)",
+  "11-12": "Northern Taurids Peak (~5 fireball/hr)",
+  "11-17": "Leonid Meteor Peak (~15/hr)",
+  "11-18": "Leonid Active Window",
+  "12-07": "Jupiter at Opposition (Brightest)",
+  "12-13": "Geminid Meteor Ramp-up (~60/hr)",
+  "12-14": "Geminid Meteor Peak (~120/hr)",
+  "12-21": "❄️ Winter Solstice (Shortest Day)",
+  "12-22": "Ursid Meteor Peak (~10/hr)"
+};
 
 // Auto-geocode locations that lack GPS coordinates (city-only entries are resolved via Open-Meteo geocoder;
 // "country" is an optional hint that narrows the search). Locations that fail geocoding are filtered out.
 CONFIG.locations = CONFIG.locations.filter(loc => {
   if (loc.lat && loc.lon) return true;
-  const query = loc.country ? `${loc.name},${loc.country}` : (loc.name || "");
+  const trimmedName = (loc.name || "").trim();
+  if (!trimmedName) {
+    Logger.log(`WARNING: Skipping location with empty/whitespace name.`);
+    return false;
+  }
+  const query = loc.country ? `${trimmedName},${loc.country}` : trimmedName;
   const geo = geocodeCity(query);
-  if (geo && geo.lat && geo.lon && geo.name) {
+  if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lon) && geo.name) {
     loc.lat = geo.lat;
     loc.lon = geo.lon;
-    loc.name = geo.name; // normalize name from geocoder response
+    loc.name = geo.name;
     return true;
   }
-  Logger.log(`WARNING: Skipping unresolvable location: "${loc.name}". Run validateConfig() for details.`);
+  Logger.log(`WARNING: Skipping unresolvable location: "${trimmedName}". Run validateConfig() for details.`);
   return false;
 });
+
+if (CONFIG.locations.length === 0) {
+  throw new Error(
+    "CONFIG.locations resolved to an empty array — all locations failed geocoding. " +
+    "Check city names or provide explicit { name, lat, lon } entries."
+  );
+}
 
 function syncWeatherToCalendar() {
   const cal = resolveCalendar();
@@ -101,7 +162,13 @@ function syncWeatherToCalendar() {
   }
 
   // 2. Fetch atmospheric datasets in parallel across all locations
-  const weatherCache = fetchAllAtmosphericDataParallel(locationPool);
+  let weatherCache;
+  try {
+    weatherCache = fetchAllAtmosphericDataParallel(locationPool);
+  } catch (e) {
+    Logger.log("fetchAllAtmosphericDataParallel failed entirely: " + e);
+    return; // Cannot proceed without any data
+  }
 
   // 3. Reconcile verified ground truth & compute scorecards
   reconcileGroundTruth(locationPool, weatherCache);
@@ -152,32 +219,47 @@ function syncWeatherToCalendar() {
       const data = weatherCache.get(key);
       if (!loc || !data) return;
 
-      const payload = buildDashboardPayload(loc, data, offset, dStr, todayStr, globalStats, unitSymbol, calTz);
+      let payload;
+      try {
+        payload = buildDashboardPayload(loc, data, offset, dStr, todayStr, globalStats, unitSymbol, calTz);
+      } catch (e) {
+        Logger.log(`WARNING: buildDashboardPayload failed for ${loc.name} on ${dStr}: ${e}`);
+        return;
+      }
       if (!payload) return;
+
+      if (CONFIG.dryRun) {
+        Logger.log(`DRY-RUN ${loc.name} ${dStr}: ${payload.title}`);
+        return;
+      }
 
       const mapKey = `${dStr}_${key}`;
       const finalDesc = `${payload.desc}\n\n[KEY:${mapKey}]`;
       const matched = eventMap.get(mapKey) || [];
 
-      if (matched.length > 0) {
-        const primary = matched[0];
-        primary.setTitle(payload.title);
-        primary.setDescription(finalDesc);
-        if (payload.eventColor) primary.setColor(payload.eventColor);
-        touchedEventIds.add(primary.getId());
+      try {
+        if (matched.length > 0) {
+          const primary = matched[0];
+          primary.setTitle(payload.title);
+          primary.setDescription(finalDesc);
+          if (payload.eventColor) primary.setColor(payload.eventColor);
+          touchedEventIds.add(primary.getId());
 
-        for (let i = 1; i < matched.length; i++) {
-          try {
-            matched[i].deleteEvent();
-            deletedEventIds.add(matched[i].getId());
-          } catch (e) {
-            Logger.log(`WARNING: Failed to delete duplicate event ${matched[i].getId()}: ${e}`);
+          for (let i = 1; i < matched.length; i++) {
+            try {
+              matched[i].deleteEvent();
+              deletedEventIds.add(matched[i].getId());
+            } catch (e) {
+              Logger.log(`WARNING: Failed to delete duplicate event ${matched[i].getId()}: ${e}`);
+            }
           }
+        } else {
+          const created = cal.createAllDayEvent(payload.title, date, { description: finalDesc });
+          if (payload.eventColor) created.setColor(payload.eventColor);
+          touchedEventIds.add(created.getId());
         }
-      } else {
-        const created = cal.createAllDayEvent(payload.title, date, { description: finalDesc });
-        if (payload.eventColor) created.setColor(payload.eventColor);
-        touchedEventIds.add(created.getId());
+      } catch (e) {
+        Logger.log(`WARNING: Calendar write failed for ${loc.name} ${dStr}: ${e}`);
       }
     });
   });
@@ -214,16 +296,16 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${CONFIG.forecastDays}&temperature_unit=${u}&timezone=auto`;
     const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&daily=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
 
-    requests.push({ url: dDailyUrl, muteHttpExceptions: true });
+    requests.push({ url: dDailyUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     reqMap.push({ key, type: "det" });
 
-    requests.push({ url: dHourlyUrl, muteHttpExceptions: true });
+    requests.push({ url: dHourlyUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     reqMap.push({ key, type: "hourly" });
 
-    requests.push({ url: eUrl, muteHttpExceptions: true });
+    requests.push({ url: eUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     reqMap.push({ key, type: "ens" });
 
-    requests.push({ url: aqUrl, muteHttpExceptions: true });
+    requests.push({ url: aqUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     reqMap.push({ key, type: "aq" });
 
     weatherCache.set(key, { det: null, ens: null, aq: null, hourlyAgg: {} });
@@ -234,7 +316,11 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     for (let i = 0; i < responses.length; i++) {
       const meta = reqMap[i];
       const res = responses[i];
-      if (res.getResponseCode() !== 200) continue;
+      const code = res.getResponseCode();
+      if (code !== 200) {
+        Logger.log(`fetchAllAtmosphericDataParallel: ${meta.key}/${meta.type} returned HTTP ${code} — using cached partial data`);
+        continue;
+      }
 
       const json = JSON.parse(res.getContentText());
       const cacheObj = weatherCache.get(meta.key);
@@ -276,8 +362,9 @@ function fetchAllAtmosphericDataParallel(locationPool) {
 // ==========================================================
 
 function reconcileGroundTruth(locationPool, weatherCache) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Anchor to UTC midnight so the comparison matches Open-Meteo's UTC date strings.
+  // Using local midnight (setHours(0,0,0,0)) would misclassify today on UTC+N servers.
+  const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
 
   locationPool.forEach((loc, cityKey) => {
     const data = weatherCache.get(cityKey);
@@ -286,9 +373,11 @@ function reconcileGroundTruth(locationPool, weatherCache) {
 
     for (let i = 0; i < times.length; i++) {
       const dateStr = times[i];
-      const targetDate = new Date(dateStr + "T00:00:00");
+      // Open-Meteo returns dates in UTC; anchor to UTC midnight so a server in
+      // UTC-5 doesn't misclassify today's date as "yesterday" near 00:00 local.
+      const targetDate = new Date(dateStr + "T00:00:00Z");
 
-      if (targetDate < today) {
+      if (targetDate < todayUTC) {
         const record = getDayRecord(cityKey, dateStr);
         if (record && !record.actual) {
           const maxT = data.det.temperature_2m_max[i];
@@ -312,7 +401,7 @@ function reconcileGroundTruth(locationPool, weatherCache) {
 
           const rawCode = (data.det.weather_code || data.det.weathercode || [])[i];
 
-          if (maxT !== null && maxT !== undefined) {
+          if (maxT !== null && maxT !== undefined && minT !== null && minT !== undefined) {
             record.actual = {
               maxTemp: Math.round(maxT),
               minTemp: Math.round(minT),
@@ -331,7 +420,7 @@ function reconcileGroundTruth(locationPool, weatherCache) {
 
 function computeGlobalModelAccuracy(sym) {
   const props = PropertiesService.getScriptProperties().getProperties();
-  let totalTempError = 0, totalRainError = 0, verifiedSnapshots = 0;
+  let totalTempError = 0, totalRainError = 0, verifiedSnapshots = 0, verifiedDays = 0;
 
   const buckets = { short: { e: 0, c: 0 }, mid: { e: 0, c: 0 }, long: { e: 0, c: 0 }, noaa: { e: 0, c: 0 } };
 
@@ -340,12 +429,15 @@ function computeGlobalModelAccuracy(sym) {
     try {
       const record = JSON.parse(props[k]);
       if (record && record.actual && Array.isArray(record.snapshots)) {
+        verifiedDays++;
         const actMax = record.actual.maxTemp;
         const actRain = record.actual.rain;
 
         record.snapshots.forEach(snap => {
+          // Defensive: skip snapshots with missing predicted values.
+          if (typeof snap.predictedMax !== "number" || typeof actMax !== "number") return;
           const tErr = Math.abs(snap.predictedMax - actMax);
-          const rErr = Math.abs((snap.predictedRain || 0) - actRain);
+          const rErr = Math.abs((typeof snap.predictedRain === "number" ? snap.predictedRain : 0) - (typeof actRain === "number" ? actRain : 0));
           totalTempError += tErr;
           totalRainError += rErr;
           verifiedSnapshots++;
@@ -365,7 +457,9 @@ function computeGlobalModelAccuracy(sym) {
       tempMAE: "Calibrating",
       rainMAE: "Calibrating",
       modelGrade: "A (Calibrating)",
-      leadCurve: "D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°"
+      leadCurve: "D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°",
+      verifiedDays: 0,
+      verifiedSnapshots: 0
     };
   }
 
@@ -387,7 +481,9 @@ function computeGlobalModelAccuracy(sym) {
     tempMAE: `±${avgTempMAE}${sym}`,
     rainMAE: `±${avgRainMAE} mm`,
     modelGrade: grade,
-    leadCurve: `D1-3:±${bShort}${sym} · D4-7:±${bMid}${sym} · D8-14:±${bLong}${sym} · D15+:±${bNoaa}${sym}`
+    leadCurve: `D1-3:±${bShort}${sym} · D4-7:±${bMid}${sym} · D8-14:±${bLong}${sym} · D15+:±${bNoaa}${sym}`,
+    verifiedDays,
+    verifiedSnapshots
   };
 }
 
@@ -401,7 +497,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const record = getDayRecord(cityKey, targetDateStr);
   const snapshots = record.snapshots || [];
 
-  let aqiVal = null, aqiType = "AQI", pm25Val = null, pm10Val = null, o3Val = null, pollenVal = null;
+  let aqiVal = null, aqiType = "AQI", pm25Val = null, pm10Val = null, pollenVal = null;
   if (data.aq && data.aq.time) {
     const idx = data.aq.time.indexOf(targetDateStr);
     if (idx !== -1) {
@@ -415,7 +511,6 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       pm25Val = data.aq.pm2_5 && data.aq.pm2_5[idx] !== null ? Number(data.aq.pm2_5[idx].toFixed(1)) : null;
       pm10Val = data.aq.pm10 && data.aq.pm10[idx] !== null ? Number(data.aq.pm10[idx].toFixed(1)) : null;
-      o3Val = data.aq.ozone && data.aq.ozone[idx] !== null ? Math.round(data.aq.ozone[idx]) : null;
       const birch = data.aq.birch_pollen ? data.aq.birch_pollen[idx] || 0 : 0;
       const grass = data.aq.grass_pollen ? data.aq.grass_pollen[idx] || 0 : 0;
       const alder = data.aq.alder_pollen ? data.aq.alder_pollen[idx] || 0 : 0;
@@ -423,8 +518,10 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     }
   }
 
-  const astroEvent = getAstronomicalEvents(targetDateStr);
-  const moonInfo = getMoonPhaseDetails(new Date(targetDateStr + "T12:00:00"));
+  // Use UTC noon to avoid TZ off-by-one in the year/date arithmetic.
+  const tgtDateObj = new Date(targetDateStr + "T12:00:00Z");
+  const astroEvent = getAstronomicalEventsForYear(targetDateStr, tgtDateObj.getUTCFullYear());
+  const moonInfo = getMoonPhaseDetails(tgtDateObj);
 
   // A. Past Days (Verified Ground Truth)
   if (offset < 0) {
@@ -432,8 +529,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     const pastIdx = data.det.time.indexOf(targetDateStr);
     if (pastIdx === -1) return null;
 
-    const actualMax = Math.round(data.det.temperature_2m_max[pastIdx]);
-    const actualMin = Math.round(data.det.temperature_2m_min[pastIdx]);
+    const tMaxRaw = data.det.temperature_2m_max[pastIdx];
+    const tMinRaw = data.det.temperature_2m_min[pastIdx];
+    if (tMaxRaw == null || tMinRaw == null) return null;
+
+    const actualMax = Math.round(tMaxRaw);
+    const actualMin = Math.round(tMinRaw);
     const actualRain = (data.det.precipitation_sum ? data.det.precipitation_sum[pastIdx] : 0) || 0;
     const rawActualCode = (data.det.weather_code || data.det.weathercode || [])[pastIdx];
     const actualCode = rawActualCode !== undefined ? rawActualCode : 0;
@@ -463,7 +564,8 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         `🎯 PREDICTION ACCURACY AUDIT`,
         `• Temp Delta: ${audit.tempDelta}`,
         `• Rain Delta: ${audit.rainDelta}`,
-        `• Stability: ${audit.volatility}`
+        `• Stability: ${audit.volatility}`,
+        `• Snapshots Tracked: ${audit.snapshotsTaken}`
       ].join("\n"),
 
       [
@@ -489,18 +591,24 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   if (offset < CONFIG.deterministicDays && data.det && data.det.time) {
     const idx = data.det.time.indexOf(targetDateStr);
     if (idx !== -1) {
-      currentMax = Math.round(data.det.temperature_2m_max[idx]);
-      currentMin = Math.round(data.det.temperature_2m_min[idx]);
-      apparentMax = data.det.apparent_temperature_max ? Math.round(data.det.apparent_temperature_max[idx]) : currentMax;
-      currentRain = data.det.precipitation_sum ? data.det.precipitation_sum[idx] : 0;
-      rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
-      currentWind = data.det.windspeed_10m_max ? Math.round(data.det.windspeed_10m_max[idx]) : 0;
-      uvIndex = data.det.uv_index_max ? data.det.uv_index_max[idx] : 0;
-      et0 = data.det.et0_fao_evapotranspiration ? data.det.et0_fao_evapotranspiration[idx] : 0;
-      radiation = data.det.shortwave_radiation_sum ? data.det.shortwave_radiation_sum[idx] : 0;
+      // Defensive: if Open-Meteo returns null for any of these, fall back to
+      // safe defaults instead of producing NaN/0 in the title/display.
+      const maxRaw = data.det.temperature_2m_max[idx];
+      const minRaw = data.det.temperature_2m_min[idx];
+      if (maxRaw == null || minRaw == null) return null;
+      currentMax = Math.round(maxRaw);
+      currentMin = Math.round(minRaw);
+      const appRaw = data.det.apparent_temperature_max ? data.det.apparent_temperature_max[idx] : null;
+      apparentMax = appRaw != null ? Math.round(appRaw) : currentMax;
+      currentRain = data.det.precipitation_sum && data.det.precipitation_sum[idx] != null ? data.det.precipitation_sum[idx] : 0;
+      rainProb = data.det.precipitation_probability_max && data.det.precipitation_probability_max[idx] != null ? data.det.precipitation_probability_max[idx] : 0;
+      currentWind = data.det.windspeed_10m_max && data.det.windspeed_10m_max[idx] != null ? Math.round(data.det.windspeed_10m_max[idx]) : 0;
+      uvIndex = data.det.uv_index_max && data.det.uv_index_max[idx] != null ? data.det.uv_index_max[idx] : 0;
+      et0 = data.det.et0_fao_evapotranspiration && data.det.et0_fao_evapotranspiration[idx] != null ? data.det.et0_fao_evapotranspiration[idx] : 0;
+      radiation = data.det.shortwave_radiation_sum && data.det.shortwave_radiation_sum[idx] != null ? data.det.shortwave_radiation_sum[idx] : 0;
       const rawCode = (data.det.weather_code || data.det.weathercode || [])[idx];
       weatherCode = rawCode !== undefined ? rawCode : 0;
-      
+
       if (data.hourlyAgg && data.hourlyAgg[targetDateStr]) {
         pressure = data.hourlyAgg[targetDateStr].pressure || 1013.25;
         soilTempMin = data.hourlyAgg[targetDateStr].soilMin !== null ? data.hourlyAgg[targetDateStr].soilMin : currentMin;
@@ -531,10 +639,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       const minVals = minKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
 
       if (maxVals.length > 0) {
-        currentMax = Math.round(maxVals.reduce((a, b) => a + b, 0) / maxVals.length);
-        currentMin = Math.round(minVals.reduce((a, b) => a + b, 0) / minVals.length);
+        const meanMax = maxVals.reduce((a, b) => a + b, 0) / maxVals.length;
+        const meanMin = minVals.reduce((a, b) => a + b, 0) / minVals.length;
+        currentMax = Math.round(meanMax);
+        currentMin = Math.round(meanMin);
         apparentMax = currentMax;
-        const variance = maxVals.reduce((a, b) => a + Math.pow(b - currentMax, 2), 0) / maxVals.length;
+        const variance = maxVals.reduce((a, b) => a + Math.pow(b - meanMax, 2), 0) / maxVals.length;
         spreadVal = Math.max(1, Math.round(Math.sqrt(variance)));
         certaintyGlyph = spreadVal <= 2 ? "🎯" : (spreadVal <= 4 ? "⚖️" : "🎲");
         currentRain = (data.ens.precipitation_sum ? data.ens.precipitation_sum[idx] : 0) || 0;
@@ -669,15 +779,23 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
   let totalRain = 0, totalMax = 0, totalMin = 0, gddSum = 0, wDays = 0;
   const base10 = isC ? 10 : 50;
 
-  const tz = calTz || "UTC";
-  const baseDate = Utilities.parseDate(baseDateStr + " 12:00:00", tz, "yyyy-MM-dd HH:mm:ss");
-
-  // Build the 7-day date list once and reuse for both temp and AQI lookups.
+  // Open-Meteo returns dates in UTC (timezone=auto). Build the 7-day UTC date list
+  // using UTC arithmetic to avoid calendar-TZ off-by-one near midnight boundaries.
   const dateKeys = [];
+  const baseMs = Date.UTC(
+    parseInt(baseDateStr.slice(0, 4), 10),
+    parseInt(baseDateStr.slice(5, 7), 10) - 1,
+    parseInt(baseDateStr.slice(8, 10), 10),
+    12, 0, 0
+  );
   for (let d = 0; d < 7; d++) {
-    const curDate = new Date(baseDate.getTime() + d * 24 * 60 * 60 * 1000);
-    dateKeys.push(Utilities.formatDate(curDate, tz, "yyyy-MM-dd"));
+    const dObj = new Date(baseMs + d * 86400000);
+    dateKeys.push(`${dObj.getUTCFullYear()}-${String(dObj.getUTCMonth() + 1).padStart(2, "0")}-${String(dObj.getUTCDate()).padStart(2, "0")}`);
   }
+
+  // Hoist ensemble key lists out of the per-day loop.
+  const ensMaxKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max")) : [];
+  const ensMinKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min")) : [];
 
   dateKeys.forEach(dStr => {
     let maxT = null, minT = null, r = 0;
@@ -691,13 +809,11 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
       }
     }
 
-    if (maxT === null && data.ens && data.ens.time) {
+    if (maxT === null && ensMaxKeys.length > 0 && data.ens && data.ens.time) {
       const idx = data.ens.time.indexOf(dStr);
       if (idx !== -1) {
-        const maxKeys = Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max"));
-        const minKeys = Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min"));
-        const maxVals = maxKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
-        const minVals = minKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
+        const maxVals = ensMaxKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
+        const minVals = ensMinKeys.map(k => data.ens[k][idx]).filter(v => v !== null && !isNaN(v));
 
         if (maxVals.length > 0) {
           maxT = maxVals.reduce((a, b) => a + b, 0) / maxVals.length;
@@ -750,9 +866,14 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
 
 function generatePrioritizedAdvices(ctx) {
   const isC = ctx.isC;
-  const maxC = isC ? ctx.tempMax : (ctx.tempMax - 32) * (5 / 9);
-  const minC = isC ? ctx.tempMin : (ctx.tempMin - 32) * (5 / 9);
-  const appC = isC ? ctx.apparentMax : (ctx.apparentMax - 32) * (5 / 9);
+  // Defensive: if any temp is null/undefined, fall back to a safe default so
+  // downstream comparisons (maxC >= 30) don't silently skip due to NaN propagation.
+  const safeMax = typeof ctx.tempMax === "number" ? ctx.tempMax : 20;
+  const safeMin = typeof ctx.tempMin === "number" ? ctx.tempMin : 15;
+  const safeApp = typeof ctx.apparentMax === "number" ? ctx.apparentMax : safeMax;
+  const maxC = isC ? safeMax : (safeMax - 32) * (5 / 9);
+  const minC = isC ? safeMin : (safeMin - 32) * (5 / 9);
+  const appC = isC ? safeApp : (safeApp - 32) * (5 / 9);
 
   const pool = [];
 
@@ -846,6 +967,9 @@ function getGddAction(gdd) {
 }
 
 function assessRoadConditions(tMin, soilMin, rainVol, isC) {
+  if (tMin == null || soilMin == null || rainVol == null || isNaN(tMin) || isNaN(soilMin) || isNaN(rainVol)) {
+    return { status: "🚗 CHILLED ASPHALT", advisory: "Sub-7°C rubber hardening threshold." };
+  }
   const minC = isC ? tMin : (tMin - 32) * (5 / 9);
   const groundC = isC ? soilMin : (soilMin - 32) * (5 / 9);
 
@@ -860,69 +984,32 @@ function assessRoadConditions(tMin, soilMin, rainVol, isC) {
   }
 }
 
-function getAstronomicalEvents(dateStr) {
-  const md = dateStr.slice(5);
-  const events = {
-    "01-03": "Quadrantid Meteor Peak (~110/hr)",
-    "01-04": "Earth at Perihelion (Closest to Sun)",
-    "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
-    "03-24": "Mercury at Greatest Eastern Elongation",
-    "04-22": "Lyrid Meteor Peak (~18/hr)",
-    "04-23": "Lyrid Active Window",
-    "05-06": "Eta Aquariids Peak (~50/hr)",
-    "05-07": "Eta Aquariids Active Window",
-    "06-21": "☀️ Summer Solstice (Longest Day)",
-    "07-04": "Earth at Aphelion (Furthest from Sun)",
-    "07-28": "Delta Aquariids Peak (~20/hr)",
-    "07-29": "Delta Aquariids Active Window",
-    "08-12": "Perseid Meteor Peak (~100/hr)",
-    "08-13": "Perseid Active Window",
-    "08-27": "Saturn at Opposition (Brightest)",
-    "09-19": "Neptune at Opposition",
-    "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
-    "10-07": "Draconid Meteor Peak (~10/hr)",
-    "10-21": "Orionid Meteor Peak (~20/hr)",
-    "10-22": "Orionid Active Window",
-    "11-05": "Southern Taurids Peak (~5-10 fireball/hr)",
-    "11-12": "Northern Taurids Peak (~5 fireball/hr)",
-    "11-17": "Leonid Meteor Peak (~15/hr)",
-    "11-18": "Leonid Active Window",
-    "12-07": "Jupiter at Opposition (Brightest)",
-    "12-13": "Geminid Meteor Ramp-up (~60/hr)",
-    "12-14": "Geminid Meteor Peak (~120/hr)",
-    "12-21": "❄️ Winter Solstice (Shortest Day)",
-    "12-22": "Ursid Meteor Peak (~10/hr)"
-  };
-  return events[md] || null;
+function getAstronomicalEventsForYear(dateStr, year) {
+  var ev = ASTRONOMICAL_EVENTS[dateStr.slice(5)];
+  if (!ev) return null;
+  if (year && /Meteor Peak/i.test(ev)) return ev + " (" + year + ")";
+  return ev;
 }
 
 function getMoonPhaseDetails(date) {
-  const lp = 2551443;
-  const now = date.getTime();
-  const newMoonRef = new Date(1970, 0, 7, 20, 35, 0).getTime();
-  const phase = ((now - newMoonRef) / 1000) % lp;
-  const dayOfCycle = phase / (24 * 3600);
-  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / lp)) / 2;
-
+  const lp = 2551443; // synodic month in seconds
+  const newMoonRef = Date.UTC(1970, 0, 7, 20, 35, 0);
+  const ms = (date instanceof Date) ? date.getTime() : Number(date);
+  let phase = ((ms - newMoonRef) / 1000) % lp;
+  if (phase < 0) phase += lp;
+  const dayOfCycle = phase / 86400;
+  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / (lp / 86400))) / 2;
   let glyph, name;
-  if (dayOfCycle <= 1.5) {
-    glyph = "🌑"; name = "New Moon";
-  } else if (dayOfCycle <= 5.5) {
-    glyph = "🌒"; name = "Waxing Crescent";
-  } else if (dayOfCycle <= 9.5) {
-    glyph = "🌓"; name = "1st Quarter";
-  } else if (dayOfCycle <= 13.5) {
-    glyph = "🌔"; name = "Waxing Gibbous";
-  } else if (dayOfCycle <= 17.5) {
-    glyph = "🌕"; name = "Full Moon";
-  } else if (dayOfCycle <= 21.5) {
-    glyph = "🌖"; name = "Waning Gibbous";
-  } else if (dayOfCycle <= 25.5) {
-    glyph = "🌗"; name = "Last Quarter";
-  } else {
-    glyph = "🌘"; name = "Waning Crescent";
-  }
-  return { glyph, name, fraction: illumination, illumination: `${Math.round(illumination * 100)}%` };
+  if (dayOfCycle < 1.85)       { glyph = "🌑"; name = "New Moon"; }
+  else if (dayOfCycle < 5.55)  { glyph = "🌒"; name = "Waxing Crescent"; }
+  else if (dayOfCycle < 9.25)  { glyph = "🌓"; name = "1st Quarter"; }
+  else if (dayOfCycle < 12.95) { glyph = "🌔"; name = "Waxing Gibbous"; }
+  else if (dayOfCycle < 16.60) { glyph = "🌕"; name = "Full Moon"; }
+  else if (dayOfCycle < 20.30) { glyph = "🌖"; name = "Waning Gibbous"; }
+  else if (dayOfCycle < 24.00) { glyph = "🌗"; name = "Last Quarter"; }
+  else if (dayOfCycle < 27.70) { glyph = "🌘"; name = "Waning Crescent"; }
+  else                         { glyph = "🌑"; name = "New Moon"; }
+  return { glyph, name, fraction: illumination, illumination: Math.round(illumination * 100) + "%" };
 }
 
 function assessStargazingConditions(data, offset, moonFraction, targetDateStr, cloudCover) {
@@ -973,7 +1060,11 @@ function saveDayRecord(cityKey, dateStr, record) {
       ...record.snapshots.slice(-(MAX_SNAPSHOTS_PER_DAY - 1))
     ];
   }
-  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(record));
+  try {
+    PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(record));
+  } catch (e) {
+    Logger.log(`saveDayRecord: failed to persist ${key} — ${e}`);
+  }
 }
 
 function cleanupOldStorageKeys() {
@@ -981,15 +1072,24 @@ function cleanupOldStorageKeys() {
   const all = props.getProperties();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 45);
-  // Use the calendar's timezone (consistent with the rest of the script) so that
-  // user records aren't deleted prematurely in timezones west of UTC.
-  const cutoffStr = Utilities.formatDate(cutoff, resolveCalendar().getTimeZone(), "yyyy-MM-dd");
+  let calTz = "UTC";
+  try {
+    const cal = resolveCalendar();
+    calTz = cal ? cal.getTimeZone() : "UTC";
+  } catch (e) {
+    Logger.log("cleanupOldStorageKeys: resolveCalendar() threw — using UTC as cutoff timezone");
+  }
+  const cutoffStr = Utilities.formatDate(cutoff, calTz, "yyyy-MM-dd");
 
   Object.keys(all).forEach(k => {
     if (k.startsWith("WTR_v10_")) {
       const parts = k.split("_");
       const dateStr = parts[parts.length - 1];
-      if (dateStr < cutoffStr) props.deleteProperty(k);
+      // Only compare against keys that look like a YYYY-MM-DD date. This
+      // guards against legacy keys, manual props, or corrupted entries.
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr) && dateStr < cutoffStr) {
+        props.deleteProperty(k);
+      }
     }
   });
 }
@@ -999,8 +1099,14 @@ function cleanupOldStorageKeys() {
 // ==========================================================
 
 function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym) {
-  if (!snapshots || snapshots.length <= 1) {
-    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: "Stable" };
+  if (!snapshots || snapshots.length === 0) {
+    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: "Stable", snapshotsTaken: 0 };
+  }
+  if (snapshots.length === 1) {
+    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: "Stable", snapshotsTaken: 1 };
+  }
+  if (!Number.isFinite(baselineMax) || !Number.isFinite(baselineRain)) {
+    return { tempDelta: "n/a", rainDelta: "n/a", volatility: "🟡 Pending", snapshotsTaken: snapshots.length };
   }
 
   let maxTempDiff = 0, tempDeltaStr = "±0" + sym;
@@ -1024,7 +1130,7 @@ function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym)
 
   const absT = Math.abs(maxTempDiff);
   const volatility = absT >= 5 ? "🔴 High Drift" : (absT >= 3 ? "🟡 Moderate" : "🟢 Stable");
-  return { tempDelta: tempDeltaStr, rainDelta: rainDeltaStr, volatility: volatility };
+  return { tempDelta: tempDeltaStr, rainDelta: rainDeltaStr, volatility: volatility, snapshotsTaken: snapshots.length };
 }
 
 function isGeocodable(str) {
@@ -1047,14 +1153,27 @@ function resolveCalendar() {
   if (CONFIG.calendarId) {
     const cal = CalendarApp.getCalendarById(CONFIG.calendarId);
     if (cal) return cal;
+    throw new Error(
+      "Calendar not found by id '" + CONFIG.calendarId + "'. " +
+      "Verify CONFIG.calendarId in your script properties, or clear it to auto-resolve by name."
+    );
   }
   const cals = CalendarApp.getCalendarsByName(CONFIG.calendarName);
-  return cals.length > 0 ? cals[0] : CalendarApp.createCalendar(CONFIG.calendarName);
+  if (cals.length > 0) return cals[0];
+  throw new Error(
+    "Calendar named '" + CONFIG.calendarName + "' does not exist. " +
+    "Either create it manually or set CONFIG.calendarId to an existing calendar's id."
+  );
 }
 
 function norm(str) {
-  if (!str) return "";
-  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (str == null) return "";
+  return String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function isValidLatLon(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon) &&
+         Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 }
 
 function detectEventCity(text, locationPool) {
@@ -1070,6 +1189,7 @@ function detectEventCity(text, locationPool) {
 
 function getEventColorEnum(t, isLong, isC) {
   if (isLong) return CalendarApp.EventColor.GRAY;
+  if (t == null || isNaN(t)) return CalendarApp.EventColor.PALE_BLUE;
   const c = isC ? t : (t - 32) * (5 / 9);
   if (c <= 0) return CalendarApp.EventColor.PALE_BLUE;  // 1 (Lavender)
   if (c <= 10) return CalendarApp.EventColor.CYAN;       // 7 (Peacock)
@@ -1080,6 +1200,8 @@ function getEventColorEnum(t, isLong, isC) {
 }
 
 function getWeatherGlyph(code) {
+  if (code === null || code === undefined || isNaN(code)) return "🌤️";
+  code = Number(code);
   if (code === 0) return "☀️";
   if (code === 1) return "🌤️";
   if (code === 2) return "⛅";
@@ -1095,6 +1217,8 @@ function getWeatherGlyph(code) {
 }
 
 function getWeatherName(code) {
+  if (code === null || code === undefined || isNaN(code)) return "Fair";
+  code = Number(code);
   if (code === 0) return "Clear Sky";
   if (code === 1) return "Mainly Clear";
   if (code === 2) return "Partly Cloudy";
@@ -1112,6 +1236,7 @@ function getWeatherName(code) {
 }
 
 function getThermalText(t, isC) {
+  if (t == null || isNaN(t)) return "Freezing";
   const c = isC ? t : (t - 32) * (5 / 9);
   if (c <= 0) return "Freezing";
   if (c <= 10) return "Chilly";
@@ -1139,7 +1264,7 @@ function getAqiGlyph(aqi, aqiType) {
 }
 
 function getAqiLabel(aqi, aqiType) {
-  if (aqi === null) return "Unknown";
+  if (aqi == null || isNaN(aqi)) return "Unknown";
   if (aqiType === "USAQI") {
     if (aqi <= 50) return "Good";
     if (aqi <= 100) return "Moderate";
