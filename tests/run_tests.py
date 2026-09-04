@@ -1769,6 +1769,29 @@ def test_ical_generateIcsFeed_rainProb_null_guard():
         'rainProb must guard arr[idx] != null, not just arr ? arr[idx] : 0')
 
 
+def test_gcal_resolveCalendar_auto_creates_missing_calendar():
+    """resolveCalendar must create the calendar if it doesn't exist, rather than
+    throwing. The default CONFIG.calendarName = 'Weather Forecast' may not exist
+    on a fresh install — the script should bootstrap itself without manual setup."""
+    fn = re.search(r'function resolveCalendar\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must contain CalendarApp.createCalendar call (not throw on missing name)
+    assert_true('CalendarApp.createCalendar' in body,
+        'resolveCalendar must auto-create calendar instead of throwing')
+    assert_true("'Weather Forecast' not found" not in body,
+        'resolveCalendar must not throw when calendar is missing — must create it')
+
+
+def test_gcal_doc_header_describes_auto_create():
+    """File header must describe the new auto-create behavior, not the old
+    'throws explicit error when no calendar matches' wording."""
+    assert_true('auto-creates' in GCAL or 'auto-create' in GCAL,
+        'gcal file header must describe auto-create calendar behavior')
+    assert_true('throws an explicit error when no calendar matches' not in GCAL,
+        'stale "throws when no calendar matches" claim must be removed from gcal header')
+
+
 # =============================================================================
 # README hygiene
 # =============================================================================

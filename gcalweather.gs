@@ -13,8 +13,9 @@
  *  - Official EventColor Enum: Reliable temperature-based dynamic color coding.
  *  - Standard Atmosphere (atm) pressure scale (1013.25 hPa baseline).
  *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll with explicit 10s timeouts.
- *  - Calendar resolution: resolveCalendar() throws an explicit error when no calendar matches,
- *    preventing NullPointerException cascades in cal.getTimeZone() / createAllDayEvent().
+ *  - Calendar resolution: resolveCalendar() auto-creates the configured calendar
+ *    if missing (first-run bootstrap). Calendar-by-id path still throws if the
+ *    explicit id is invalid (caller misconfiguration, not recoverable by auto-create).
  *  - Storage cleanup gracefully falls back to UTC if calendar resolution fails.
  *  - Empty CONFIG.locations (post-geocoding) raises a clear, actionable error.
  *  - ASTRONOMICAL_EVENTS hoisted to a module-level const for fast lookup across hot paths.
@@ -1119,12 +1120,14 @@ function cleanupOldStorageKeys() {
   const all = props.getProperties();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 45);
+  // resolveCalendar now auto-creates the calendar if missing, so it will not throw.
+  // Still wrap defensively in case script lacks Calendar permission entirely.
   let calTz = "UTC";
   try {
     const cal = resolveCalendar();
     calTz = cal ? cal.getTimeZone() : "UTC";
   } catch (e) {
-    Logger.log("cleanupOldStorageKeys: resolveCalendar() threw — using UTC as cutoff timezone");
+    Logger.log("cleanupOldStorageKeys: Calendar API unavailable — using UTC as cutoff timezone");
   }
   const cutoffStr = Utilities.formatDate(cutoff, calTz, "yyyy-MM-dd");
 
@@ -1209,10 +1212,15 @@ function resolveCalendar() {
   }
   const cals = CalendarApp.getCalendarsByName(CONFIG.calendarName);
   if (cals.length > 0) return cals[0];
-  throw new Error(
-    "Calendar named '" + CONFIG.calendarName + "' does not exist. " +
-    "Either create it manually or set CONFIG.calendarId to an existing calendar's id."
-  );
+  Logger.log("resolveCalendar: '" + CONFIG.calendarName + "' not found — creating it");
+  const newCal = CalendarApp.createCalendar(CONFIG.calendarName, {
+    summary: "Weather & celestial events for configured locations",
+    location: "",
+    timeZone: Session.getScriptTimeZone()
+  });
+  newCal.setSelected(false);
+  Logger.log("Created calendar '" + newCal.getName() + "' (" + newCal.getId() + ")");
+  return newCal;
 }
 
 function norm(str) {
