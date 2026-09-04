@@ -1090,6 +1090,33 @@ def test_ical_ics_header_meta_block():
         'X-META-AQISOURCE must reference hourly-aggregated (current AQI pipeline)')
 
 
+def test_ical_ics_header_no_duplicate_aqisource():
+    """X-META-AQISOURCE must appear exactly once (RFC 5545 allows duplicates but
+    having two with different values confuses consumers)."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    count = body.count('X-META-AQISOURCE:')
+    assert_true(count == 1, f'X-META-AQISOURCE must appear exactly once (found {count})')
+
+
+def test_gcal_buildDashboardPayload_no_calTz_param():
+    """buildDashboardPayload must not accept a calTz parameter (it was unused).
+    Forwarded only to computeContinuousMultiDayAggregates which also does not
+    use it. Both signatures cleaned up to remove dead parameter."""
+    fn = re.search(r'function buildDashboardPayload\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    header = fn.group(0).split('\n')[0]
+    assert_true(', calTz)' not in header and 'calTz' not in header,
+        'buildDashboardPayload must not have calTz parameter (unused)')
+
+    fn2 = re.search(r'function computeContinuousMultiDayAggregates\([\s\S]*?\n\}', GCAL)
+    assert_true(fn2 is not None)
+    header2 = fn2.group(0).split('\n')[0]
+    assert_true(', calTz)' not in header2 and 'calTz' not in header2,
+        'computeContinuousMultiDayAggregates must not have calTz parameter (uses Date.UTC)')
+
+
 def test_norm_handles_non_string():
     """norm() must not throw when called with null, undefined, or a Number."""
     fn = re.search(r'function norm\([\s\S]*?\n\}', ICAL)

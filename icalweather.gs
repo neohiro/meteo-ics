@@ -526,7 +526,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
     `X-META-SCRIPTVERSION:${ICAL_CONFIG.version}`,
     `X-META-FETCHEDAT:${fetchedAt}`,
     "X-META-AQISOURCE:hourly-aggregated",
-    `X-META-AQISOURCE:open-meteo-hourly · v${ICAL_CONFIG.version} · ${fetchedAt}`
+    `X-META-BUILD:v${ICAL_CONFIG.version} · ${fetchedAt} · open-meteo-hourly`
   ];
 
   let eventCount = 0;

@@ -228,7 +228,7 @@ function syncWeatherToCalendar() {
 
       let payload;
       try {
-        payload = buildDashboardPayload(loc, data, offset, dStr, todayStr, globalStats, unitSymbol, calTz);
+        payload = buildDashboardPayload(loc, data, offset, dStr, todayStr, globalStats, unitSymbol);
       } catch (e) {
         Logger.log(`WARNING: buildDashboardPayload failed for ${loc.name} on ${dStr}: ${e}`);
         return;
@@ -537,7 +537,7 @@ function computeGlobalModelAccuracy(sym) {
 // DASHBOARD & EVENT FORMATTING ENGINE
 // ==========================================================
 
-function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globalStats, sym, calTz) {
+function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globalStats, sym) {
   const isC = CONFIG.temperatureUnit === "celsius";
   const cityKey = norm(loc.name);
   const record = getDayRecord(cityKey, targetDateStr);
@@ -718,7 +718,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   }
 
   const drift = computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym);
-  const aggregates = computeContinuousMultiDayAggregates(data, targetDateStr, isC, calTz);
+  const aggregates = computeContinuousMultiDayAggregates(data, targetDateStr, isC);
   const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, targetDateStr);
 
   const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
@@ -821,7 +821,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 // CONTINUOUS 7-DAY AGGREGATE ENGINE (Date-Key Aligned)
 // ==========================================================
 
-function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
+function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
   let totalRain = 0, totalMax = 0, totalMin = 0, gddSum = 0, wDays = 0;
   const base10 = isC ? 10 : 50;
 
