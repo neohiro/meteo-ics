@@ -998,6 +998,9 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
             result.aq.ozone.push(globalAqi.ozone[i]);
             result.aq.nitrogen_dioxide.push(globalAqi.nitrogen_dioxide[i]);
             result.aq.dust.push(globalAqi.dust[i]);
+            result.aq.alder_pollen.push(null);
+            result.aq.birch_pollen.push(null);
+            result.aq.grass_pollen.push(null);
           }
         });
         const sorted = result.aq.time.map((d, i) => ({ d, i })).sort((a, b) => a.d.localeCompare(b.d));

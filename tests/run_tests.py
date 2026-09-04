@@ -2171,6 +2171,34 @@ def test_ical_waqi_time_array_populated_with_iterated_dates():
         'r.time.push(dates[0]) must not appear — use r.time.push(d) iterating over dates')
 
 
+def test_ical_global_aqi_merge_syncs_pollen_arrays():
+    """When the global AQI fallback adds new dates (Open-Meteo has gaps), the merge
+    must also push null to the pollen arrays so all result.aq arrays stay the same
+    length after the sort.
+
+    Bug: globalAqi has no pollen arrays. If the merge pushed new elements only
+    to the main arrays and skipped alder_pollen/birch_pollen/grass_pollen, the
+    subsequent sorted re-ordering would mis-align those arrays, producing null
+    pollen at every index after the original time range.
+    """
+    fn = re.search(r'function fetchIcsAtmosphericDataParallel\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # The merge loop must push to all three pollen arrays when adding a new date.
+    # We check that alder_pollen (the first pollen field) has a .push() call
+    # inside the global AQI merge section.
+    assert_true(
+        re.search(r'alder_pollen\.push\(null\)', body),
+        'merge must push null to alder_pollen for new dates from global AQI '
+        '(otherwise pollen arrays go out of sync after the sort)')
+    assert_true(
+        re.search(r'birch_pollen\.push\(null\)', body),
+        'merge must push null to birch_pollen for new dates from global AQI')
+    assert_true(
+        re.search(r'grass_pollen\.push\(null\)', body),
+        'merge must push null to grass_pollen for new dates from global AQI')
+
+
 def test_ical_openaq_endpoints_in_source():
     """OpenAQ and WAQI endpoints must be defined as constants."""
     assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT\s*=', ICAL))
