@@ -840,7 +840,10 @@ function fetchIcsAtmosphericDataParallel(loc, unit) {
   const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const hUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm,relative_humidity_2m,dew_point_2m,cloud_cover&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${ICAL_CONFIG.forecastDays}&temperature_unit=${unit}&timezone=auto`;
-  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
+  // Open-Meteo Air Quality API hard-caps forecast_days at 7; anything higher returns HTTP 400.
+  // (verified 2026-09-04: forecast_days=7 → 200, forecast_days=8 → 400)
+  const aqDays = Math.min(ICAL_CONFIG.deterministicDays, 7);
+  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqDays}&timezone=auto`;
 
   try {
     const responses = UrlFetchApp.fetchAll([
@@ -1383,7 +1386,7 @@ function generatePrioritizedAdvices(ctx) {
   const maxC = isC ? safeMax : (safeMax - 32) * (5 / 9);
   const minC = isC ? safeMin : (safeMin - 32) * (5 / 9);
   const appC = isC ? safeApparent : (safeApparent - 32) * (5 / 9);
-  const uvMax = (typeof ctx.uv === "number") ? ctx.uv : ctx.uvMax;
+  const uvMax = Number.isFinite(ctx.uv) ? ctx.uv : 0;
 
   const pool = [];
 
@@ -1395,13 +1398,13 @@ function generatePrioritizedAdvices(ctx) {
     pool.push({ p: 80, text: adv("aqiSens", lang) });
   }
 
-  if (typeof uvMax === "number" && uvMax >= 8) {
+  if (Number.isFinite(uvMax) && uvMax >= 8) {
     pool.push({ p: 90, text: adv("uvExtreme", lang) });
-  } else if (typeof uvMax === "number" && uvMax >= 6) {
+  } else if (Number.isFinite(uvMax) && uvMax >= 6) {
     pool.push({ p: 70, text: adv("uvHigh", lang) });
-  } else if (typeof uvMax === "number" && uvMax >= 3) {
+  } else if (Number.isFinite(uvMax) && uvMax >= 3) {
     pool.push({ p: 40, text: adv("uvMod", lang) });
-  } else if (typeof uvMax === "number" && uvMax < 2) {
+  } else if (Number.isFinite(uvMax) && uvMax < 2) {
     pool.push({ p: 5, text: adv("uvLow", lang) });
   }
 
