@@ -8,16 +8,17 @@ Run the Python test suite (requires Python 3.8+):
 python tests/run_tests.py
 ```
 
-Expected output: **156 passed, 0 failed**.
+Expected output: **172 passed, 0 failed**.
 
 The suite covers:
-- **URL parameter parsing**: `clamp`, `normalizeLang`, `parseBoolParam` (8 supported languages, defaults, coercion)
+- **URL parameter parsing**: `clamp`, `normalizeLang`, `parseBoolParam`, `parseAqProvider` (8 supported languages, defaults, coercion)
 - **Moon phase**: UTC-reference calculation, correct synodic-month phase boundaries, pre-1970 safety, 8-phase boundary midpoints
 - **Weather glyph**: all major WMO codes, null/NaN guard
 - **Golden hour window**: hour-crossing logic, NaN guard, sentinel values
 - **ICS escape + folding**: RFC 5545 CRLF, special-character escaping, octet-count folding for UTF-8
 - **gcalweather.gs**: 22 source-code checks (resolveCalendar throws, CONFIG.dryRun, FETCH_TIMEOUT_MS, ASTRONOMICAL_EVENTS hoisted, moon UTC fix, boundaries, geocode null-return, whitespace trim, per-city try/catch, NaN audit guard, verifiedDays in accuracy metrics, config version, norm() hardened, isValidLatLon helper, tgtDateObj UTC, aggregates UTC, buildDashboardPayload past-day null guard, moon formula balanced parens, meteor peak regex, reconcileGroundTruth UTC anchor, dead getAstronomicalEvents removed, generatePrioritizedAdvices null-guard, null-temp guard, fetch logs failures)
 - **icalweather.gs**: 25 source-code checks (all 4 new URL params, SUPPORTED_LANGS, ADVICE_TEXTS, adv() helper, escapeIcsText RFC fix, foldIcsLines octet-count, moon UTC fix, getAstronomicalEventsForYear, assessRoadConditions/StargazingConditions lang-param, 5 helper lang-param, buildReadme, X-WR-LANG, status supportedLanguages, config version, norm() hardened, isValidLatLon helper, MAX_INPUT_LEN cap, cleanupOldStorageKeys strict date, computeDayAudit snapshotsTaken, X-WR-CALDESC, saveDayRecord try/catch, AQI poor threshold at 40, moon formula balanced parens, parseLocationsFromParams array-safe, doGet unitParam string-coerced, meteor peak regex, smoke tests)
+- **Global AQI integration (OpenAQ + WAQI)**: `parseAqProvider`, `aqProvider` URL param, `fetchGlobalAQI`/`gcalFetchGlobalAQI` existence, OpenAQ/WAQI endpoint constants, WAQI token ScriptProperties storage, AQ forecast_days cap at 7, AQI priority fallback, OpenAQ/WAQI fallback in fetch loops
 - **RFC 5545**: VCALENDAR/VEVENT structure, PRODID format, CRLF line endings
 - **Integration**: doGet/generateIcsFeed parameter flow, per-city error isolation, AQI type priority (EAQI before USAQI), 4-city limit + dedup, gcalweather dryRun, AQI staleness safety, calendar write try/catch
 - **Code quality**: no duplicate function defs, no dead code, advice priority ordering, PRODID RFC compliance

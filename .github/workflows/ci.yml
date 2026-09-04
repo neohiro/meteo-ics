@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Python test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python tests/run_tests.py
+
+      - name: Upload summary
+        if: always()
+        run: |
+          python tests/run_tests.py 2>&1 | tail -5
+
+  lint:
+    name: Script lint (brace/paren balance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check brace/paren/bracket balance
+        run: |
+          python - <<'PY'
+          import re, sys
+          for path in ("gcalweather.gs", "icalweather.gs"):
+              with open(path, "r", encoding="utf-8") as f:
+                  src = f.read()
+              # Strip strings & comments so we only count structural delimiters.
+              cleaned = re.sub(r"//[^\n]*", "", src)
+              cleaned = re.sub(r"/\*[\s\S]*?\*/", "", cleaned)
+              cleaned = re.sub(r'"(?:\\.|[^"\\])*"', '""', cleaned)
+              cleaned = re.sub(r"'(?:\\.|[^'\\])*'", "''", cleaned)
+              cleaned = re.sub(r"`(?:\\.|[^`\\])*`", "``", cleaned)
+              counts = {c: cleaned.count(c) for c in "(){}[]"}
+              ok = counts["("] == counts[")"] and counts["{"] == counts["}"] and counts["["] == counts["]"]
+              print(f"{path}: {counts} -> {'OK' if ok else 'FAIL'}")
+              if not ok:
+                  sys.exit(1)
+          PY

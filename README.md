@@ -1,8 +1,9 @@
 # 🌦️ Autonomous Weather, Astronomical & Atmospheric Calendar Engine
 
 [![Protocol](https://img.shields.io/badge/RFC-5545%20(iCalendar)-blue.svg)](#)
-[![Data Sources](https://img.shields.io/badge/Data-Open--Meteo%20%7C%20NOAA%20GFS%20%7C%20Copernicus%20CAMS-orange.svg)](#)
+[![Data Sources](https://img.shields.io/badge/Data-Open--Meteo%20%7C%20NOAA%20GFS%20%7C%20Copernicus%20CAMS%20%7C%20OpenAQ%20%7C%20WAQI-orange.svg)](#)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
+[![Version](https://img.shields.io/badge/Version-2.2.0-brightgreen.svg)](./CHANGELOG.md)
 
 **Your weather, astronomy & air-quality — automatically delivered to any calendar app.**  
 Subscribe once to a live `.ics` feed (Apple Calendar, Outlook, Google Calendar, Thunderbird) or deploy the Google Apps Script to get personalized, location-aware weather dashboards synced directly to your Google Calendar. Every morning, your calendar shows you what's coming — temperature swings, rain probability, road hazards, UV index, pollen loads, moon phases, and even meteor showers — with a built-in forecast accuracy audit that learns from reality over time.
@@ -12,7 +13,27 @@ Subscribe once to a live `.ics` feed (Apple Calendar, Outlook, Google Calendar, 
 ## 🌟 What This Service Does — At a Glance
 
 > **Transform your calendar into a personal meteorologist.**  
-> Stop checking weather apps. Your calendar already shows you your day — now it also shows you what's coming: hot, cold, wet, wild, hazy, or perfect. Real forecast data from Open-Meteo, NOAA GFS ensembles, and Copernicus CAMS, delivered automatically to Apple Calendar, Outlook, Google Calendar, or Thunderbird via a simple `.ics` subscription URL.
+> Stop checking weather apps. Your calendar already shows you your day — now it also shows you what's coming: hot, cold, wet, wild, hazy, or perfect. Real forecast data from Open-Meteo, NOAA GFS ensembles, Copernicus CAMS, OpenAQ (200+ countries), and WAQI (1000+ stations) — delivered automatically to Apple Calendar, Outlook, Google Calendar, or Thunderbird via a simple `.ics` subscription URL.
+
+### What's new in 2.2.0
+
+- **Global AQI Engine** — When a city is outside the Open-Meteo CAMS coverage (most of Africa, South America, South & Southeast Asia, Pacific islands, etc.), the engine transparently falls back to **OpenAQ v3** (free, no key) and then **WAQI** (token-optional). One URL parameter — `aqProvider=auto|openmeteo|openaq|waqi` — controls the source. See the [Air Quality Data Sources](#-air-quality-data-sources) section for details.
+- **WAQI token passthrough** — Provide your own WAQI API token via `?waqiToken=XXX` and it will be stored in `ScriptProperties` for higher rate limits.
+- **13 new tests** (172 total) cover the OpenAQ/WAQI integration, URL parameter parsing, and the new fallback paths.
+- **GitHub Actions CI** runs the full test suite on every push and PR.
+- **CHANGELOG.md** with full release notes from 2.2.0 backwards.
+
+### Why calendars?
+
+Your calendar is the one app you already check every morning. A weather forecast that lives *inside* the calendar — as a per-day all-day event titled "☀️ 22°C Paris" — is the most natural place for it. You glance at the day and you immediately know: dress warm, take the umbrella, drive carefully, the AQI is bad today. No new app, no new habit, no new login.
+
+### How it works under the hood
+
+1. **You request a URL** (e.g. `?cities=Tokyo&lang=ja&days=14`) once. The script auto-geocodes the city via Open-Meteo's free geocoder, fetches 4 endpoints in parallel (deterministic forecast, hourly aggregates, NOAA GFS ensemble, and air quality), and assembles them into one ICS feed.
+2. **Your calendar subscribes** to that URL and refreshes it on its own schedule (Apple Calendar: every hour; Google Calendar: every 6–12 hours; Outlook: every 24 hours by default).
+3. **Each day is a calendar event** with a colored title (e.g. blue=cool, orange=warm, red=hot) and a multi-section description showing temperature, sky, rain, wind, sun, moon, AQI, UV, pollen, road conditions (when T_min ≤ 7°C), 7-day aggregates, and a model accuracy audit.
+4. **The script self-audits**: every day, the latest forecast snapshot is stored in `ScriptProperties` (capped at 5 snapshots per day per city, retained 45 days). Once a day becomes "past", the stored actuals are compared against each historical snapshot to compute a lifetime Mean Absolute Error (MAE) for both temperature and precipitation, plus a lead-curve breakdown (D1–3, D4–7, D8–14, D15+).
+5. **You see your model's reliability** before you trust the forecast. After ~7 days of operation, the dashboard shows `±2.3°C` (lifetime), `A (High)`, and a lead curve: `D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°`.
 
 ---
 
@@ -119,6 +140,8 @@ Append `?` for the first parameter and `&` for additional flags.
 | `unit` | `celsius`, `fahrenheit` | `celsius` | Temperature scale |
 | `days` | `1` to `30` | `30` | Forecast window |
 | `hazards` | `true`, `false` | `true` | Road risk alerts (active when T_min ≤ 7°C) |
+| `aqProvider` | `auto`, `openmeteo`, `openaq`, `waqi` | `auto` | AQI source: `auto` cascades CAMS → USAQI → OpenAQ → WAQI; specific values force a single source |
+| `waqiToken` | any string | *(none)* | WAQI API token (stored in `ScriptProperties` for higher rate limit) |
 | `action` | `status`, `metrics` | *(none)* | Returns live JSON diagnostics |
 
 > **⚠️ Quota Protection:** Hard cap of **4 cities** per request to prevent execution timeouts.
@@ -137,15 +160,25 @@ Do not download the `.ics` file; subscribe to the URL for automatic updates:
 
 ## 🌐 Air Quality Data Sources
 
-| Source | Coverage | API Access | Best For |
-|---|---|---|---|
-| **Copernicus CAMS** (via Open-Meteo) | Europe | Built-in (free) | EAQI, pollen (EU residents) |
-| **NOAA / US EPA** (via Open-Meteo) | United States | Built-in (free) | USAQI (US residents) |
-| **OpenAQ** (openaq.org) | 200+ countries | Free API key, 60 req/min | Global PM2.5, PM10, NO₂, O₃ |
-| **WAQI** (aqicn.org) | 1000+ stations | Free token, 1000 req/s | City-level AQI + forecast |
-| **NASA FIRMS** (firms.modaps.eosdi.nasa.gov) | Global (fire/smoke) | Free, no key | Wildfire smoke advisories |
+The AQI engine has a priority cascade. For each city, it tries them in order and uses the first one that returns data:
 
-> **For developers:** OpenAQ and WAQI can be integrated via standard `UrlFetchApp.fetch()` calls in Google Apps Script. See the `gcalweather.gs` source for pattern.
+| Priority | Source | Coverage | API Access | Best For | Status |
+|---|---|---|---|---|---|
+| 1 | **Copernicus CAMS** (via Open-Meteo) | Europe | Built-in (free) | EAQI, pollen (EU residents) | ✅ Live |
+| 2 | **NOAA / US EPA** (via Open-Meteo) | United States | Built-in (free) | USAQI (US residents) | ✅ Live |
+| 3 | **OpenAQ** (openaq.org v3) | 200+ countries | Free, no key (60 req/min) | Global PM2.5, PM10, NO₂, O₃ | ✅ Live (v2.2.0+) |
+| 4 | **WAQI** (aqicn.org) | 1000+ stations | Free token optional (1000 req/s with token) | City-level AQI (any country) | ✅ Live (v2.2.0+) |
+| 5 | **NASA FIRMS** (firms.modaps.eosdi.nasa.gov) | Global (fire/smoke) | Free, no key | Wildfire smoke advisories | 📝 Roadmap |
+
+The `aqProvider` URL parameter lets you override the cascade:
+- `aqProvider=auto` (default) — try CAMS → USAQI → OpenAQ → WAQI in order
+- `aqProvider=openmeteo` — only CAMS/USAQI (no global fallback)
+- `aqProvider=openaq` — force OpenAQ only
+- `aqProvider=waqi` — force WAQI only (provide `?waqiToken=XXX` for higher quota)
+
+**Example:** a city in Lagos, Nigeria, with no CAMS coverage: `?cities=Lagos&aqProvider=auto` will automatically fall through to OpenAQ for the AQI value.
+
+> **For developers:** the OpenAQ and WAQI integration lives in `fetchGlobalAQI()` (icalweather.gs) and `gcalFetchGlobalAQI()` (gcalweather.gs). Both attempt OpenAQ first, then WAQI, and merge results into the same `data.aq` shape that downstream consumers expect — so no other code needs to change when you switch providers.
 
 ---
 
@@ -158,8 +191,9 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 - **D1–14:** Deterministic high-res forecast (temp, rain prob/vol, wind, pressure, UV, ET₀).
 - **D15–30:** NOAA GFS 31-member probabilistic ensemble trajectory (`±°`).
 - **D-5 to D-1:** Verified ground-truth logbook with D-countdown accuracy drift auditing.
-- **Air Quality & Sky:** CAMS AQI, PM2.5, PM10, pollen count, moon phases, meteor peaks.
+- **Air Quality & Sky:** CAMS AQI (Europe) / US EPA AQI (North America) / **OpenAQ + WAQI global fallback** (200+ countries) — PM2.5, PM10, pollen count, moon phases, meteor peaks.
 - **Road Hazards:** Ice/frost advisories auto-rendered only when T_min ≤ 7°C.
+- **Global AQI Engine (v2.2.0+):** when the Open-Meteo CAMS/NOAA endpoints return no data for a region (most of Africa, South America, South & Southeast Asia, Pacific islands), the script transparently falls back to OpenAQ (free, no key) and then WAQI (token-optional). Override with `?aqProvider=openaq` or `?aqProvider=waqi` to force a specific source.
 
 ### 🇬🇧 Quick Links
 
@@ -187,6 +221,7 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 - **第 15–30 天：** 美国 NOAA GFS 31 成员集合预报模型（附带模型分歧度 `±°`）。
 - **过去 5 天：** 历史实测回溯（Ground Truth），以 D 倒计时坐标审计预测漂移。
 - **空气质量与天象：** 欧洲 CAMS AQI 指数、PM2.5、PM10、花粉浓度、月相、流星雨极大期。
+- **全球空气质量引擎 (v2.2.0+)：** 在 CAMS 与美国 EPA AQI 覆盖范围之外（非洲、南美洲、南亚/东南亚、太平洋岛国等），脚本自动回退到 **OpenAQ**（200+ 国家，免费，无需密钥）和 **WAQI**（1000+ 站点，可选 token）。使用 `?aqProvider=openaq` 或 `?aqProvider=waqi` 强制指定数据源。
 - **道路安全：** 当气温 ≤ 7°C 时自动激活结冰与湿滑预警。
 
 ### 🇨🇳 快捷链接
@@ -209,6 +244,7 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 - **दिन 15–30:** NOAA GFS 31-सदस्यीय संभावित मौसम मॉडल (सटीकता अंतर `±°` के साथ)।
 - **पिछले 5 दिन:** वास्तविक दर्ज मौसम और D-काउंटडाउन प्रणाली पर आधारित मॉडल ऑडिट।
 - **वायु गुणवत्ता और खगोल:** यूरोपीय CAMS AQI, PM2.5, PM10, पराग स्तर, चंद्र कलाएं, उल्कापिंड गतिविधि।
+- **वैश्विक AQI इंजन (v2.2.0+):** जब कोई शहर CAMS/नोएए EPA AQI कवरेज से बाहर है (अफ्रीका, दक्षिण अमेरिका, दक्षिण/दक्षिण-पूर्व एशिया, प्रशांत द्वीप समूह), तो स्क्रिप्ट स्वचालित रूप से **OpenAQ** (200+ देश, मुफ्त, बिना कुंजी) और फिर **WAQI** (token-वैकल्पिक) पर गिरती है। `?aqProvider=openaq` या `?aqProvider=waqi` से विशेष स्रोत बाध्य करें।
 - **सड़क चेतावनी:** तापमान <= 7°C होने पर सड़क पर फिसलन और पाले की चेतावनी।
 
 ### 🇮🇳 तैयार लिंक
@@ -231,6 +267,7 @@ Recibe cada mañana lo que viene: temperaturas, lluvia, viento, UV, calidad del 
 - **Días 15–30:** Modelo probabilístico NOAA GFS (31 miembros) con dispersión (`±°`).
 - **Días -5 a -1:** Registro histórico verificado con auditoría de error según cuenta regresiva D.
 - **Calidad del Aire y Cielo:** CAMS AQI, PM2.5, PM10, polen, fases lunares y lluvias de meteoros.
+- **Motor AQI global (v2.2.0+):** cuando una ciudad queda fuera de la cobertura CAMS/EPA (África, Sudamérica, Sur/Sureste asiático, islas del Pacífico), el script recurre automáticamente a **OpenAQ** (200+ países, gratis, sin clave) y luego a **WAQI** (token opcional). Usa `?aqProvider=openaq` o `?aqProvider=waqi` para forzar una fuente.
 - **Seguridad Vial:** Advertencias automáticas de calzada deslizante activas solo con T_min ≤ 7°C.
 
 ### 🇪🇸 Enlaces Directos
@@ -253,6 +290,7 @@ Chaque matin, votre calendrier vous montre ce qui arrive. Des prévisions haute 
 - **J15–30 :** Ensemble probabiliste NOAA GFS (31 membres) avec dispersion (`±°`).
 - **J-5 à J-1 :** Historique vérifié et calcul de dérive du modèle basé sur le compte à rebours D.
 - **Qualité de l'Air & Espace :** CAMS AQI, PM2.5, PM10, pollens, phases lunaires, météo.
+- **Moteur AQI mondial (v2.2.0+) :** lorsqu'une ville est hors couverture CAMS/EPA (Afrique, Amérique du Sud, Asie du Sud/du Sud-Est, îles du Pacifique), le script bascule automatiquement sur **OpenAQ** (200+ pays, gratuit, sans clé) puis sur **WAQI** (jeton optionnel). Forcer une source avec `?aqProvider=openaq` ou `?aqProvider=waqi`.
 - **Sécurité Routière :** Alertes de verglas/gel activées uniquement lorsque T_min ≤ 7°C.
 
 ### 🇫🇷 Liens Prêts à l'Emploi
@@ -275,6 +313,7 @@ Chaque matin, votre calendrier vous montre ce qui arrive. Des prévisions haute 
 - **الأيام 15–30:** نموذج التجميع الاحتمالي NOAA GFS مع نسبة تشتت النموذج (`±°`).
 - **الأيام السابقة (-5 إلى -1):** سجل الرصد الواقعي لقياس هامش خطأ التوقعات بنظام العد التنازلي D.
 - **جودة الهواء والفلك:** مؤشر CAMS AQI، والجسيمات PM2.5/PM10، واللقاح، ومنازل القمر والشهب.
+- **محرك AQI العالمي (v2.2.0+):** عندما تقع مدينة خارج تغطية CAMS/EPA (أفريقيا، أمريكا الجنوبية، جنوب/جنوب شرق آسيا، جزر المحيط الهادئ)، يلجأ السكريبت تلقائياً إلى **OpenAQ** (200+ دولة، مجاني، بدون مفتاح) ثم **WAQI** (رمز اختياري). اضغط `?aqProvider=openaq` أو `?aqProvider=waqi` لإجبار مصدر محدد.
 - **مخاطر الطرق:** تنبيهات الصقيع والانزلاق تتفعل تلقائياً فقط عند حرارة <= 7°C.
 
 ### 🇸🇦 روابط مباشرة
@@ -297,6 +336,7 @@ Jeden Morgen zeigt Ihnen Ihr Kalender, was kommt. Hochauflösende Vorhersagen (T
 - **T15–30:** Probabilistisches NOAA GFS 31-Member Ensemble mit Unsicherheitsbereich (`±°`).
 - **T-5 bis T-1:** Verifiziertes Realdaten-Logbuch mit Modellabweichungs-Audit via D-Countdown.
 - **Luftqualität & Himmel:** CAMS AQI, PM2.5, PM10, Pollenflug, Mondphasen und Sternschnuppen-Peaks.
+- **Globale AQI-Engine (v2.2.0+):** Liegt eine Stadt außerhalb der CAMS/EPA-Abdeckung (Afrika, Südamerika, Süd-/Südostasien, Pazifikinseln), fällt das Skript automatisch auf **OpenAQ** (200+ Länder, kostenlos, ohne Schlüssel) und dann auf **WAQI** (Token optional) zurück. Mit `?aqProvider=openaq` oder `?aqProvider=waqi` eine bestimmte Quelle erzwingen.
 - **Straßenglätte:** Automatische Warnungen aktiv ausschließlich bei T_min ≤ 7°C.
 
 ### 🇩🇪 Sofort-Links
@@ -319,6 +359,7 @@ Elke ochtend toont uw agenda wat er aankomt. Hoge-resolutie voorspellingen (D1�
 - **D15–30:** NOAA GFS 31-lid ensemble projecties met modelspreiding (`±°`).
 - **D-5 tot D-1:** Geverifieerd waarnemingenlogboek met drift-auditing volgens D-aftellogica.
 - **Luchtkwaliteit & Hemel:** CAMS LKI/AQI, PM2.5, PM10, pollenbelasting, maanfasen en meteorenzwermen.
+- **Wereldwijde AQI-engine (v2.2.0+):** valt een stad buiten de CAMS/EPA-dekking (Afrika, Zuid-Amerika, Zuid-/Zuidoost-Azië, Pacifische eilanden), dan valt het script automatisch terug op **OpenAQ** (200+ landen, gratis, geen sleutel) en daarna op **WAQI** (token optioneel). Gebruik `?aqProvider=openaq` of `?aqProvider=waqi` om een specifieke bron te forceren.
 - **Wegcondities:** Gladheidswaarschuwingen automatisch actief zodra T_min ≤ 7°C.
 
 ### 🇳🇱 Directe Links

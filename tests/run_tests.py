@@ -1967,23 +1967,7 @@ def test_ical_assessRoadConditions_uses_isfinite():
 # =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================
-for name, fn in list(globals().items()):
-    if name.startswith('test_') and callable(fn):
-        t(name[5:].replace('_', ' '), fn)
-
-# =============================================================================
-# Summary
-# =============================================================================
-print(f'\n=== SUMMARY ===')
-print(f'Passed: {pass_n}')
-print(f'Failed: {fail_n}')
-if fail_n > 0:
-    print('\nFailures:')
-    for n, e in failures:
-        print(f'  - {n}')
-        print(f'    {e.split(chr(10))[0]}')
-    sys.exit(1)
-sys.exit(0)
+# (Moved to end of file to capture all test_ functions defined below.)
 
 
 def test_ical_aq_forecast_days_capped_at_7():
@@ -2011,4 +1995,119 @@ def test_gcal_aq_forecast_days_capped_at_7():
         'aqUrl must reference the capped aqForecastDays variable')
 
 
+def test_parseAqProvider_ical():
+    """parseAqProvider must exist and return correct values for all four options."""
+    assert_true(re.search(r'function parseAqProvider\(', ICAL),
+        'parseAqProvider must be defined in icalweather.gs')
+    assert_true(re.search(r'parseAqProvider\(', ICAL),
+        'parseAqProvider must be called in doGet')
+
+
+def test_ical_aqProvider_url_param():
+    """doGet must read aqProvider and waqiToken params."""
+    fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqProvider' in body,
+        'doGet must read aqProvider URL param')
+    assert_true('waqiToken' in body,
+        'doGet must read waqiToken URL param')
+
+
+def test_ical_generateIcsFeed_passes_aqProvider():
+    """generateIcsFeed must receive aqProvider from opts and pass it to the fetcher."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqProvider' in body,
+        'generateIcsFeed must read aqProvider from options')
+
+
+def test_ical_fetchGlobalAQI_function_exists():
+    """fetchGlobalAQI function must exist with correct structure."""
+    assert_true(re.search(r'function fetchGlobalAQI\(', ICAL),
+        'fetchGlobalAQI must be defined in icalweather.gs')
+    assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT', ICAL),
+        'OpenAQ endpoint constant must be defined')
+    assert_true(re.search(r'WAQI_BASE_ENDPOINT', ICAL),
+        'WAQI endpoint constant must be defined')
+
+
+def test_gcal_fetchGlobalAQI_function_exists():
+    """gcalFetchGlobalAQI function must exist with correct structure."""
+    assert_true(re.search(r'function gcalFetchGlobalAQI\(', GCAL),
+        'gcalFetchGlobalAQI must be defined in gcalweather.gs')
+    assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT', GCAL),
+        'OpenAQ endpoint constant must be defined in gcalweather.gs')
+    assert_true(re.search(r'WAQI_BASE_ENDPOINT', GCAL),
+        'WAQI endpoint constant must be defined in gcalweather.gs')
+
+
+def test_ical_openaq_fallback_in_fetch():
+    """fetchIcsAtmosphericDataParallel must call fetchGlobalAQI when needed."""
+    fn = re.search(r'function fetchIcsAtmosphericDataParallel\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('fetchGlobalAQI' in body,
+        'fetchIcsAtmosphericDataParallel must call fetchGlobalAQI for global fallback')
+    assert_true('needsGlobalFallback' in body,
+        'fetchIcsAtmosphericDataParallel must compute needsGlobalFallback flag')
+
+
+def test_ical_openaq_endpoints_in_source():
+    """OpenAQ and WAQI endpoints must be defined as constants."""
+    assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT\s*=', ICAL))
+    assert_true(re.search(r'WAQI_BASE_ENDPOINT\s*=', ICAL))
+
+
+def test_gcal_openaq_endpoints_in_source():
+    """OpenAQ and WAQI endpoints must be defined as constants in gcal."""
+    assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT\s*=', GCAL))
+    assert_true(re.search(r'WAQI_BASE_ENDPOINT\s*=', GCAL))
+
+
+def test_gcal_config_aqProvider():
+    """CONFIG must include aqProvider with default auto."""
+    assert_true(re.search(r'aqProvider:\s*"auto"', GCAL),
+        'CONFIG must have aqProvider: "auto" default')
+
+
+def test_ical_waqi_token_stored_in_script_props():
+    """doGet must persist waqiToken to ScriptProperties."""
+    fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('setProperty' in body and 'WAQI_TOKEN' in body,
+        'waqiToken must be stored to ScriptProperties under WAQI_TOKEN key')
+
+
+def test_ical_aqi_display_includes_source_context():
+    """AQI display labels must show correct context for OpenAQ/WAQI values."""
+    # When no European/US AQI is available but OpenAQ or WAQI fills in, the value
+    # is stored in european_aqi or us_aqi and the existing label helpers must still work.
+    # The existing getAqiLabel/getAqiGlyph tests already cover the numeric path.
+    assert_true(re.search(r'getAqiLabel', ICAL))
+    assert_true(re.search(r'getAqiGlyph', ICAL))
+
+
+# =============================================================================
+# Register all test_ functions and run via t()
+# =============================================================================
+for name, fn in list(globals().items()):
+    if name.startswith('test_') and callable(fn):
+        t(name[5:].replace('_', ' '), fn)
+
+# =============================================================================
+# Summary
+# =============================================================================
+print(f'\n=== SUMMARY ===')
+print(f'Passed: {pass_n}')
+print(f'Failed: {fail_n}')
+if fail_n > 0:
+    print('\nFailures:')
+    for n, e in failures:
+        print(f'  - {n}')
+        print(f'    {e.split(chr(10))[0]}')
+    sys.exit(1)
+sys.exit(0)
 

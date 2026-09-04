@@ -6,7 +6,8 @@
  *    Optional 'country' field narrows the geocoder query.
  *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
  *  - Clean single empty line (\n\n) separation between all category cards.
- *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
+ *  - Global AQI Engine: Automatic fallback between European AQI (0-100), US EPA AQI (0-500),
+ *    OpenAQ (200+ countries, free, no key), and WAQI (1000+ stations, token-optional).
  *  - 100% Guaranteed Deduplication: Keyed with [KEY:YYYY-MM-DD_city] + orphaned event sweep.
  *  - Timezone Drift Immunity: UTC-anchored date keys (T00:00:00Z / Date.UTC) match Open-Meteo's UTC date strings, so server timezone never misclassifies past vs future days.
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
@@ -55,13 +56,14 @@ function geocodeCity(name) {
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
-  version: "2.1.0",
+  version: "2.2.0",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
   historyDays: 5,
   autoDetectFromEvents: true,
   dryRun: false,
+  aqProvider: "auto",
   locations: [
     { name: "Kyoto" },
     { name: "Brunssum" }
@@ -71,6 +73,9 @@ const CONFIG = {
 const KEY_REGEX = /\[KEY:([a-zA-Z0-9_\-]+)\]/;
 const MAX_SNAPSHOTS_PER_DAY = 5;
 const FETCH_TIMEOUT_MS = 10000;
+const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
+const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
+const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
 const ASTRONOMICAL_EVENTS = {
   "01-03": "Quadrantid Meteor Peak (~110/hr)",
   "01-04": "Earth at Perihelion (Closest to Sun)",
@@ -294,6 +299,7 @@ function syncWeatherToCalendar() {
 function fetchAllAtmosphericDataParallel(locationPool) {
   const weatherCache = new Map();
   const u = CONFIG.temperatureUnit;
+  const aqProvider = (CONFIG.aqProvider || "auto").toLowerCase();
   const requests = [];
   const reqMap = [];
 
@@ -301,9 +307,10 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
     const dHourlyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
     const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${CONFIG.forecastDays}&temperature_unit=${u}&timezone=auto`;
-    // Open-Meteo Air-Quality API hard-caps forecast_days at 7; anything higher returns HTTP 400.
-    // (past_days=6 + forecast_days=7 = 13 days total — just under the ~14-day limit.)
-    const aqForecastDays = Math.min(CONFIG.deterministicDays, 7);
+    // Open-Meteo Air-Quality API hard-caps forecast_days at 7 (anything higher returns HTTP 400).
+    // For regions outside EU/US, the global OpenAQ/WAQI fallback (see fetchGlobalAQI) provides
+    // additional coverage when aqProvider is "auto" or explicitly "openaq" or "waqi".
+    const aqForecastDays = Math.min(CONFIG.deterministicDays, OPEN_METEO_AQ_FORECAST_DAYS_CAP);
     const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqForecastDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
 
     requests.push({ url: dDailyUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
@@ -400,7 +407,124 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     Logger.log("Parallel atmospheric fetch error: " + e);
   }
 
+  const needsGlobalFallback = aqProvider === "auto"
+    ? false
+    : aqProvider === "openaq" || aqProvider === "waqi";
+
+  if (needsGlobalFallback || aqProvider === "auto") {
+    locationPool.forEach((loc, key) => {
+      const cacheObj = weatherCache.get(key);
+      if (!cacheObj) return;
+      const noAqi = !cacheObj.aq || !cacheObj.aq.time ||
+        (cacheObj.aq.european_aqi.every(v => v === null) && cacheObj.aq.us_aqi.every(v => v === null));
+      if (noAqi || needsGlobalFallback) {
+        const globalAqi = gcalFetchGlobalAQI(loc, aqProvider);
+        if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
+          if (cacheObj.aq && cacheObj.aq.time) {
+            globalAqi.time.forEach((d, i) => {
+              const exIdx = cacheObj.aq.time.indexOf(d);
+              if (exIdx === -1) {
+                cacheObj.aq.time.push(d);
+                cacheObj.aq.european_aqi.push(globalAqi.european_aqi[i]);
+                cacheObj.aq.us_aqi.push(globalAqi.us_aqi[i]);
+                cacheObj.aq.pm2_5.push(globalAqi.pm2_5[i]);
+                cacheObj.aq.pm10.push(globalAqi.pm10[i]);
+              }
+            });
+            const sorted = cacheObj.aq.time.map((d, i) => ({ d, i })).sort((a, b) => a.d.localeCompare(b.d));
+            cacheObj.aq.time = sorted.map(x => x.d);
+            cacheObj.aq.european_aqi = sorted.map(x => cacheObj.aq.european_aqi[x.i]);
+            cacheObj.aq.us_aqi = sorted.map(x => cacheObj.aq.us_aqi[x.i]);
+            cacheObj.aq.pm2_5 = sorted.map(x => cacheObj.aq.pm2_5[x.i]);
+            cacheObj.aq.pm10 = sorted.map(x => cacheObj.aq.pm10[x.i]);
+          } else {
+            cacheObj.aq = globalAqi;
+          }
+        }
+      }
+    });
+  }
+
   return weatherCache;
+}
+
+function gcalFetchGlobalAQI(loc, aqProvider) {
+  const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [] };
+  const today = new Date();
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today.getTime() + i * 86400000);
+    dates.push(Utilities.formatDate(d, "UTC", "yyyy-MM-dd"));
+  }
+
+  if (aqProvider === "auto" || aqProvider === "openaq") {
+    try {
+      const res = UrlFetchApp.fetch(
+        `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&limit=1`,
+        { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
+      );
+      if (res.getResponseCode() === 200) {
+        const json = JSON.parse(res.getContentText());
+        if (json.results && json.results.length > 0) {
+          const measurements = json.results[0].measurements || [];
+          const openaqVals = {};
+          measurements.forEach(m => {
+            const param = (m.parameter || "").toLowerCase();
+            if (openaqVals[param] === undefined || (m.lastUpdated && new Date(m.lastUpdated) > new Date(openaqVals[param + "_ts"] || 0))) {
+              openaqVals[param] = m.value;
+              openaqVals[param + "_ts"] = m.lastUpdated;
+            }
+          });
+          const fill = v => (v !== undefined && v !== null && !isNaN(v) ? Math.round(v) : null);
+          const pm25 = fill(openaqVals["pm25"]) || fill(openaqVals["pm2.5"]);
+          const pm10 = fill(openaqVals["pm10"]);
+          dates.forEach(d => {
+            r.time.push(d);
+            r.european_aqi.push(pm25);
+            r.us_aqi.push(pm25);
+            r.pm2_5.push(pm25);
+            r.pm10.push(pm10);
+          });
+          return r;
+        }
+      } else {
+        Logger.log(`gcalFetchGlobalAQI/OpenAQ: ${loc.name} returned HTTP ${res.getResponseCode()}`);
+      }
+    } catch (e) {
+      Logger.log(`gcalFetchGlobalAQI/OpenAQ error for ${loc.name}: ${e}`);
+    }
+  }
+
+  if (aqProvider === "auto" || aqProvider === "waqi") {
+    try {
+      const token = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
+      const url = `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/${token ? "?token=" + token : ""}`;
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
+      if (res.getResponseCode() === 200) {
+        const json = JSON.parse(res.getContentText());
+        if (json.data && json.data.aqi !== undefined) {
+          const aqi = Math.round(Number(json.data.aqi));
+          const iaqi = json.data.iaqi || {};
+          const pm25v = iaqi.pm25 ? Math.round(Number(iaqi.pm25.v)) : null;
+          const pm10v = iaqi.pm10 ? Math.round(Number(iaqi.pm10.v)) : null;
+          dates.forEach(d => {
+            r.time.push(d);
+            r.european_aqi.push(aqi);
+            r.us_aqi.push(aqi);
+            r.pm2_5.push(pm25v);
+            r.pm10.push(pm10v);
+          });
+          return r;
+        }
+      } else {
+        Logger.log(`gcalFetchGlobalAQI/WAQI: ${loc.name} returned HTTP ${res.getResponseCode()}`);
+      }
+    } catch (e) {
+      Logger.log(`gcalFetchGlobalAQI/WAQI error for ${loc.name}: ${e}`);
+    }
+  }
+
+  return null;
 }
 
 // ==========================================================
