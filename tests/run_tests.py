@@ -2003,6 +2003,37 @@ def test_parseAqProvider_ical():
         'parseAqProvider must be called in doGet')
 
 
+def test_parseAqProvider_no_openmeteo_branch():
+    """parseAqProvider must NOT accept 'openmeteo' — it's not a valid AQ source here."""
+    fn = re.search(r'function parseAqProvider\([^)]*\)\s*\{([\s\S]*?)\n\}', ICAL)
+    assert_true(fn is not None, 'parseAqProvider function body must be findable')
+    body = fn.group(1)
+    # 'openmeteo' must not appear as a returnable option
+    assert_true('"openmeteo"' not in body and "'openmeteo'" not in body,
+        'parseAqProvider must not return "openmeteo" — only auto/openaq/waqi are supported')
+
+
+def test_waqi_url_conditionally_includes_token():
+    """WAQI URL must NOT append ?token= when no token is configured.
+
+    The fix: use a ternary at statement level (token ? URL_with_token : URL_without)
+    rather than embedding ?token=<expr> inside a template literal, which would
+    produce a bare '?token=' when the token is empty.
+    """
+    for fname, src in [("icalweather.gs", ICAL), ("gcalweather.gs", GCAL)]:
+        # Slice the body of fetchGlobalAQI / gcalFetchGlobalAQI
+        marker = "gcalFetchGlobalAQI" if "gcalweather" in fname else "fetchGlobalAQI"
+        idx = src.find(f"function {marker}")
+        assert_true(idx > 0, f"{fname}: {marker} not found")
+        # Take next 2000 chars as function body approximation
+        body = src[idx:idx + 2500]
+        # The buggy pattern is a '?token=' literal embedded inside a template literal
+        # with a ternary. The fix removes any '?token=' literal from the WAQI URL.
+        assert_true('"?token="' not in body and "'?token='" not in body,
+            f"{fname}: no '\"?token=\"' or ''?token='' literal should appear — "
+            "this would produce a bare '?token=' when the token is empty")
+
+
 def test_ical_aqProvider_url_param():
     """doGet must read aqProvider and waqiToken params."""
     fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)

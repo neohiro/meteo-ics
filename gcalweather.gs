@@ -498,7 +498,9 @@ function gcalFetchGlobalAQI(loc, aqProvider) {
   if (aqProvider === "auto" || aqProvider === "waqi") {
     try {
       const token = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
-      const url = `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/${token ? "?token=" + token : ""}`;
+      const url = token
+        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${token}`
+        : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       if (res.getResponseCode() === 200) {
         const json = JSON.parse(res.getContentText());

@@ -224,7 +224,6 @@ function parseAqProvider(raw) {
   const s = String(raw || "auto").toLowerCase().trim();
   if (s === "openaq") return "openaq";
   if (s === "waqi") return "waqi";
-  if (s === "openmeteo") return "openmeteo";
   return "auto";
 }
 
@@ -951,7 +950,8 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider) {
   }
 
   const needsGlobalFallback = aqProvider === "auto"
-    ? !result.aq || !result.aq.time || result.aq.european_aqi.every(v => v === null) && result.aq.us_aqi.every(v => v === null)
+    ? !result.aq || !result.aq.time
+      || (result.aq.european_aqi.every(v => v === null) && result.aq.us_aqi.every(v => v === null))
     : aqProvider === "openaq" || aqProvider === "waqi";
 
   if (needsGlobalFallback) {
@@ -1045,7 +1045,9 @@ function fetchGlobalAQI(loc, aqProvider) {
   if (aqProvider === "auto" || aqProvider === "waqi") {
     try {
       const token = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
-      const url = `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/${token ? "?token=" + token : ""}`;
+      const url = token
+        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${token}`
+        : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       if (res.getResponseCode() === 200) {
         const json = JSON.parse(res.getContentText());
