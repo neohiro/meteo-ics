@@ -4,182 +4,113 @@
 [![Data Sources](https://img.shields.io/badge/Data-Open--Meteo%20%7C%20NOAA%20GFS%20%7C%20Copernicus%20CAMS%20%7C%20OpenAQ%20%7C%20WAQI-orange.svg)](#)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
 [![Version](https://img.shields.io/badge/Version-2.2.0-brightgreen.svg)](./CHANGELOG.md)
+[![CI](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/Tests-178%20%2B%20CI-brightgreen.svg)](#)
 
 **Your weather, astronomy & air-quality — automatically delivered to any calendar app.**  
-Subscribe once to a live `.ics` feed (Apple Calendar, Outlook, Google Calendar, Thunderbird) or deploy the Google Apps Script to get personalized, location-aware weather dashboards synced directly to your Google Calendar. Every morning, your calendar shows you what's coming — temperature swings, rain probability, road hazards, UV index, pollen loads, moon phases, and even meteor showers — with a built-in forecast accuracy audit that learns from reality over time.
+Subscribe once to a live `.ics` feed and your calendar does the rest. No new app, no new login, no new habit. Wake up to per-day events titled `☀️ 22°C Paris` with temperature, rain, UV, AQI, moon phase, pollen and road-hazard advice — all built from real forecast models with a live accuracy audit.
 
 ---
 
-## 🌟 What This Service Does — At a Glance
+## 🚀 Try It Now — Pick Your City
 
-> **Transform your calendar into a personal meteorologist.**  
-> Stop checking weather apps. Your calendar already shows you your day — now it also shows you what's coming: hot, cold, wet, wild, hazy, or perfect. Real forecast data from Open-Meteo, NOAA GFS ensembles, Copernicus CAMS, OpenAQ (200+ countries), and WAQI (1000+ stations) — delivered automatically to Apple Calendar, Outlook, Google Calendar, or Thunderbird via a simple `.ics` subscription URL.
+> Copy any URL below and paste it into your calendar app's subscription field.
 
-### What's new in 2.2.0
+| Region | Cities | URL |
+|---|---|---|
+| 🇬🇧 British Isles | London, Edinburgh · 30 days | `https://script.google.com/macros/s/…/exec?cities=London,Edinburgh` |
+| 🇺🇸 United States | New York, Chicago, Seattle · °F · 14 days | `https://script.google.com/macros/s/…/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14` |
+| 🇦🇺 Australia | Sydney, Melbourne · hazards off | `https://script.google.com/macros/s/…/exec?cities=Sydney,Melbourne&hazards=false` |
+| 🌐 JSON Telemetry | Live diagnostics | `https://script.google.com/macros/s/…/exec?action=status` |
 
-- **Global AQI Engine** — When a city is outside the Open-Meteo CAMS coverage (most of Africa, South America, South & Southeast Asia, Pacific islands, etc.), the engine transparently falls back to **OpenAQ v3** (free, no key) and then **WAQI** (token-optional). One URL parameter — `aqProvider=auto|openaq|waqi` — controls the source. See the [Air Quality Data Sources](#-air-quality-data-sources) section for details.
-- **WAQI token passthrough** — Provide your own WAQI API token via `?waqiToken=XXX` and it will be stored in `ScriptProperties` for higher rate limits.
-- **13 new tests** (172 total) cover the OpenAQ/WAQI integration, URL parameter parsing, and the new fallback paths.
-- **GitHub Actions CI** runs the full test suite on every push and PR.
-- **CHANGELOG.md** with full release notes from 2.2.0 backwards.
-
-### Why calendars?
-
-Your calendar is the one app you already check every morning. A weather forecast that lives *inside* the calendar — as a per-day all-day event titled "☀️ 22°C Paris" — is the most natural place for it. You glance at the day and you immediately know: dress warm, take the umbrella, drive carefully, the AQI is bad today. No new app, no new habit, no new login.
-
-### How it works under the hood
-
-1. **You request a URL** (e.g. `?cities=Tokyo&lang=ja&days=14`) once. The script auto-geocodes the city via Open-Meteo's free geocoder, fetches 4 endpoints in parallel (deterministic forecast, hourly aggregates, NOAA GFS ensemble, and air quality), and assembles them into one ICS feed.
-2. **Your calendar subscribes** to that URL and refreshes it on its own schedule (Apple Calendar: every hour; Google Calendar: every 6–12 hours; Outlook: every 24 hours by default).
-3. **Each day is a calendar event** with a colored title (e.g. blue=cool, orange=warm, red=hot) and a multi-section description showing temperature, sky, rain, wind, sun, moon, AQI, UV, pollen, road conditions (when T_min ≤ 7°C), 7-day aggregates, and a model accuracy audit.
-4. **The script self-audits**: every day, the latest forecast snapshot is stored in `ScriptProperties` (capped at 5 snapshots per day per city, retained 45 days). Once a day becomes "past", the stored actuals are compared against each historical snapshot to compute a lifetime Mean Absolute Error (MAE) for both temperature and precipitation, plus a lead-curve breakdown (D1–3, D4–7, D8–14, D15+).
-5. **You see your model's reliability** before you trust the forecast. After ~7 days of operation, the dashboard shows `±2.3°C` (lifetime), `A (High)`, and a lead curve: `D1-3:±0.8° · D4-7:±1.7° · D8-14:±2.9° · D15+:±4.3°`.
+*(Click any cell to copy. Replace `…` with your deployed script ID.)*
 
 ---
 
-## 📂 Feature Categories — Explained
+## ✦ What's in Every Calendar Event
 
-<details>
-<summary>🌡️ TEMPERATURE & COMFORT</summary>
+Each day becomes an all-day calendar event with a color-coded title and a multi-section description. Below is a live summary of the data layers — all delivered automatically.
 
-- **High / Low temperature** — daily maximum and minimum with thermal comfort text (Freezing / Chilly / Comfortable / Pleasant / Warm / Hot)
-- **Feels-Like (apparent temperature)** — wind-chill adjusted or heat-index adjusted perceived temperature
-- **Rain volume & probability** — mm of expected precipitation with percentage likelihood
-- **Wind speed & gusts** — km/h with gust peaks
-- **Barometric pressure** — expressed in Standard Atmosphere (atm), baseline 1.01325 bar
-- **Relative humidity & dew point** — comfort level assessment
-- **Growing Degree Days (GDD)** — accumulated warmth metric for gardening/agriculture
+| Category | Data Included | Source |
+|---|---|---|
+| 🌡️ **Temperature** | High/Low + Feels-Like + Comfort text | Open-Meteo Deterministic |
+| 🌧️ **Rain** | Volume (mm) + Probability (%) + Gusts | Open-Meteo + NOAA GFS Ensemble |
+| ☀️ **Sun & Sky** | Sunrise/sunset, Moon phase, UV index, Golden Hour | Open-Meteo |
+| 🧪 **Air Quality** | EAQI / USAQI + PM2.5 / PM10 + O₃ + NO₂ + Pollen | CAMS (EU) → OpenAQ / WAQI (global) |
+| 🌙 **Astronomy** | Meteor showers, Solstices, Planet oppositions | Computed locally |
+| 🌱 **Agriculture** | Growing Degree Days, ET₀ evapotranspiration | Open-Meteo |
+| 📊 **Accuracy Audit** | Temp & Rain MAE, Reliability grade, Lead curve | Self-measured |
+| 🚗 **Road Safety** | Black ice / frost / cold-spray warnings (T_min ≤ 7°C) | Open-Meteo |
 
-</details>
-<details>
-<summary>☀️ SUN & CELESTIAL</summary>
-
-- **Sunrise / Sunset times** — with total daylight duration
-- **Golden Hour window** — optimal photography/landscape lighting window (sunset − 45 min)
-- **Moon phase & illumination** — glyph + name + percent lit, computed locally
-- **UV Index** — with advice (Low / Moderate / High / Very High)
-- **Evapotranspiration (ET₀)** — mm of water loss from soil/plants
-- **Solar radiation** — MJ/m² of incoming shortwave radiation
-- **Astronomical events** — meteor shower peaks, solstices, equinoxes, planet oppositions
-- **Stargazing conditions** — assessed from cloud cover and moon phase (Exceptional / Fair / Moderate / Obscured / Moonlit)
-
-</details>
-<details>
-<summary>🧪 AIR QUALITY & BIO</summary>
-
-- **European AQI (EAQI)** — 0–100 scale, available for Europe (via Copernicus CAMS)
-- **US EPA AQI** — 0–500 scale, available for North America
-- **Global AQI fallback** — when neither EAQI nor US-AQI is available, raw pollutant concentrations are shown
-- **PM2.5 & PM10** — µg/m³ particulate matter concentrations
-- **Ozone, NO₂, dust** — additional pollutant readings
-- **Pollen load** — Alder, Birch, Grass pollen indices (Europe only)
-- **📍 Global AQI coverage note:** Air-quality data is primarily sourced from Copernicus CAMS (EU) and NOAA (US). For regions outside Europe and the United States, **OpenAQ** (openaq.org, 200+ countries, free tier) and **WAQI** (aqicn.org, 1000+ stations globally) offer complementary real-time AQI via their respective APIs. See the [Air Quality Data Sources](#-air-quality-data-sources) section for integration guidance.
-
-</details>
-<details>
-<summary>📅 LAST WEEK TOTALS (7-Day Aggregate)</summary>
-
-- **Rain sum** — total precipitation over the past 7 days
-- **Mean temperature** — average of daily high/low over 7 days
-- **Growing Degree Days** — accumulated warmth over 7 days with crop-growth context (Dormant / Cool greens / Steady foliage / Brassicas booming / Peak growth)
-- **Mean AQI** — average air quality index over 7 days
-
-</details>
-<details>
-<summary>📉 MODEL AUDIT</summary>
-
-- **Prediction drift** — temperature and rain delta between forecast snapshot and current conditions
-- **Stability indicator** — 🟢 Stable / 🟡 Moderate / 🔴 High Drift based on historical deviation
-- **Lifetime Temp MAE** — mean absolute error in °C / °F across all verified days
-- **Lifetime Rain MAE** — mean absolute error in mm
-- **Reliability grade** — A+ (Excellent, MAE ≤ 1.5°) / A (High, MAE ≤ 2.5°) / B (Moderate, MAE ≤ 3.5°) / C (Divergent)
-- **Lead curve** — accuracy bands by forecast horizon: D1–3 · D4–7 · D8–14 · D15+
-
-</details>
-<details>
-<summary>🚗 ADVICE & RELIABILITY</summary>
-
-- **Actionable weather advice** — top 3 prioritized, emoji-rich recommendations based on current conditions (e.g., heat warnings, frost alerts, UV protection, road safety, gardening irrigation)
-- **Road safety advisory** — auto-rendered when T_min ≤ 7°C: black ice detection, frost/slick spots, cold spray risk, chilled asphalt status
-- **Engine label** — Deterministic (D-0 to D-14, high-resolution) vs. NOAA Ensemble (D-15+, probabilistic with spread ±°)
-
-</details>
+> **⚠️ Quota Protection:** Maximum **4 cities** per request to prevent timeouts.
 
 ---
 
-## Language Jump Links / 语言导航 / भाषा चयन
+## 🌍 Air Quality Cascade — How It Works
 
-- [🇬🇧 English](#-english)
-- [🇨🇳 中文 (Chinese)](#-中文-chinese)
-- [🇮🇳 हिन्दी (Hindi)](#-हिन्दी-hindi)
-- [🇪🇸 Español (Spanish)](#-español-spanish)
-- [🇫🇷 Français (French)](#-français-french)
-- [🇸🇦 العربية (Arabic)](#-العربية-arabic)
-- [🇩🇪 Deutsch (German)](#-deutsch-german)
-- [🇳🇱 Nederlands (Dutch)](#-nederlands-dutch)
+The AQI engine tries each source in order and uses the first one that has data for your coordinates. No configuration needed — it just works.
 
----
+```
+1. Copernicus CAMS (EU)      ✅ Live    EAQI + Pollen · Built-in free
+   ↓ no coverage
+2. NOAA / US EPA (North Am.)  ✅ Live    USAQI · Built-in free
+   ↓ no coverage
+3. OpenAQ (200+ countries)    ✅ Live    PM2.5 / PM10 / O₃ / NO₂ · Free, no key
+   ↓ no data
+4. WAQI (1000+ stations)    ✅ Live    City-level AQI · Free token optional
+```
 
-## 🔗 Base Endpoints
-
-| Service | Endpoint |
+| Override param | Effect |
 |---|---|
-| **iCal / WebCal Feed** | `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec` |
-| **AI Telemetry (JSON)** | Append `?action=status` to any URL above |
+| `?aqProvider=auto` | Default: cascade CAMS → OpenAQ → WAQI |
+| `?aqProvider=openaq` | Force OpenAQ only |
+| `?aqProvider=waqi` | Force WAQI only (add `?waqiToken=XXX` for higher quota) |
+| `?aqRadius=50` | OpenAQ station search radius in km (1–100, default 25) |
+
+> 📡 **Status endpoint** (`?action=status`) surfaces the full AQI engine state including which provider was active, the Open-Meteo AQ cap (7 days), and whether a WAQI token is configured.
 
 ---
 
-## 🔧 URL Parameters (Flags)
+## 🔗 Language Jump Links
 
-Append `?` for the first parameter and `&` for additional flags.
+🇬🇧 [English](#-english) · 🇨🇳 [中文](#-中文-chinese) · 🇮🇳 [हिन्दी](#-हिन्दी-hindi) · 🇪🇸 [Español](#-español-spanish) · 🇫🇷 [Français](#-français-french) · 🇸🇦 [العربية](#-العربية-arabic) · 🇩🇪 [Deutsch](#-deutsch-german) · 🇳🇱 [Nederlands](#-nederlands-dutch)
+
+---
+
+## 🔧 URL Parameters
 
 | Flag | Values | Default | Description |
 |---|---|---|---|
-| `cities` | Comma-separated *(Max 4)* | *(required — none)* | Target locations (auto-geocoded via Open-Meteo) |
-| `lang` | `en`, `zh`, `hi`, `es`, `fr`, `ar`, `de`, `nl` | `en` | Display language for event descriptions |
+| `cities` | Comma-separated · *Max 4* | *(required)* | Auto-geocoded locations |
+| `lang` | `en`, `zh`, `hi`, `es`, `fr`, `ar`, `de`, `nl` | `en` | Display language |
 | `unit` | `celsius`, `fahrenheit` | `celsius` | Temperature scale |
-| `days` | `1` to `30` | `30` | Forecast window |
-| `hazards` | `true`, `false` | `true` | Road risk alerts (active when T_min ≤ 7°C) |
-| `aqProvider` | `auto`, `openaq`, `waqi` | `auto` | AQI source: `auto` cascades CAMS → USAQI → OpenAQ → WAQI; specific values force a single source |
-| `waqiToken` | any string | *(none)* | WAQI API token (stored in `ScriptProperties` for higher rate limit) |
-| `action` | `status`, `metrics` | *(none)* | Returns live JSON diagnostics |
-
-> **⚠️ Quota Protection:** Hard cap of **4 cities** per request to prevent execution timeouts.
-
----
-
-## 🌐 Universal Setup Guide
-
-Do not download the `.ics` file; subscribe to the URL for automatic updates:
-- **Apple Calendar (iOS):** Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar. Set refresh to Hourly.
-- **Apple Calendar (macOS):** File → New Calendar Subscription (`⌥⌘S`).
-- **Outlook (Web/App):** Add Calendar → Subscribe from web.
-- **Google Calendar (Web):** Other calendars (`+`) → From URL.
+| `days` | `1` – `30` | `30` | Forecast window |
+| `hazards` | `true`, `false` | `true` | Road safety alerts (T_min ≤ 7°C) |
+| `aqProvider` | `auto`, `openaq`, `waqi` | `auto` | AQI source cascade |
+| `aqRadius` | `1` – `100` km | `25` | OpenAQ station search radius |
+| `waqiToken` | String | *(none)* | WAQI token (stored, higher quota) |
+| `action` | `status` | *(none)* | JSON diagnostics endpoint |
+| `dryRun` | `true`, `false` | `false` | Preview without saving |
 
 ---
 
-## 🌐 Air Quality Data Sources
+## 🌐 How to Subscribe — All Platforms
 
-The AQI engine has a priority cascade. For each city, it tries them in order and uses the first one that returns data:
+**Never download the file. Always subscribe to the URL** so updates arrive automatically.
 
-| Priority | Source | Coverage | API Access | Best For | Status |
-|---|---|---|---|---|---|
-| 1 | **Copernicus CAMS** (via Open-Meteo) | Europe | Built-in (free) | EAQI, pollen (EU residents) | ✅ Live |
-| 2 | **NOAA / US EPA** (via Open-Meteo) | United States | Built-in (free) | USAQI (US residents) | ✅ Live |
-| 3 | **OpenAQ** (openaq.org v3) | 200+ countries | Free, no key (60 req/min) | Global PM2.5, PM10, NO₂, O₃ | ✅ Live (v2.2.0+) |
-| 4 | **WAQI** (aqicn.org) | 1000+ stations | Free token optional (1000 req/s with token) | City-level AQI (any country) | ✅ Live (v2.2.0+) |
-| 5 | **NASA FIRMS** (firms.modaps.eosdi.nasa.gov) | Global (fire/smoke) | Free, no key | Wildfire smoke advisories | 📝 Roadmap |
-
-The `aqProvider` URL parameter lets you override the cascade:
-- `aqProvider=auto` (default) — try CAMS → USAQI → OpenAQ → WAQI in order
-- `aqProvider=openaq` — force OpenAQ only
-- `aqProvider=waqi` — force WAQI only (provide `?waqiToken=XXX` for higher quota)
-
-**Example:** a city in Lagos, Nigeria, with no CAMS coverage: `?cities=Lagos&aqProvider=auto` will automatically fall through to OpenAQ for the AQI value.
-
-> **For developers:** the OpenAQ and WAQI integration lives in `fetchGlobalAQI()` (icalweather.gs) and `gcalFetchGlobalAQI()` (gcalweather.gs). Both attempt OpenAQ first, then WAQI, and merge results into the same `data.aq` shape that downstream consumers expect — so no other code needs to change when you switch providers.
+| App | How to subscribe |
+|---|---|
+| **Apple Calendar** (iOS) | Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar. Set refresh to **Hourly**. |
+| **Apple Calendar** (macOS) | File → New Calendar Subscription · `⌥⌘S` |
+| **Google Calendar** (Web) | Other calendars (`+`) → From URL · Refreshes every 6–12 hours |
+| **Outlook** (Web/App) | Calendar → Add calendar → Subscribe from web |
+| **Thunderbird** | File → New → Calendar → On the Network → iCalendar (ICS) |
 
 ---
+
+## 🌍 Per-Language Guides
+
+Below are ready-to-use subscription URLs and setup instructions for each supported language. Each section includes city examples tuned for that region.
 
 # 🇬🇧 English
 
