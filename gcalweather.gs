@@ -915,9 +915,9 @@ function generatePrioritizedAdvices(ctx) {
   const isC = ctx.isC;
   // Defensive: if any temp is null/undefined, fall back to a safe default so
   // downstream comparisons (maxC >= 30) don't silently skip due to NaN propagation.
-  const safeMax = typeof ctx.tempMax === "number" ? ctx.tempMax : 20;
-  const safeMin = typeof ctx.tempMin === "number" ? ctx.tempMin : 15;
-  const safeApp = typeof ctx.apparentMax === "number" ? ctx.apparentMax : safeMax;
+  const safeMax = Number.isFinite(ctx.tempMax) ? ctx.tempMax : 20;
+  const safeMin = Number.isFinite(ctx.tempMin) ? ctx.tempMin : 15;
+  const safeApp = Number.isFinite(ctx.apparentMax) ? ctx.apparentMax : safeMax;
   const maxC = isC ? safeMax : (safeMax - 32) * (5 / 9);
   const minC = isC ? safeMin : (safeMin - 32) * (5 / 9);
   const appC = isC ? safeApp : (safeApp - 32) * (5 / 9);
@@ -1014,7 +1014,10 @@ function getGddAction(gdd) {
 }
 
 function assessRoadConditions(tMin, soilMin, rainVol, isC) {
-  if (tMin == null || soilMin == null || rainVol == null || isNaN(tMin) || isNaN(soilMin) || isNaN(rainVol)) {
+  // Guard raw inputs with Number.isFinite so null/undefined don't silently
+  // pass through isNaN (isNaN(null) === false) and trigger a false black-ice
+  // advisory after the unit conversion below.
+  if (!Number.isFinite(tMin) || !Number.isFinite(soilMin) || !Number.isFinite(rainVol)) {
     return { status: "🚗 CHILLED ASPHALT", advisory: "Sub-7°C rubber hardening threshold." };
   }
   const minC = isC ? tMin : (tMin - 32) * (5 / 9);

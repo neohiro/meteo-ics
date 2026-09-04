@@ -1602,11 +1602,13 @@ def test_gcal_generatePrioritizedAdvices_safeTemp_defaults():
     fn = re.search(r'function generatePrioritizedAdvices\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Must check typeof before arithmetic
-    assert_true('typeof ctx.tempMax' in body,
-        'generatePrioritizedAdvices must guard tempMax with typeof before arithmetic')
-    assert_true('typeof ctx.tempMin' in body,
-        'generatePrioritizedAdvices must guard tempMin with typeof before arithmetic')
+    # Must use Number.isFinite (not typeof) so NaN is caught: typeof NaN === "number" is true
+    assert_true('Number.isFinite(ctx.tempMax)' in body,
+        'generatePrioritizedAdvices must guard tempMax with Number.isFinite (not typeof)')
+    assert_true('Number.isFinite(ctx.tempMin)' in body,
+        'generatePrioritizedAdvices must guard tempMin with Number.isFinite (not typeof)')
+    assert_true('Number.isFinite(ctx.apparentMax)' in body,
+        'generatePrioritizedAdvices must guard apparentMax with Number.isFinite (not typeof)')
 
 
 def test_gcal_buildDashboardPayload_nullTemp_guard():
@@ -1931,6 +1933,37 @@ def test_readme_cities_default_is_required():
         'README cities param must indicate it is required, not show a fake default')
 
 
+def test_ical_generatePrioritizedAdvices_wind_rain_pollen_moon_isfinite():
+    """generatePrioritizedAdvices must use Number.isFinite for ctx.wind, ctx.rainVol,
+    ctx.pollen, ctx.moonIllum comparisons. The old typeof === "number" pattern
+    lets NaN slip through (typeof NaN === "number" === true), silently suppressing
+    high-wind, severe-storm, pollen, and moon advice when data is corrupted."""
+    fn = re.search(r'function generatePrioritizedAdvices\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    for field in ('ctx.wind', 'ctx.rainVol', 'ctx.pollen', 'ctx.moonIllum'):
+        assert_true(f'Number.isFinite({field})' in body,
+            f'generatePrioritizedAdvices must use Number.isFinite for {field} (not typeof)')
+        assert_true(f'typeof {field} === "number"' not in body,
+            f'generatePrioritizedAdvices must not use typeof for {field} comparisons')
+
+
+def test_ical_assessRoadConditions_uses_isfinite():
+    """assessRoadConditions must guard raw inputs with Number.isFinite (not isNaN on
+    derived values). isNaN(null) === false, so the old pattern silently treated missing
+    soil temperature as 0C and triggered a false black-ice advisory."""
+    fn = re.search(r'function assessRoadConditions\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('Number.isFinite(tMin)' in body and 'Number.isFinite(soilMin)' in body
+                and 'Number.isFinite(rainVol)' in body,
+        'assessRoadConditions must guard tMin/soilMin/rainVol with Number.isFinite')
+    tmin_pos = body.index('Number.isFinite(tMin)')
+    minc_pos = body.find('minC = ') if 'minC = ' in body else -1
+    assert_true(minc_pos == -1 or tmin_pos < minc_pos,
+        'Number.isFinite(tMin) guard must appear before unit conversion (minC =)')
+
+
 # =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================
@@ -1976,4 +2009,6 @@ def test_gcal_aq_forecast_days_capped_at_7():
         'fetchAllAtmosphericDataParallel must cap AQ forecast_days at 7 (API limit)')
     assert_true(re.search(r'aqUrl\s*=.*?forecast_days=\$\{aqForecastDays\}', body) is not None,
         'aqUrl must reference the capped aqForecastDays variable')
+
+
 

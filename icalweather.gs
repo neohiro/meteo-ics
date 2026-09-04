@@ -1418,21 +1418,21 @@ function generatePrioritizedAdvices(ctx) {
   } else if (maxC >= 30) {
     pool.push({ p: 60, text: adv("heat", lang) });
   }
-  if (typeof ctx.wind === "number" && ctx.wind >= 12) {
+  if (Number.isFinite(ctx.wind) && ctx.wind >= 12) {
     pool.push({ p: 50, text: adv("windGust", lang) });
   }
-  if (typeof ctx.rainVol === "number" && ctx.rainVol >= 25) {
+  if (Number.isFinite(ctx.rainVol) && ctx.rainVol >= 25) {
     pool.push({ p: 92, text: adv("stormSevere", lang) });
   }
   if (ctx.aqi !== null && ctx.aqiType !== "USAQI" && ctx.aqi > 40) {
     pool.push({ p: 70, text: adv("airQualPoor", lang) });
   }
-  if (typeof ctx.pollen === "number" && ctx.pollen >= 5) {
+  if (Number.isFinite(ctx.pollen) && ctx.pollen >= 5) {
     pool.push({ p: 50, text: adv("pollenHigh", lang) });
   }
-  if (typeof ctx.moonIllum === "number" && ctx.moonIllum >= 0.98) {
+  if (Number.isFinite(ctx.moonIllum) && ctx.moonIllum >= 0.98) {
     pool.push({ p: 15, text: adv("moonFull", lang) });
-  } else if (typeof ctx.moonIllum === "number" && ctx.moonIllum <= 0.02) {
+  } else if (Number.isFinite(ctx.moonIllum) && ctx.moonIllum <= 0.02) {
     pool.push({ p: 20, text: adv("moonNew", lang) });
   }
 
@@ -1441,11 +1441,14 @@ function generatePrioritizedAdvices(ctx) {
 
 function assessRoadConditions(tMin, soilMin, rainVol, isC, lang) {
   lang = lang || "en";
-  const minC = isC ? tMin : (tMin - 32) * (5 / 9);
-  const groundC = isC ? soilMin : (soilMin - 32) * (5 / 9);
-  if (isNaN(groundC) || isNaN(minC) || isNaN(rainVol)) {
+  // Guard raw inputs with Number.isFinite (not isNaN on derived values):
+  // isNaN(null) === false, so null would silently pass and get treated as 0°C
+  // in the unit conversion below, triggering a false black-ice advisory.
+  if (!Number.isFinite(tMin) || !Number.isFinite(soilMin) || !Number.isFinite(rainVol)) {
     return { status: tRoadStatus("rdChill", lang), advisory: tRoadAdv("advCh", lang) };
   }
+  const minC = isC ? tMin : (tMin - 32) * (5 / 9);
+  const groundC = isC ? soilMin : (soilMin - 32) * (5 / 9);
   if (groundC <= 0 && rainVol > 0.2) {
     return { status: tRoadStatus("rdBI", lang), advisory: tRoadAdv("advBI", lang) };
   } else if (groundC <= 0) {
