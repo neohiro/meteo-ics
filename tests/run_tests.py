@@ -2090,6 +2090,37 @@ def test_ical_aqi_display_includes_source_context():
     assert_true(re.search(r'getAqiGlyph', ICAL))
 
 
+def test_lint_balance_helper_ok():
+    """The CI lint helper must agree that both .gs files are balanced."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'lint_balance', os.path.join(REPO, 'tests', 'lint_balance.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for name in ('gcalweather.gs', 'icalweather.gs'):
+        p = os.path.join(REPO, name)
+        ok, counts = mod.lint_file(__import__('pathlib').Path(p))
+        assert_true(ok, f'{name} lint should pass but got {counts}')
+
+
+def test_lint_balance_helper_finds_mismatch():
+    """The CI lint helper must detect a deliberate imbalance."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'lint_balance', os.path.join(REPO, 'tests', 'lint_balance.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    bad = 'function f() { if (true) { return 1; '
+    from pathlib import Path
+    p = Path(os.path.join(os.path.dirname(__file__), '_lint_fixture_bad.js'))
+    p.write_text(bad, encoding='utf-8')
+    try:
+        ok, _ = mod.lint_file(p)
+        assert_true(not ok, 'deliberately imbalanced source must lint as FAIL')
+    finally:
+        p.unlink(missing_ok=True)
+
+
 # =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================
