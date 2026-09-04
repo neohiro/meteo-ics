@@ -2,7 +2,9 @@
  * Ultimate Personalized Weather, Astronomical & Ground-Truth Dashboard for Google Calendar
  * 
  * Verified & Bulletproof:
- *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
+ *  - City-name geocoding: locations can be configured with name only (no lat/lon required).
+ *    Optional 'country' field narrows the geocoder query.
+ *  - Road condition advisory triggered at min temp <= 7C with surface glaze & black ice detection.
  *  - Clean single empty line (\n\n) separation between all category cards.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - 100% Guaranteed Deduplication: Keyed with [KEY:YYYY-MM-DD_city] + orphaned event sweep.
@@ -11,6 +13,13 @@
  *  - Official EventColor Enum: Reliable temperature-based dynamic color coding.
  *  - Standard Atmosphere (atm) pressure scale (1013.25 hPa baseline).
  *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll.
+ *
+ * Location Config Example:
+ *   locations: [
+ *     { name: "Brunnsum" },                          // auto-geocoded via Open-Meteo
+ *     { name: "Cambridge", country: "UK" },          // disambiguated by country
+ *     { name: "Kyoto", lat: 35.0116, lon: 135.7681 } // explicit coords still supported
+ *   ]
  */
 
 function geocodeCity(name) {
@@ -1133,4 +1142,28 @@ function getUvAdvice(uv) {
   if (uv <= 5) return "Moderate";
   if (uv <= 7) return "High";
   return "Very High";
+}
+
+function validateConfig() {
+  const errors = [];
+  CONFIG.locations.forEach((loc, i) => {
+    if (!loc.name) {
+      errors.push(`Location ${i}: missing 'name' field`);
+    }
+    if (!loc.lat || !loc.lon) {
+      errors.push(`Location ${i} ('${loc.name || "unnamed"}'): no coordinates — geocoding required`);
+      const geo = geocodeCity(loc.name || "");
+      if (!geo || !geo.lat || !geo.lon) {
+        errors.push(`  geocodeCity('${loc.name}') failed — city not found in Open-Meteo database`);
+      } else {
+        Logger.log(`  geocoded to: ${geo.lat}, ${geo.lon}`);
+      }
+    }
+  });
+  if (errors.length === 0) {
+    Logger.log("Config validation: OK");
+  } else {
+    errors.forEach(e => Logger.log("Config error: " + e));
+  }
+  return errors;
 }

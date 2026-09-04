@@ -2,7 +2,7 @@
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
  * 
  * Verified & Bulletproof:
- *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
+ *  - Road condition advisory triggered at min temp <= 7C with surface glaze & black ice detection.
  *  - Endpoint Documentation Fallback: meteo-ics_readme.txt generated when URL is opened without parameters.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - Open-Meteo Parameter Separation: Distinct daily and hourly requests eliminate 400 Bad Request errors.
@@ -11,6 +11,16 @@
  *  - Standard Atmosphere: Pressure in atm (1013.25 hPa baseline).
  *  - Parallel HTTP Requests: External APIs fetched concurrently using UrlFetchApp.fetchAll.
  *  - Clean single empty line (\n\n) separation between card blocks.
+ *
+ * URL Parameters:
+ *   cities=X,Y,Z       — city names, auto-geocoded via Open-Meteo (e.g. ?cities=London,Paris)
+ *   locations=X:lat:lon — explicit coordinates (e.g. ?locations=Kyoto:35.0116:135.7681)
+ *   lat=X&lon=Y&name=Z — single coordinate pair
+ *   unit=celsius|fahrenheit
+ *   days=1-30
+ *   lang=en|zh|hi|es|fr|de|nl
+ *   hazards=true|false
+ *   action=status|metrics
  */
 
 const ICAL_CONFIG = {
