@@ -103,7 +103,7 @@ Subscribe once to a live `.ics` feed (Apple Calendar, Outlook, Google Calendar, 
 
 | Service | Endpoint |
 |---|---|
-| **iCal / WebCal Feed** | `[ICAL_ENDPOINT]` |
+| **iCal / WebCal Feed** | `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec` |
 | **AI Telemetry (JSON)** | Append `?action=status` to any URL above |
 
 ---
@@ -164,16 +164,16 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇬🇧 Quick Links
 
 - **British Isles (London & Edinburgh, 30 Days):**  
-  `[ICAL_ENDPOINT]?cities=London,Edinburgh`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=London,Edinburgh`
 
 - **US Metro in Fahrenheit (New York, Chicago, Seattle, 14 Days):**  
-  `[ICAL_ENDPOINT]?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
 
 - **No Road Hazard Warnings (Sydney & Melbourne):**  
-  `[ICAL_ENDPOINT]?cities=Sydney,Melbourne&hazards=false`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Sydney,Melbourne&hazards=false`
 
 - **AI Telemetry Endpoint (JSON):**  
-  `[ICAL_ENDPOINT]?action=status`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?action=status`
 
 ---
 
@@ -192,10 +192,10 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇨🇳 快捷链接
 
 - **京津冀与长三角 (北京与上海, 30天周期):**  
-  `[ICAL_ENDPOINT]?cities=Beijing,Shanghai&lang=zh`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Beijing,Shanghai&lang=zh`
 
 - **华南及大湾区核心城市 (广州、深圳、香港、台北, 14天):**  
-  `[ICAL_ENDPOINT]?cities=Guangzhou,Shenzhen,Hong%20Kong,Taipei&lang=zh&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Guangzhou,Shenzhen,Hong%20Kong,Taipei&lang=zh&days=14`
 
 ---
 
@@ -214,10 +214,10 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇮🇳 तैयार लिंक
 
 - **उत्तर भारत मेट्रो (दिल्ली और लखनऊ, 30 दिन):**  
-  `[ICAL_ENDPOINT]?cities=Delhi,Lucknow&lang=hi`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Delhi,Lucknow&lang=hi`
 
 - **भारतीय प्रमुख आर्थिक केंद्र (मुंबई, बेंगलुरु, हैदराबाद, कोलकाता, 14 दिन):**  
-  `[ICAL_ENDPOINT]?cities=Mumbai,Bengaluru,Hyderabad,Kolkata&lang=hi&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Mumbai,Bengaluru,Hyderabad,Kolkata&lang=hi&days=14`
 
 ---
 
@@ -236,10 +236,10 @@ Recibe cada mañana lo que viene: temperaturas, lluvia, viento, UV, calidad del 
 ### 🇪🇸 Enlaces Directos
 
 - **Península Ibérica (Madrid y Barcelona, 30 Días):**  
-  `[ICAL_ENDPOINT]?cities=Madrid,Barcelona&lang=es`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Madrid,Barcelona&lang=es`
 
 - **Hispanoamérica (Ciudad de México, Bogotá, Buenos Aires, Santiago, 14 Días):**  
-  `[ICAL_ENDPOINT]?cities=Mexico%20City,Bogota,Buenos%20Aires,Santiago&lang=es&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Mexico%20City,Bogota,Buenos%20Aires,Santiago&lang=es&days=14`
 
 ---
 
@@ -258,10 +258,10 @@ Chaque matin, votre calendrier vous montre ce qui arrive. Des prévisions haute 
 ### 🇫🇷 Liens Prêts à l'Emploi
 
 - **France Métropolitaine (Paris & Lyon, 30 Jours) :**  
-  `[ICAL_ENDPOINT]?cities=Paris,Lyon&lang=fr`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Paris,Lyon&lang=fr`
 
 - **Espace Francophone (Marseille, Bruxelles, Genève, Montréal, 14 Jours) :**  
-  `[ICAL_ENDPOINT]?cities=Marseille,Brussels,Geneva,Montreal&lang=fr&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Marseille,Brussels,Geneva,Montreal&lang=fr&days=14`
 
 ---
 
@@ -280,10 +280,10 @@ Chaque matin, votre calendrier vous montre ce qui arrive. Des prévisions haute 
 ### 🇸🇦 روابط مباشرة
 
 - **الخليج العربي (الرياض وأبوظبي, 30 يوماً):**  
-  `[ICAL_ENDPOINT]?cities=Riyadh,Abu%20Dhabi&lang=ar`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Riyadh,Abu%20Dhabi&lang=ar`
 
 - **عواصم عربية كبرى (القاهرة، دبي، الدوحة، عمّان, 14 يوماً):**  
-  `[ICAL_ENDPOINT]?cities=Cairo,Dubai,Doha,Amman&lang=ar&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Cairo,Dubai,Doha,Amman&lang=ar&days=14`
 
 ---
 
@@ -302,10 +302,10 @@ Jeden Morgen zeigt Ihnen Ihr Kalender, was kommt. Hochauflösende Vorhersagen (T
 ### 🇩🇪 Sofort-Links
 
 - **Deutschland Achse (Berlin & München, 30 Tage):**  
-  `[ICAL_ENDPOINT]?cities=Berlin,Munich&lang=de`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Berlin,Munich&lang=de`
 
 - **DACH-Großstädte (Hamburg, Frankfurt, Wien, Zürich, 14 Tage):**  
-  `[ICAL_ENDPOINT]?cities=Hamburg,Frankfurt,Vienna,Zurich&lang=de&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Hamburg,Frankfurt,Vienna,Zurich&lang=de&days=14`
 
 ---
 
@@ -324,10 +324,10 @@ Elke ochtend toont uw agenda wat er aankomt. Hoge-resolutie voorspellingen (D1�
 ### 🇳🇱 Directe Links
 
 - **Randstad Hart (Amsterdam & Rotterdam, 30 Dagen):**  
-  `[ICAL_ENDPOINT]?cities=Amsterdam,Rotterdam&lang=nl`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Amsterdam,Rotterdam&lang=nl`
 
 - **Benelux Knooppunten (Utrecht, Eindhoven, Antwerpen, Gent, 14 Dagen):**  
-  `[ICAL_ENDPOINT]?cities=Utrecht,Eindhoven,Antwerp,Ghent&lang=nl&days=14`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Utrecht,Eindhoven,Antwerp,Ghent&lang=nl&days=14`
 
 - **Kustzone Zonder Gladheidswaarschuwingen (Den Haag & Vlissingen):**  
-  `[ICAL_ENDPOINT]?cities=The%20Hague,Vlissingen&lang=nl&hazards=false`
+  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=The%20Hague,Vlissingen&lang=nl&hazards=false`
