@@ -1638,8 +1638,6 @@ def test_ical_doc_header_mentions_array_safety():
 # =============================================================================
 
 def test_gcal_aq_url_uses_hourly_not_daily():
-    """Open-Meteo air-quality API rejects `daily=` parameter (HTTP 400).
-    aqUrl must use `hourly=` so the request succeeds; aggregation is done in the response handler."""
     assert_true('hourly=european_aqi' in GCAL,
         'gcal aqUrl must use hourly=... fields (daily= causes HTTP 400)')
     assert_true('daily=european_aqi' not in GCAL,
@@ -1654,12 +1652,9 @@ def test_ical_aq_url_uses_hourly_not_daily():
 
 
 def test_gcal_aq_aggregation_is_daily_shaped():
-    """AQ response handler must produce a daily-aggregated object matching the
-    consumer contract: { time: [], european_aqi: [], us_aqi: [], ... }."""
     fn = re.search(r'function fetchAllAtmosphericDataParallel\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Must aggregate hourly → daily arrays (european_aqi, pm2_5, etc.)
     assert_true('aqTime.map' in body and 'european_aqi' in body,
         'gcal AQ handler must map to daily arrays matching consumer shape')
 
@@ -1670,6 +1665,37 @@ def test_ical_aq_aggregation_is_daily_shaped():
     body = fn.group(0)
     assert_true('aqTime.map' in body and 'european_aqi' in body,
         'ical AQ handler must map to daily arrays matching consumer shape')
+
+
+# =============================================================================
+# Pass 1/2 follow-up — NaN poisoning in deterministic temperature reads
+# =============================================================================
+
+def test_ical_generateIcsFeed_guards_null_temperature():
+    """generateIcsFeed reads data.det.temperature_2m_max[idx] and passes it to
+    Math.round(). Without a null guard, Math.round(null) = NaN, which bypasses the
+    `currentMax === null` continue check (NaN !== null) and produces "NaN°C"
+    in the ICS event title. Fix: check Number.isFinite before rounding."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # The fix introduces a local tMaxRaw variable and guards before Math.round
+    assert_true('tMaxRaw' in body,
+        'generateIcsFeed must extract temperature raw value before rounding (NaN guard)')
+    assert_true('Number.isFinite(tMaxRaw)' in body,
+        'generateIcsFeed must check Number.isFinite before Math.round on temperature_2m_max')
+
+
+def test_gcal_computeDayAudit_skips_nan_predictedMax():
+    """computeDayAudit reads snap.predictedMax and computes tDiff = snap.predictedMax - baselineMax.
+    If snap.predictedMax is NaN (corrupted storage), tDiff is NaN and tempDeltaStr becomes "NaN°C".
+    Fix: guard with Number.isFinite and return early."""
+    fn = re.search(r'function computeDayAudit\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must guard snap.predictedMax against non-finite values
+    assert_true('Number.isFinite(pMax)' in body or 'isFinite(pMax)' in body,
+        'computeDayAudit must guard snap.predictedMax with Number.isFinite before use')
 
 
 def test_gcal_syncWeatherToCalendar_geo_null_guard():

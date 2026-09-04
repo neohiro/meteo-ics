@@ -564,10 +564,13 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       let title = "", modelLabel = "", spreadVal = 0;
 
       if (offset < ICAL_CONFIG.deterministicDays) {
-        currentMax = Math.round(data.det.temperature_2m_max[idx]);
-        currentMin = Math.round(data.det.temperature_2m_min[idx]);
-        apparentMax = data.det.apparent_temperature_max ? Math.round(data.det.apparent_temperature_max[idx]) : currentMax;
-        currentRain = data.det.precipitation_sum ? data.det.precipitation_sum[idx] : 0;
+        const tMaxRaw = data.det.temperature_2m_max[idx];
+        const tMinRaw = data.det.temperature_2m_min[idx];
+        currentMax = (tMaxRaw != null && Number.isFinite(tMaxRaw)) ? Math.round(tMaxRaw) : 0;
+        currentMin = (tMinRaw != null && Number.isFinite(tMinRaw)) ? Math.round(tMinRaw) : 0;
+        const appRaw = data.det.apparent_temperature_max ? data.det.apparent_temperature_max[idx] : null;
+        apparentMax = (appRaw != null && Number.isFinite(appRaw)) ? Math.round(appRaw) : currentMax;
+        currentRain = (data.det.precipitation_sum && data.det.precipitation_sum[idx] != null) ? data.det.precipitation_sum[idx] : 0;
         rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
         currentWind = data.det.windspeed_10m_max ? Math.round(data.det.windspeed_10m_max[idx]) : 0;
         windGusts = data.det.windgusts_10m_max ? Math.round(data.det.windgusts_10m_max[idx]) : 0;

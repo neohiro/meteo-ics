@@ -1159,7 +1159,9 @@ function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym)
   let maxRainDiff = 0, rainDeltaStr = "0 mm";
 
   snapshots.forEach(snap => {
-    const tDiff = snap.predictedMax - baselineMax;
+    const pMax = snap.predictedMax;
+    if (!Number.isFinite(pMax)) return;
+    const tDiff = pMax - baselineMax;
     const lead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
     const label = lead === 0 ? "D0" : `D${lead}`;
 
