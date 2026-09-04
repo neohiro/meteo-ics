@@ -13,20 +13,41 @@
  *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll.
  */
 
+function geocodeCity(name) {
+  try {
+    const res = UrlFetchApp.fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`, { muteHttpExceptions: true });
+    const data = JSON.parse(res.getContentText()).results;
+    if (data && data.length) return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
+  } catch (e) {}
+  return { name: "", lat: 0, lon: 0 };
+}
+
 const CONFIG = {
-  calendarId: "",                   // Optional: Leave empty to use calendarName
-  calendarName: "Weather Forecast", // Dedicated calendar name
-  temperatureUnit: "celsius",       // "celsius" or "fahrenheit"
-  forecastDays: 30,                 // Total days ahead
-  deterministicDays: 14,            // High-res deterministic cutoff
-  historyDays: 5,                   // Past days to verify with ground truth
-  autoDetectFromEvents: true,       // Auto-detect travel locations from primary calendar
+  calendarId: "",                       
+  calendarName: "Weather Forecast", 
+  temperatureUnit: "celsius",       
+  forecastDays: 30,                 
+  deterministicDays: 14,            
+  historyDays: 5,                   
+  autoDetectFromEvents: true,       
   locations: [
-    { name: "Kyoto", lat: 35.0116, lon: 135.7681 },
-    { name: "Valparaíso", lat: -33.0472, lon: -71.6127 },
-    { name: "Reykjavik", lat: 64.1466, lon: -21.9426 }
+    { name: "Kyoto" },
+    { name: "Brunnsum" }
   ]
 };
+
+// Auto-geocode locations that lack GPS coordinates (city-only entries are resolved via Open-Meteo geocoder; "country" is an optional hint that simply narrows the search)
+CONFIG.locations.forEach(loc => {
+  if (!loc.lat || !loc.lon) {
+    const query = loc.country ? `${loc.name},${loc.country}` : loc.name;
+    const geo = geocodeCity(query);
+    if (geo && geo.lat && geo.lon) {
+      loc.lat = geo.lat;
+      loc.lon = geo.lon;
+      if (!loc.name) loc.name = geo.name || query;
+    }
+  }
+});
 
 function syncWeatherToCalendar() {
   const cal = resolveCalendar();
@@ -55,7 +76,7 @@ function syncWeatherToCalendar() {
           const cityKey = norm(city);
           if (!locationPool.has(cityKey)) {
             const geo = geocodeCity(city);
-            if (geo) locationPool.set(cityKey, { ...geo, isDynamic: true });
+            if (geo.name) locationPool.set(cityKey, { ...geo, isDynamic: true });
           }
           if (locationPool.has(cityKey)) dayLocKeys.add(cityKey);
         }
@@ -1019,15 +1040,6 @@ function detectEventCity(text, locationPool) {
   for (let key of sortedKeys) {
     if (normalizedText.includes(key)) return key;
   }
-  return null;
-}
-
-function geocodeCity(name) {
-  try {
-    const res = UrlFetchApp.fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`, { muteHttpExceptions: true });
-    const data = JSON.parse(res.getContentText()).results;
-    if (data && data.length) return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
-  } catch (e) {}
   return null;
 }
 
