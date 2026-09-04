@@ -1881,12 +1881,17 @@ def test_gcal_doc_header_describes_auto_create():
 # =============================================================================
 
 def test_readme_ical_endpoint_is_placeholder():
-    """README must use a placeholder URL for the ical endpoint since it
-    changes on each deploy. The old hardcoded ID should not be present."""
+    """README must contain a valid Google Apps Script deployment URL for the ical endpoint.
+    The [ICAL_ENDPOINT] placeholder should be replaced with the real deployed URL.
+    After each new deploy, update README.md with the new ID and re-enable this check.
+    The test verifies: (1) a script.google.com URL is present, (2) the old placeholder
+    and old deployment ID are absent."""
     import os
     readme = open(os.path.join(REPO, 'README.md'), encoding='utf-8').read()
-    assert_true('[ICAL_ENDPOINT]' in readme,
-        'README must use [ICAL_ENDPOINT] placeholder (endpoint changes on deploy)')
+    assert_true('script.google.com' in readme,
+        'README must contain a Google Apps Script deployment URL')
+    assert_true('[ICAL_ENDPOINT]' not in readme,
+        '[ICAL_ENDPOINT] placeholder must be replaced with the real deployed URL')
     assert_true('AKfycbzwkRzpOskREtgz2TE187v4jEiurxRhiM7HLKeyOyQ4SSFU1CwVo_vhr6o7iJd79Pw-eg' not in readme,
         'README must not contain the old hardcoded Apps Script ID')
 
