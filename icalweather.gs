@@ -2,7 +2,7 @@
  * Weather & Astronomical Dashboard iCalendar (.ics) Generator
  * 
  * Verified & Bulletproof:
- *  - Road condition advisory triggered at min temp <= 7C with surface glaze & black ice detection.
+ *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
  *  - Endpoint Documentation Fallback: meteo-ics_readme.txt generated when URL is opened without parameters.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - Open-Meteo Parameter Separation: Distinct daily and hourly requests eliminate 400 Bad Request errors.
@@ -183,12 +183,13 @@ function parseLocationsFromParams(e) {
   }
 
   const seen = new Set();
-  return list.filter(loc => {
+  const deduped = list.filter(loc => {
     const key = norm(loc.name);
-    if (seen.has(key)) return false;
+    if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+  return deduped.slice(0, 4);
 }
 
 function generateIcsFeed(locations, temperatureUnit) {
@@ -307,9 +308,9 @@ function generateIcsFeed(locations, temperatureUnit) {
 
           pm25Val = data.aq.pm2_5 && data.aq.pm2_5[aqIdx] !== null ? Number(data.aq.pm2_5[aqIdx].toFixed(1)) : null;
           pm10Val = data.aq.pm10 && data.aq.pm10[aqIdx] !== null ? Number(data.aq.pm10[aqIdx].toFixed(1)) : null;
-          const birch = data.aq.birch_pollen ? data.aq.birch_pollen[idx] || 0 : 0;
-          const grass = data.aq.grass_pollen ? data.aq.grass_pollen[idx] || 0 : 0;
-          const alder = data.aq.alder_pollen ? data.aq.alder_pollen[idx] || 0 : 0;
+          const birch = data.aq.birch_pollen ? data.aq.birch_pollen[aqIdx] || 0 : 0;
+          const grass = data.aq.grass_pollen ? data.aq.grass_pollen[aqIdx] || 0 : 0;
+          const alder = data.aq.alder_pollen ? data.aq.alder_pollen[aqIdx] || 0 : 0;
           pollenVal = Math.round(Math.max(birch, grass, alder));
         }
       }
@@ -549,10 +550,14 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
 
   const baseDate = Utilities.parseDate(baseDateStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
 
+  // Build the 7-day date list once and reuse for both temp and AQI lookups.
+  const dateKeys = [];
   for (let d = 0; d < 7; d++) {
     const curDate = new Date(baseDate.getTime() + d * 24 * 60 * 60 * 1000);
-    const dStr = Utilities.formatDate(curDate, "UTC", "yyyy-MM-dd");
+    dateKeys.push(Utilities.formatDate(curDate, "UTC", "yyyy-MM-dd"));
+  }
 
+  dateKeys.forEach(dStr => {
     let maxT = null, minT = null, r = 0;
 
     if (data.det && data.det.time) {
@@ -588,13 +593,11 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
       if (meanT > base10) gddSum += (meanT - base10);
       wDays++;
     }
-  }
+  });
 
   let totalAqi = 0, aqiDays = 0;
   if (data.aq && data.aq.time) {
-    for (let d = 0; d < 7; d++) {
-      const curDate = new Date(baseDate.getTime() + d * 24 * 60 * 60 * 1000);
-      const dStr = Utilities.formatDate(curDate, "UTC", "yyyy-MM-dd");
+    dateKeys.forEach(dStr => {
       const idx = data.aq.time.indexOf(dStr);
       if (idx !== -1) {
         let val = null;
@@ -608,7 +611,7 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
           aqiDays++;
         }
       }
-    }
+    });
   }
 
   return {
@@ -826,27 +829,28 @@ function getMoonPhaseDetails(date) {
   const now = date.getTime();
   const newMoonRef = new Date(1970, 0, 7, 20, 35, 0).getTime();
   const phase = ((now - newMoonRef) / 1000) % lp;
-  const dayOfCycle = Math.floor(phase / (24 * 3600));
+  const dayOfCycle = phase / (24 * 3600);
+  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / lp)) / 2;
 
-  let glyph = "🌑", name = "New Moon", fraction = 0;
-  if (dayOfCycle <= 1 || dayOfCycle >= 28) {
-    glyph = "🌑"; name = "New Moon"; fraction = 0.02;
-  } else if (dayOfCycle <= 6) {
-    glyph = "🌒"; name = "Waxing Crescent"; fraction = 0.25;
-  } else if (dayOfCycle <= 9) {
-    glyph = "🌓"; name = "1st Quarter"; fraction = 0.50;
-  } else if (dayOfCycle <= 13) {
-    glyph = "🌔"; name = "Waxing Gibbous"; fraction = 0.75;
-  } else if (dayOfCycle <= 16) {
-    glyph = "🌕"; name = "Full Moon"; fraction = 0.99;
-  } else if (dayOfCycle <= 20) {
-    glyph = "🌖"; name = "Waning Gibbous"; fraction = 0.75;
-  } else if (dayOfCycle <= 23) {
-    glyph = "🌗"; name = "Last Quarter"; fraction = 0.50;
+  let glyph, name;
+  if (dayOfCycle <= 1.5) {
+    glyph = "🌑"; name = "New Moon";
+  } else if (dayOfCycle <= 5.5) {
+    glyph = "🌒"; name = "Waxing Crescent";
+  } else if (dayOfCycle <= 9.5) {
+    glyph = "🌓"; name = "1st Quarter";
+  } else if (dayOfCycle <= 13.5) {
+    glyph = "🌔"; name = "Waxing Gibbous";
+  } else if (dayOfCycle <= 17.5) {
+    glyph = "🌕"; name = "Full Moon";
+  } else if (dayOfCycle <= 21.5) {
+    glyph = "🌖"; name = "Waning Gibbous";
+  } else if (dayOfCycle <= 25.5) {
+    glyph = "🌗"; name = "Last Quarter";
   } else {
-    glyph = "🌘"; name = "Waning Crescent"; fraction = 0.25;
+    glyph = "🌘"; name = "Waning Crescent";
   }
-  return { glyph, name, fraction, illumination: `${Math.round(fraction * 100)}%` };
+  return { glyph, name, fraction: illumination, illumination: `${Math.round(illumination * 100)}%` };
 }
 
 function assessStargazingConditions(data, offset, moonFraction, dateKey, cloudCover) {
@@ -923,6 +927,7 @@ function getAqiGlyph(aqi, aqiType) {
     if (aqi <= 100) return "🟡";
     if (aqi <= 150) return "🟠";
     if (aqi <= 200) return "🔴";
+    if (aqi <= 300) return "🟤";
     return "🟣";
   }
   if (aqi <= 20) return "🟢";
@@ -937,8 +942,9 @@ function getAqiLabel(aqi, aqiType) {
   if (aqiType === "USAQI") {
     if (aqi <= 50) return "Good";
     if (aqi <= 100) return "Moderate";
-    if (aqi <= 150) return "Sensitive";
+    if (aqi <= 150) return "Unhealthy for Sensitive";
     if (aqi <= 200) return "Unhealthy";
+    if (aqi <= 300) return "Very Unhealthy";
     return "Hazardous";
   }
   if (aqi <= 20) return "Good";

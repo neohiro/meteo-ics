@@ -4,7 +4,7 @@
  * Verified & Bulletproof:
  *  - City-name geocoding: locations can be configured with name only (no lat/lon required).
  *    Optional 'country' field narrows the geocoder query.
- *  - Road condition advisory triggered at min temp <= 7C with surface glaze & black ice detection.
+ *  - Road condition advisory triggered at min temp <= 7°C with surface glaze & black ice detection.
  *  - Clean single empty line (\n\n) separation between all category cards.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100) and US EPA AQI (0-500).
  *  - 100% Guaranteed Deduplication: Keyed with [KEY:YYYY-MM-DD_city] + orphaned event sweep.
@@ -32,30 +32,36 @@ function geocodeCity(name) {
 }
 
 const CONFIG = {
-  calendarId: "",                       
-  calendarName: "Weather Forecast", 
-  temperatureUnit: "celsius",       
-  forecastDays: 30,                 
-  deterministicDays: 14,            
-  historyDays: 5,                   
-  autoDetectFromEvents: true,       
+  calendarId: "",
+  calendarName: "Weather Forecast",
+  temperatureUnit: "celsius",
+  forecastDays: 30,
+  deterministicDays: 14,
+  historyDays: 5,
+  autoDetectFromEvents: true,
   locations: [
     { name: "Kyoto" },
     { name: "Brunnsum" }
   ]
 };
 
-// Auto-geocode locations that lack GPS coordinates (city-only entries are resolved via Open-Meteo geocoder; "country" is an optional hint that simply narrows the search)
-CONFIG.locations.forEach(loc => {
-  if (!loc.lat || !loc.lon) {
-    const query = loc.country ? `${loc.name},${loc.country}` : loc.name;
-    const geo = geocodeCity(query);
-    if (geo && geo.lat && geo.lon) {
-      loc.lat = geo.lat;
-      loc.lon = geo.lon;
-      if (!loc.name) loc.name = geo.name || query;
-    }
+const KEY_REGEX = /\[KEY:([a-zA-Z0-9_\-]+)\]/;
+const MAX_SNAPSHOTS_PER_DAY = 5;
+
+// Auto-geocode locations that lack GPS coordinates (city-only entries are resolved via Open-Meteo geocoder;
+// "country" is an optional hint that narrows the search). Locations that fail geocoding are filtered out.
+CONFIG.locations = CONFIG.locations.filter(loc => {
+  if (loc.lat && loc.lon) return true;
+  const query = loc.country ? `${loc.name},${loc.country}` : (loc.name || "");
+  const geo = geocodeCity(query);
+  if (geo && geo.lat && geo.lon && geo.name) {
+    loc.lat = geo.lat;
+    loc.lon = geo.lon;
+    loc.name = geo.name; // normalize name from geocoder response
+    return true;
   }
+  Logger.log(`WARNING: Skipping unresolvable location: "${loc.name}". Run validateConfig() for details.`);
+  return false;
 });
 
 function syncWeatherToCalendar() {
@@ -113,7 +119,7 @@ function syncWeatherToCalendar() {
     const desc = ev.getDescription() || "";
     let mapKey = null;
 
-    const match = desc.match(/\[KEY:([a-zA-Z0-9_\-]+)\]/);
+    const match = desc.match(KEY_REGEX);
     if (match) {
       mapKey = match[1];
       allManagedEvents.push(ev);
@@ -164,7 +170,9 @@ function syncWeatherToCalendar() {
           try {
             matched[i].deleteEvent();
             deletedEventIds.add(matched[i].getId());
-          } catch (e) {}
+          } catch (e) {
+            Logger.log(`WARNING: Failed to delete duplicate event ${matched[i].getId()}: ${e}`);
+          }
         }
       } else {
         const created = cal.createAllDayEvent(payload.title, date, { description: finalDesc });
@@ -180,7 +188,9 @@ function syncWeatherToCalendar() {
     if (!touchedEventIds.has(id) && !deletedEventIds.has(id)) {
       try {
         ev.deleteEvent();
-      } catch (e) {}
+      } catch (e) {
+        Logger.log(`WARNING: Failed to delete orphaned event ${id}: ${e}`);
+      }
     }
   });
 
@@ -659,12 +669,17 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
   let totalRain = 0, totalMax = 0, totalMin = 0, gddSum = 0, wDays = 0;
   const base10 = isC ? 10 : 50;
 
-  const baseDate = Utilities.parseDate(baseDateStr + " 12:00:00", calTz || "UTC", "yyyy-MM-dd HH:mm:ss");
+  const tz = calTz || "UTC";
+  const baseDate = Utilities.parseDate(baseDateStr + " 12:00:00", tz, "yyyy-MM-dd HH:mm:ss");
 
+  // Build the 7-day date list once and reuse for both temp and AQI lookups.
+  const dateKeys = [];
   for (let d = 0; d < 7; d++) {
     const curDate = new Date(baseDate.getTime() + d * 24 * 60 * 60 * 1000);
-    const dStr = Utilities.formatDate(curDate, calTz || "UTC", "yyyy-MM-dd");
+    dateKeys.push(Utilities.formatDate(curDate, tz, "yyyy-MM-dd"));
+  }
 
+  dateKeys.forEach(dStr => {
     let maxT = null, minT = null, r = 0;
 
     if (data.det && data.det.time) {
@@ -700,13 +715,11 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
       if (meanT > base10) gddSum += (meanT - base10);
       wDays++;
     }
-  }
+  });
 
   let totalAqi = 0, aqiDays = 0;
   if (data.aq && data.aq.time) {
-    for (let d = 0; d < 7; d++) {
-      const curDate = new Date(baseDate.getTime() + d * 24 * 60 * 60 * 1000);
-      const dStr = Utilities.formatDate(curDate, calTz || "UTC", "yyyy-MM-dd");
+    dateKeys.forEach(dStr => {
       const idx = data.aq.time.indexOf(dStr);
       if (idx !== -1) {
         let val = null;
@@ -720,7 +733,7 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC, calTz) {
           aqiDays++;
         }
       }
-    }
+    });
   }
 
   return {
@@ -888,27 +901,28 @@ function getMoonPhaseDetails(date) {
   const now = date.getTime();
   const newMoonRef = new Date(1970, 0, 7, 20, 35, 0).getTime();
   const phase = ((now - newMoonRef) / 1000) % lp;
-  const dayOfCycle = Math.floor(phase / (24 * 3600));
+  const dayOfCycle = phase / (24 * 3600);
+  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / lp)) / 2;
 
-  let glyph = "🌑", name = "New Moon", fraction = 0;
-  if (dayOfCycle <= 1 || dayOfCycle >= 28) {
-    glyph = "🌑"; name = "New Moon"; fraction = 0.02;
-  } else if (dayOfCycle <= 6) {
-    glyph = "🌒"; name = "Waxing Crescent"; fraction = 0.25;
-  } else if (dayOfCycle <= 9) {
-    glyph = "🌓"; name = "1st Quarter"; fraction = 0.50;
-  } else if (dayOfCycle <= 13) {
-    glyph = "🌔"; name = "Waxing Gibbous"; fraction = 0.75;
-  } else if (dayOfCycle <= 16) {
-    glyph = "🌕"; name = "Full Moon"; fraction = 0.99;
-  } else if (dayOfCycle <= 20) {
-    glyph = "🌖"; name = "Waning Gibbous"; fraction = 0.75;
-  } else if (dayOfCycle <= 23) {
-    glyph = "🌗"; name = "Last Quarter"; fraction = 0.50;
+  let glyph, name;
+  if (dayOfCycle <= 1.5) {
+    glyph = "🌑"; name = "New Moon";
+  } else if (dayOfCycle <= 5.5) {
+    glyph = "🌒"; name = "Waxing Crescent";
+  } else if (dayOfCycle <= 9.5) {
+    glyph = "🌓"; name = "1st Quarter";
+  } else if (dayOfCycle <= 13.5) {
+    glyph = "🌔"; name = "Waxing Gibbous";
+  } else if (dayOfCycle <= 17.5) {
+    glyph = "🌕"; name = "Full Moon";
+  } else if (dayOfCycle <= 21.5) {
+    glyph = "🌖"; name = "Waning Gibbous";
+  } else if (dayOfCycle <= 25.5) {
+    glyph = "🌗"; name = "Last Quarter";
   } else {
-    glyph = "🌘"; name = "Waning Crescent"; fraction = 0.25;
+    glyph = "🌘"; name = "Waning Crescent";
   }
-  return { glyph, name, fraction, illumination: `${Math.round(fraction * 100)}%` };
+  return { glyph, name, fraction: illumination, illumination: `${Math.round(illumination * 100)}%` };
 }
 
 function assessStargazingConditions(data, offset, moonFraction, targetDateStr, cloudCover) {
@@ -953,10 +967,10 @@ function getDayRecord(cityKey, dateStr) {
 
 function saveDayRecord(cityKey, dateStr, record) {
   const key = `WTR_v10_${cityKey}_${dateStr}`;
-  if (record.snapshots && record.snapshots.length > 5) {
+  if (record.snapshots && record.snapshots.length > MAX_SNAPSHOTS_PER_DAY) {
     record.snapshots = [
       record.snapshots[0],
-      ...record.snapshots.slice(-4)
+      ...record.snapshots.slice(-(MAX_SNAPSHOTS_PER_DAY - 1))
     ];
   }
   PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(record));
@@ -967,7 +981,9 @@ function cleanupOldStorageKeys() {
   const all = props.getProperties();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 45);
-  const cutoffStr = Utilities.formatDate(cutoff, "UTC", "yyyy-MM-dd");
+  // Use the calendar's timezone (consistent with the rest of the script) so that
+  // user records aren't deleted prematurely in timezones west of UTC.
+  const cutoffStr = Utilities.formatDate(cutoff, resolveCalendar().getTimeZone(), "yyyy-MM-dd");
 
   Object.keys(all).forEach(k => {
     if (k.startsWith("WTR_v10_")) {
@@ -1022,7 +1038,7 @@ function isGeocodable(str) {
 
 function isWeatherDashboardEvent(ev) {
   const desc = ev.getDescription() || "";
-  if (/\[KEY:[a-zA-Z0-9_\-]+\]/.test(desc)) return true;
+  if (KEY_REGEX.test(desc)) return true;
   const title = ev.getTitle() || "";
   return /^[☀️🌤️⛅☁️🌫️🌦️🌧️🌊❄️🌨️⚡🎯⚖️🎲]/.test(title);
 }
@@ -1112,6 +1128,7 @@ function getAqiGlyph(aqi, aqiType) {
     if (aqi <= 100) return "🟡";
     if (aqi <= 150) return "🟠";
     if (aqi <= 200) return "🔴";
+    if (aqi <= 300) return "🟤";
     return "🟣";
   }
   if (aqi <= 20) return "🟢";
@@ -1126,8 +1143,9 @@ function getAqiLabel(aqi, aqiType) {
   if (aqiType === "USAQI") {
     if (aqi <= 50) return "Good";
     if (aqi <= 100) return "Moderate";
-    if (aqi <= 150) return "Sensitive";
+    if (aqi <= 150) return "Unhealthy for Sensitive";
     if (aqi <= 200) return "Unhealthy";
+    if (aqi <= 300) return "Very Unhealthy";
     return "Hazardous";
   }
   if (aqi <= 20) return "Good";
