@@ -1010,13 +1010,14 @@ def test_gcal_variance_uses_unrounded_mean():
 
 def test_ical_computeGlobalModelAccuracy_null_safe():
     """computeGlobalModelAccuracy must not NaN-poison totals when
-    snap.predictedMax is missing."""
+    snap.predictedMax is missing or NaN. typeof NaN === "number" so we must
+    use Number.isFinite to catch NaN too."""
     fn = re.search(r'function computeGlobalModelAccuracy\([\s\S]*?\n\}', ICAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Must check typeof before arithmetic
-    assert_true('typeof snap.predictedMax' in body,
-        'must guard against missing predictedMax in snapshots')
+    # Must check Number.isFinite before arithmetic (typeof NaN === "number")
+    assert_true('Number.isFinite(snap.predictedMax)' in body,
+        'must guard against NaN predictedMax in snapshots using Number.isFinite')
 
 
 def test_ical_doget_catches_generate_error():
@@ -1718,6 +1719,54 @@ def test_gcal_validateConfig_geo_null_guard():
     body = fn.group(0)
     assert_true(re.search(r'!geo\s*\|\|\s*!geo\.lat', body),
         'validateConfig must guard against null geo result before .lat/.lon access')
+
+
+# =============================================================================
+# Pass 2/2 — NaN poisoning in accuracy engine + numeric rounding guards
+# =============================================================================
+
+def test_gcal_computeGlobalModelAccuracy_uses_isFinite():
+    """computeGlobalModelAccuracy snapshots loop must use Number.isFinite,
+    not typeof, to guard snap.predictedMax. typeof NaN === "number" so
+    typeof alone lets NaN values through the guard and poison the totals."""
+    fn = re.search(r'function computeGlobalModelAccuracy\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('Number.isFinite(snap.predictedMax)' in body,
+        'gcal computeGlobalModelAccuracy must use Number.isFinite(snap.predictedMax)')
+
+
+def test_ical_computeGlobalModelAccuracy_uses_isFinite():
+    fn = re.search(r'function computeGlobalModelAccuracy\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('Number.isFinite(snap.predictedMax)' in body,
+        'ical computeGlobalModelAccuracy must use Number.isFinite(snap.predictedMax)')
+
+
+def test_ical_generateIcsFeed_wind_radiation_null_guards():
+    """generateIcsFeed deterministc branch must guard windspeed/windgusts/uv/et0
+    with != null check before Math.round. Math.round(undefined) = NaN, which
+    bypasses the currentMax === null guard and appears as "NaN" in the ICS title."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must extract raw values and guard before Math.round
+    assert_true('wMaxRaw' in body,
+        'ical must extract windspeed raw value before rounding (NaN guard)')
+    assert_true('Number.isFinite(wMaxRaw)' in body or 'wMaxRaw != null' in body,
+        'ical windspeed rounding must guard against null/undefined before Math.round')
+
+
+def test_ical_generateIcsFeed_rainProb_null_guard():
+    """rainProb must guard against null element in precipitation_probability_max array.
+    Previously used: arr ? arr[idx] : 0 which passes null through as 0 — wrong.
+    Must use: arr && arr[idx] != null ? arr[idx] : 0."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('precipitation_probability_max[idx] != null' in body,
+        'rainProb must guard arr[idx] != null, not just arr ? arr[idx] : 0')
 
 
 # =============================================================================

@@ -479,9 +479,10 @@ function computeGlobalModelAccuracy(sym) {
 
         record.snapshots.forEach(snap => {
           // Defensive: skip snapshots with missing predicted values.
-          if (typeof snap.predictedMax !== "number" || typeof actMax !== "number") return;
+          // typeof NaN === "number" so we must use Number.isFinite to catch NaN too.
+          if (!Number.isFinite(snap.predictedMax) || !Number.isFinite(actMax)) return;
           const tErr = Math.abs(snap.predictedMax - actMax);
-          const rErr = Math.abs((typeof snap.predictedRain === "number" ? snap.predictedRain : 0) - (typeof actRain === "number" ? actRain : 0));
+          const rErr = Math.abs((Number.isFinite(snap.predictedRain) ? snap.predictedRain : 0) - (Number.isFinite(actRain) ? actRain : 0));
           totalTempError += tErr;
           totalRainError += rErr;
           verifiedSnapshots++;

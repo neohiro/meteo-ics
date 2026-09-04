@@ -571,15 +571,20 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         const appRaw = data.det.apparent_temperature_max ? data.det.apparent_temperature_max[idx] : null;
         apparentMax = (appRaw != null && Number.isFinite(appRaw)) ? Math.round(appRaw) : currentMax;
         currentRain = (data.det.precipitation_sum && data.det.precipitation_sum[idx] != null) ? data.det.precipitation_sum[idx] : 0;
-        rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
-        currentWind = data.det.windspeed_10m_max ? Math.round(data.det.windspeed_10m_max[idx]) : 0;
-        windGusts = data.det.windgusts_10m_max ? Math.round(data.det.windgusts_10m_max[idx]) : 0;
+        rainProb = (data.det.precipitation_probability_max && data.det.precipitation_probability_max[idx] != null) ? data.det.precipitation_probability_max[idx] : 0;
+        const wMaxRaw = data.det.windspeed_10m_max ? data.det.windspeed_10m_max[idx] : null;
+        currentWind = (wMaxRaw != null && Number.isFinite(wMaxRaw)) ? Math.round(wMaxRaw) : 0;
+        const wgRaw = data.det.windgusts_10m_max ? data.det.windgusts_10m_max[idx] : null;
+        windGusts = (wgRaw != null && Number.isFinite(wgRaw)) ? Math.round(wgRaw) : 0;
         const rawCode = (data.det.weather_code || data.det.weathercode || [])[idx];
         weatherCode = rawCode !== undefined ? rawCode : 0;
 
-        uvIndex = data.det.uv_index_max ? data.det.uv_index_max[idx] : 0;
-        et0 = data.det.et0_fao_evapotranspiration ? data.det.et0_fao_evapotranspiration[idx] : 0;
-        radiation = data.det.shortwave_radiation_sum ? data.det.shortwave_radiation_sum[idx] : 0;
+        const uvRaw = data.det.uv_index_max ? data.det.uv_index_max[idx] : null;
+        uvIndex = (uvRaw != null && Number.isFinite(uvRaw)) ? uvRaw : 0;
+        const et0Raw = data.det.et0_fao_evapotranspiration ? data.det.et0_fao_evapotranspiration[idx] : null;
+        et0 = (et0Raw != null && Number.isFinite(et0Raw)) ? et0Raw : 0;
+        const radRaw = data.det.shortwave_radiation_sum ? data.det.shortwave_radiation_sum[idx] : null;
+        radiation = (radRaw != null && Number.isFinite(radRaw)) ? radRaw : 0;
 
         if (data.hourlyAgg && data.hourlyAgg[dateKey]) {
           pressure = data.hourlyAgg[dateKey].pressure || 1013.25;
@@ -1030,10 +1035,11 @@ function computeGlobalModelAccuracy(sym) {
 
         record.snapshots.forEach(snap => {
           // Defensive: skip snapshots with missing predicted values rather than
-          // poisoning the running error totals with NaN.
-          if (typeof snap.predictedMax !== "number" || typeof actMax !== "number") return;
+          // poisoning the running error totals with NaN. typeof NaN === "number"
+          // so we must use Number.isFinite to catch NaN too.
+          if (!Number.isFinite(snap.predictedMax) || !Number.isFinite(actMax)) return;
           const tErr = Math.abs(snap.predictedMax - actMax);
-          const rErr = Math.abs((typeof snap.predictedRain === "number" ? snap.predictedRain : 0) - (typeof actRain === "number" ? actRain : 0));
+          const rErr = Math.abs((Number.isFinite(snap.predictedRain) ? snap.predictedRain : 0) - (Number.isFinite(actRain) ? actRain : 0));
           totalTempError += tErr;
           totalRainError += rErr;
           verifiedSnapshots++;
