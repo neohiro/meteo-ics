@@ -510,6 +510,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   const today = new Date();
   const todayStr = Utilities.formatDate(today, "UTC", "yyyy-MM-dd");
   const todayRef = Utilities.parseDate(todayStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
+  const fetchedAt = Utilities.formatDate(today, "UTC", "yyyy-MM-dd'T'HH:mm:ss'Z'");
 
   const calName = t("calName", lang) || ICAL_CONFIG.calendarName;
   const lines = [
@@ -520,8 +521,12 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${escapeIcsText(calName)}`,
     "X-WR-TIMEZONE:UTC",
-    `X-WR-CALDESC:Weather + astronomical · v${ICAL_CONFIG.version}`,
-    `X-WR-LANG:${lang}`
+    `X-WR-CALDESC:Weather + astronomical · v${ICAL_CONFIG.version} · Open-Meteo AQI (hourly)`,
+    `X-WR-LANG:${lang}`,
+    `X-META-SCRIPTVERSION:${ICAL_CONFIG.version}`,
+    `X-META-FETCHEDAT:${fetchedAt}`,
+    "X-META-AQISOURCE:hourly-aggregated",
+    `X-META-AQISOURCE:open-meteo-hourly · v${ICAL_CONFIG.version} · ${fetchedAt}`
   ];
 
   let eventCount = 0;

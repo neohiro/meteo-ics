@@ -1076,6 +1076,20 @@ def test_ical_ics_header_version_desc():
         'X-WR-CALDESC must reference ICAL_CONFIG.version')
 
 
+def test_ical_ics_header_meta_block():
+    """ICS header must include X-META-* properties exposing scriptVersion,
+    fetchedAt, and aqiSource so subscribers/dashboards can verify which
+    pipeline version generated the feed (no support back-and-forth)."""
+    assert_true('X-META-SCRIPTVERSION' in ICAL,
+        'ICS header must include X-META-SCRIPTVERSION')
+    assert_true('X-META-FETCHEDAT' in ICAL,
+        'ICS header must include X-META-FETCHEDAT')
+    assert_true('X-META-AQISOURCE' in ICAL,
+        'ICS header must include X-META-AQISOURCE')
+    assert_true('hourly-aggregated' in ICAL,
+        'X-META-AQISOURCE must reference hourly-aggregated (current AQI pipeline)')
+
+
 def test_norm_handles_non_string():
     """norm() must not throw when called with null, undefined, or a Number."""
     fn = re.search(r'function norm\([\s\S]*?\n\}', ICAL)
