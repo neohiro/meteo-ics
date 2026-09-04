@@ -1588,7 +1588,7 @@ def test_gcal_reconcileGroundTruth_minT_null_guard():
 
 
 # =============================================================================
-# Pass 1/2 follow-up — moon null safety + sample-config spelling fix
+# Pass 1/2 follow-up — moon null safety + stale docs + config spelling
 # =============================================================================
 
 def test_gcal_moon_phase_null_safe():
@@ -1633,6 +1633,45 @@ def test_ical_doc_header_mentions_array_safety():
         'ical header must document array-coerced URL params (Pass 6 fix)')
 
 
+# =============================================================================
+# Pass 1/2 follow-up — AQI hourly aggregation (HTTP 400 fix)
+# =============================================================================
+
+def test_gcal_aq_url_uses_hourly_not_daily():
+    """Open-Meteo air-quality API rejects `daily=` parameter (HTTP 400).
+    aqUrl must use `hourly=` so the request succeeds; aggregation is done in the response handler."""
+    assert_true('hourly=european_aqi' in GCAL,
+        'gcal aqUrl must use hourly=... fields (daily= causes HTTP 400)')
+    assert_true('daily=european_aqi' not in GCAL,
+        'gcal aqUrl must NOT use daily=... fields (Open-Meteo rejects this)')
+
+
+def test_ical_aq_url_uses_hourly_not_daily():
+    assert_true('hourly=european_aqi' in ICAL,
+        'ical aqUrl must use hourly=... fields (daily= causes HTTP 400)')
+    assert_true('daily=european_aqi' not in ICAL,
+        'ical aqUrl must NOT use daily=... fields')
+
+
+def test_gcal_aq_aggregation_is_daily_shaped():
+    """AQ response handler must produce a daily-aggregated object matching the
+    consumer contract: { time: [], european_aqi: [], us_aqi: [], ... }."""
+    fn = re.search(r'function fetchAllAtmosphericDataParallel\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must aggregate hourly → daily arrays (european_aqi, pm2_5, etc.)
+    assert_true('aqTime.map' in body and 'european_aqi' in body,
+        'gcal AQ handler must map to daily arrays matching consumer shape')
+
+
+def test_ical_aq_aggregation_is_daily_shaped():
+    fn = re.search(r'function fetchIcsAtmosphericDataParallel\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqTime.map' in body and 'european_aqi' in body,
+        'ical AQ handler must map to daily arrays matching consumer shape')
+
+
 def test_gcal_syncWeatherToCalendar_geo_null_guard():
     """syncWeatherToCalendar must guard against geocodeCity returning null
     before accessing .name. Without the guard: TypeError: Cannot read properties of null."""
@@ -1653,6 +1692,30 @@ def test_gcal_validateConfig_geo_null_guard():
     body = fn.group(0)
     assert_true(re.search(r'!geo\s*\|\|\s*!geo\.lat', body),
         'validateConfig must guard against null geo result before .lat/.lon access')
+
+
+# =============================================================================
+# README hygiene
+# =============================================================================
+
+def test_readme_ical_endpoint_is_placeholder():
+    """README must use a placeholder URL for the ical endpoint since it
+    changes on each deploy. The old hardcoded ID should not be present."""
+    import os
+    readme = open(os.path.join(REPO, 'README.md'), encoding='utf-8').read()
+    assert_true('[ICAL_ENDPOINT]' in readme,
+        'README must use [ICAL_ENDPOINT] placeholder (endpoint changes on deploy)')
+    assert_true('AKfycbzwkRzpOskREtgz2TE187v4jEiurxRhiM7HLKeyOyQ4SSFU1CwVo_vhr6o7iJd79Pw-eg' not in readme,
+        'README must not contain the old hardcoded Apps Script ID')
+
+
+def test_readme_cities_default_is_required():
+    """README must not advertise a default for `cities` since the script
+    requires it — `London,Dublin` was misleading."""
+    import os
+    readme = open(os.path.join(REPO, 'README.md'), encoding='utf-8').read()
+    assert_true('required' in readme or '(required' in readme,
+        'README cities param must indicate it is required, not show a fake default')
 
 
 # =============================================================================

@@ -807,7 +807,7 @@ function fetchIcsAtmosphericDataParallel(loc, unit) {
   const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const hUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm,relative_humidity_2m,dew_point_2m,cloud_cover&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${ICAL_CONFIG.forecastDays}&temperature_unit=${unit}&timezone=auto`;
-  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&daily=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
+  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
 
   try {
     const responses = UrlFetchApp.fetchAll([
@@ -821,8 +821,43 @@ function fetchIcsAtmosphericDataParallel(loc, unit) {
     else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} deterministic returned HTTP ${responses[0].getResponseCode()}`);
     if (responses[2].getResponseCode() === 200) result.ens = JSON.parse(responses[2].getContentText()).daily;
     else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} ensemble returned HTTP ${responses[2].getResponseCode()}`);
-    if (responses[3].getResponseCode() === 200) result.aq = JSON.parse(responses[3].getContentText()).daily;
-    else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} air-quality returned HTTP ${responses[3].getResponseCode()}`);
+    if (responses[3].getResponseCode() === 200) {
+      const h = JSON.parse(responses[3].getContentText()).hourly;
+      if (h && h.time) {
+        const aqAgg = {};
+        for (let k = 0; k < h.time.length; k++) {
+          const dStr = h.time[k].slice(0, 10);
+          if (!aqAgg[dStr]) aqAgg[dStr] = { aqMax: null, usMax: null, pm25: [], pm10: [], oz: null, no2: null, dust: null, alder: null, birch: null, grass: null };
+          const rec = aqAgg[dStr];
+          if (h.european_aqi && h.european_aqi[k] !== null && !isNaN(h.european_aqi[k])) rec.aqMax = rec.aqMax === null ? h.european_aqi[k] : Math.max(rec.aqMax, h.european_aqi[k]);
+          if (h.us_aqi && h.us_aqi[k] !== null && !isNaN(h.us_aqi[k])) rec.usMax = rec.usMax === null ? h.us_aqi[k] : Math.max(rec.usMax, h.us_aqi[k]);
+          if (h.pm2_5 && h.pm2_5[k] !== null && !isNaN(h.pm2_5[k])) rec.pm25.push(h.pm2_5[k]);
+          if (h.pm10 && h.pm10[k] !== null && !isNaN(h.pm10[k])) rec.pm10.push(h.pm10[k]);
+          if (h.ozone && h.ozone[k] !== null && !isNaN(h.ozone[k])) rec.oz = rec.oz === null ? h.ozone[k] : Math.max(rec.oz, h.ozone[k]);
+          if (h.nitrogen_dioxide && h.nitrogen_dioxide[k] !== null && !isNaN(h.nitrogen_dioxide[k])) rec.no2 = rec.no2 === null ? h.nitrogen_dioxide[k] : Math.max(rec.no2, h.nitrogen_dioxide[k]);
+          if (h.dust && h.dust[k] !== null && !isNaN(h.dust[k])) rec.dust = rec.dust === null ? h.dust[k] : Math.max(rec.dust, h.dust[k]);
+          if (h.alder_pollen && h.alder_pollen[k] !== null && !isNaN(h.alder_pollen[k])) rec.alder = rec.alder === null ? h.alder_pollen[k] : Math.max(rec.alder, h.alder_pollen[k]);
+          if (h.birch_pollen && h.birch_pollen[k] !== null && !isNaN(h.birch_pollen[k])) rec.birch = rec.birch === null ? h.birch_pollen[k] : Math.max(rec.birch, h.birch_pollen[k]);
+          if (h.grass_pollen && h.grass_pollen[k] !== null && !isNaN(h.grass_pollen[k])) rec.grass = rec.grass === null ? h.grass_pollen[k] : Math.max(rec.grass, h.grass_pollen[k]);
+        }
+        const aqTime = Object.keys(aqAgg).sort();
+        result.aq = {
+          time: aqTime,
+          european_aqi: aqTime.map(d => aqAgg[d].aqMax),
+          us_aqi: aqTime.map(d => aqAgg[d].usMax),
+          pm2_5: aqTime.map(d => aqAgg[d].pm25.length > 0 ? aqAgg[d].pm25.reduce((a, b) => a + b, 0) / aqAgg[d].pm25.length : null),
+          pm10: aqTime.map(d => aqAgg[d].pm10.length > 0 ? aqAgg[d].pm10.reduce((a, b) => a + b, 0) / aqAgg[d].pm10.length : null),
+          ozone: aqTime.map(d => aqAgg[d].oz),
+          nitrogen_dioxide: aqTime.map(d => aqAgg[d].no2),
+          dust: aqTime.map(d => aqAgg[d].dust),
+          alder_pollen: aqTime.map(d => aqAgg[d].alder),
+          birch_pollen: aqTime.map(d => aqAgg[d].birch),
+          grass_pollen: aqTime.map(d => aqAgg[d].grass)
+        };
+      }
+    } else {
+      Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} air-quality returned HTTP ${responses[3].getResponseCode()}`);
+    }
 
     if (responses[1].getResponseCode() === 200) {
       const hData = JSON.parse(responses[1].getContentText()).hourly;

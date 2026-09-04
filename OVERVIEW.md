@@ -6,7 +6,7 @@
 |---|---|---|
 | `icalweather.gs` | ICS calendar feed generator (RFC 5545). Exposed as a Google Apps Script Web App URL; calendar clients subscribe to it. | `doGet(e)` |
 | `gcalweather.gs` | Google Calendar event syncer. Writes per-city, per-day all-day events to a configured Google Calendar. | `syncWeatherToCalendar()` |
-| `tests/run_tests.py` | 135-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
+| `tests/run_tests.py` | 141-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
 
 Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on:
 - **Open-Meteo API** (free, no key required) — deterministic forecast, ensemble forecast, air quality
@@ -121,6 +121,8 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 | 45 | gcal | **Stale file-header comment**: "Timezone Drift Immunity: Calendar timezone-aligned dates anchored to local midday" — inconsistent with the actual UTC-anchored implementation (Pass 4/7/8) | Updated header to: "UTC-anchored date keys (T00:00:00Z / Date.UTC)" |
 | 46 | gcal | **Sample config unresolvable**: `CONFIG.locations` used `"Brunnsum"` (typo). Open-Meteo geocoder fails silently → `CONFIG.locations` becomes empty → `throw new Error` fires at every invocation. "Brunssum" is the correct Dutch town spelling | Fixed in both CONFIG block and header doc |
 | 47 | gcal | **`TypeError` in auto-detect**: `syncWeatherToCalendar` called `geocodeCity()` which can return `null`, then immediately accessed `.name` without a null check → `TypeError: Cannot read properties of null` on any calendar event with an unresolvable location | Added `if (geo && geo.name)` guard |
+| 48 | both | **Air-quality endpoint HTTP 400**: Both fetchers used `daily=european_aqi,...` in the air-quality URL. Open-Meteo Air Quality API **does not support `daily=` pre-aggregated parameters** (returns HTTP 400). AQI data was silently absent for all locations | Dropped `daily=` from aqUrl; switched to `hourly=` fields; added in-response hourly→daily aggregation (AQI/pollen = daily max, PM = daily mean) — consumer code unchanged |
+| 49 | README | **Stale endpoint URL + fake default**: README hardcoded the old Apps Script ID; `cities` param advertised `London,Dublin` as default but script requires locations. README URL replaced with `[ICAL_ENDPOINT]` placeholder; cities column corrected to `(required — none)` | Updated README.md; deploy-time replace needed |
 
 ---
 
@@ -130,8 +132,8 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 |---|---|---|
 | Brace / paren / bracket structural balance | `validate3.py` (custom, reads `.gs` as text, counts delimiters) | 0/0/0 both files |
 | Source-content fix verification (54 checks) | `verify_fixes.py` (custom, regex on source) | ALL PASS |
-| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (135 Python tests) | 135 passed, 0 failed |
-| Test count documented | `tests/README.md` | 135 |
+| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (141 Python tests) | 141 passed, 0 failed |
+| Test count documented | `tests/README.md` | 141 |
 
 **What was NOT verified** (no Apps Script runtime available; Node.js not installed):
 - Live `doGet` execution — all paths verified structurally but not end-to-end
