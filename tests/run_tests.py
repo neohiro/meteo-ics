@@ -77,11 +77,10 @@ def parse_bool_param(v):
     return str(v).lower() in ('1', 'true', 'yes')
 
 
-LP = 2551443
-
 
 def get_moon_phase_details(date):
     """Mirror of gcal/ical getMoonPhaseDetails — TZ-independent via UTC epoch."""
+    LP = 2551443
     if isinstance(date, datetime.datetime):
         if date.tzinfo is not None:
             ms = int(date.timestamp() * 1000)
@@ -1168,11 +1167,23 @@ def test_ical_generatePrioritizedAdvices_nan_safe():
     fn = re.search(r'function generatePrioritizedAdvices\([\s\S]*?\n\}', ICAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Must extract safeMax/safeMin/safeApparent before arithmetic
-    assert_true('safeMax' in body or 'Number.isFinite(ctx.tempMax)' in body,
-        'generatePrioritizedAdvices must guard ctx.tempMax against NaN before arithmetic')
+    # Must use Number.isFinite for temp guards (typeof NaN === "number")
     assert_true('Number.isFinite(ctx.tempMax)' in body,
-        'generatePrioritizedAdvices must use Number.isFinite (typeof NaN === "number")')
+        'generatePrioritizedAdvices must guard ctx.tempMax with Number.isFinite')
+
+
+def test_ical_generatePrioritizedAdvices_uv_uses_isFinite():
+    """generatePrioritizedAdvices must use Number.isFinite for uvMax comparisons.
+    The old pattern used `typeof uvMax === "number" && uvMax >= 8` which lets
+    NaN through (typeof NaN === "number" is true), so uv advice silently disappears
+    when ctx.uv is null/undefined."""
+    fn = re.search(r'function generatePrioritizedAdvices\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('Number.isFinite(uvMax)' in body,
+        'generatePrioritizedAdvices UV comparisons must use Number.isFinite (not typeof)')
+    assert_true('typeof uvMax === "number"' not in body,
+        'generatePrioritizedAdvices must not use typeof for uvMax comparisons')
 
 
 def test_norm_handles_non_string():
@@ -1940,3 +1951,29 @@ if fail_n > 0:
         print(f'    {e.split(chr(10))[0]}')
     sys.exit(1)
 sys.exit(0)
+
+
+def test_ical_aq_forecast_days_capped_at_7():
+    """Open-Meteo Air Quality API hard-caps forecast_days at 7 (verified 2026-09-04:
+    forecast_days=7 -> 200, forecast_days=8 -> 400). Without this cap, every city call
+    that uses deterministicDays > 7 (the default is 14) returns HTTP 400 and falls
+    back to cached partial AQ data -- silently dropping AQI for the whole window."""
+    fn = re.search(r'function fetchIcsAtmosphericDataParallel\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqDays' in body and 'Math.min' in body,
+        'fetchIcsAtmosphericDataParallel must cap AQ forecast_days at 7 (API limit)')
+    assert_true(re.search(r'aqUrl\s*=.*?forecast_days=\$\{aqDays\}', body) is not None,
+        'aqUrl must reference the capped aqDays variable, not deterministicDays')
+
+
+def test_gcal_aq_forecast_days_capped_at_7():
+    """Same AQ cap as ical -- verified against live API."""
+    fn = re.search(r'function fetchAllAtmosphericDataParallel\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqForecastDays' in body and 'Math.min' in body,
+        'fetchAllAtmosphericDataParallel must cap AQ forecast_days at 7 (API limit)')
+    assert_true(re.search(r'aqUrl\s*=.*?forecast_days=\$\{aqForecastDays\}', body) is not None,
+        'aqUrl must reference the capped aqForecastDays variable')
+
