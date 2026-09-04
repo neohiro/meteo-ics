@@ -17,7 +17,7 @@ Subscribe once to a live `.ics` feed (Apple Calendar, Outlook, Google Calendar, 
 
 ### What's new in 2.2.0
 
-- **Global AQI Engine** — When a city is outside the Open-Meteo CAMS coverage (most of Africa, South America, South & Southeast Asia, Pacific islands, etc.), the engine transparently falls back to **OpenAQ v3** (free, no key) and then **WAQI** (token-optional). One URL parameter — `aqProvider=auto|openmeteo|openaq|waqi` — controls the source. See the [Air Quality Data Sources](#-air-quality-data-sources) section for details.
+- **Global AQI Engine** — When a city is outside the Open-Meteo CAMS coverage (most of Africa, South America, South & Southeast Asia, Pacific islands, etc.), the engine transparently falls back to **OpenAQ v3** (free, no key) and then **WAQI** (token-optional). One URL parameter — `aqProvider=auto|openaq|waqi` — controls the source. See the [Air Quality Data Sources](#-air-quality-data-sources) section for details.
 - **WAQI token passthrough** — Provide your own WAQI API token via `?waqiToken=XXX` and it will be stored in `ScriptProperties` for higher rate limits.
 - **13 new tests** (172 total) cover the OpenAQ/WAQI integration, URL parameter parsing, and the new fallback paths.
 - **GitHub Actions CI** runs the full test suite on every push and PR.
@@ -140,7 +140,7 @@ Append `?` for the first parameter and `&` for additional flags.
 | `unit` | `celsius`, `fahrenheit` | `celsius` | Temperature scale |
 | `days` | `1` to `30` | `30` | Forecast window |
 | `hazards` | `true`, `false` | `true` | Road risk alerts (active when T_min ≤ 7°C) |
-| `aqProvider` | `auto`, `openmeteo`, `openaq`, `waqi` | `auto` | AQI source: `auto` cascades CAMS → USAQI → OpenAQ → WAQI; specific values force a single source |
+| `aqProvider` | `auto`, `openaq`, `waqi` | `auto` | AQI source: `auto` cascades CAMS → USAQI → OpenAQ → WAQI; specific values force a single source |
 | `waqiToken` | any string | *(none)* | WAQI API token (stored in `ScriptProperties` for higher rate limit) |
 | `action` | `status`, `metrics` | *(none)* | Returns live JSON diagnostics |
 
@@ -172,7 +172,6 @@ The AQI engine has a priority cascade. For each city, it tries them in order and
 
 The `aqProvider` URL parameter lets you override the cascade:
 - `aqProvider=auto` (default) — try CAMS → USAQI → OpenAQ → WAQI in order
-- `aqProvider=openmeteo` — only CAMS/USAQI (no global fallback)
 - `aqProvider=openaq` — force OpenAQ only
 - `aqProvider=waqi` — force WAQI only (provide `?waqiToken=XXX` for higher quota)
 

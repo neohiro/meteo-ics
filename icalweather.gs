@@ -445,6 +445,22 @@ function handleStatusEndpoint(params) {
       snapshotsEvaluated: stats.verifiedSnapshots || 0
     },
     configHealth: configHealth,
+    airQualityData: {
+      defaultProvider: "auto",
+      providerOptions: ["auto", "openaq", "waqi"],
+      providerDescriptions: {
+        auto: "cascade: Open-Meteo CAMS/EAQI → OpenAQ v3 latest → WAQI geo-feed",
+        openaq: "OpenAQ v3 latest measurements (200+ countries, no key required)",
+        waqi: "WAQI /feed/geo: endpoint (1000+ stations, optional token for higher rate limit)"
+      },
+      openMeteoAqForecastDaysCap: OPEN_METEO_AQ_FORECAST_DAYS_CAP,
+      openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + OPEN_METEO_AQ_FORECAST_DAYS_CAP + ". For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
+      globalFallbackEndpoints: {
+        openaq: OPENAQ_LATEST_ENDPOINT,
+        waqi: WAQI_BASE_ENDPOINT + "<lat>;<lon>/"
+      },
+      waqiTokenStored: !!(PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN"))
+    },
     supportedLanguages: SUPPORTED_LANGS,
     endpoints: {
       calendarFeed: "?cities=City1,City2&days=14&lang=en",

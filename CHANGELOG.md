@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Global AQI Engine — OpenAQ + WAQI integration** (both scripts):
-  - `aqProvider` URL param (`icalweather.gs`): `auto` (default) / `openmeteo` / `openaq` / `waqi`.
+  - `aqProvider` URL param (`icalweather.gs`): `auto` (default) / `openaq` / `waqi`.
     - `auto`: prefer Open-Meteo CAMS/EAQI, then OpenAQ v3 latest, then WAQI geo-feed.
     - `openaq`: force OpenAQ v3 `/v3/latest` endpoint.
     - `waqi`: force WAQI `/feed/geo:` endpoint.

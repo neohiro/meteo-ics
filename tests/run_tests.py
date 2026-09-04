@@ -1159,6 +1159,32 @@ def test_ical_statusEndpoint_includes_configHealth():
         'configHealth must expose deterministicDays cap status')
 
 
+def test_ical_statusEndpoint_includes_airQualityData():
+    """handleStatusEndpoint must expose an airQualityData block so operators
+    can monitor the global AQI fallback chain without running a feed.
+
+    Operators can scrape the status endpoint and alert on:
+      - waqiTokenStored: false (token not configured)
+      - defaultProvider unexpected value
+      - openMeteoAqForecastDaysCap drift
+    """
+    fn = re.search(r'function handleStatusEndpoint\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('airQualityData' in body,
+        'handleStatusEndpoint must return airQualityData block')
+    assert_true('defaultProvider' in body,
+        'airQualityData must include defaultProvider')
+    assert_true('providerOptions' in body,
+        'airQualityData must list supported provider options')
+    assert_true('openMeteoAqForecastDaysCap' in body,
+        'airQualityData must expose the Open-Meteo AQ cap for observability')
+    assert_true('globalFallbackEndpoints' in body,
+        'airQualityData must show the global fallback endpoint URLs')
+    assert_true('waqiTokenStored' in body,
+        'airQualityData must report whether a WAQI token is stored')
+
+
 def test_ical_generatePrioritizedAdvices_nan_safe():
     """generatePrioritizedAdvices must guard ctx.tempMax/tempMin/apparentMax
     against null/undefined/NaN. Without the guard, `null - 32 = NaN` poisons
