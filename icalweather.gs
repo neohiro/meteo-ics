@@ -37,12 +37,12 @@
  *   hazards=true|false  — enable road safety section (default true)
  *   dryRun=true         — preview feed as plain text (default false)
  *   action=status|metrics — return JSON diagnostics instead of ICS
- *   aqProvider=auto|openmeteo|openaq|waqi — AQI source (default auto).
- *                                            auto: Open-Meteo first, then OpenAQ, then WAQI.
- *                                            openmeteo: only CAMS/EAQI/USAQI.
- *                                            openaq: force OpenAQ v3 latest endpoint.
- *                                            waqi: force WAQI geo feed (requires waqiToken for high quota).
- *   waqiToken=XXX       — optional WAQI API token (https://aqicn.org/data-platform/token/).
+  *   aqProvider=auto|openaq|waqi — AQI source (default auto).
+  *                                            auto: Open-Meteo first, then OpenAQ, then WAQI.
+  *                                            openaq: force OpenAQ v3 latest endpoint.
+  *                                            waqi: force WAQI geo feed (requires waqiToken for high quota).
+  *   aqRadius=1-100   — OpenAQ station search radius in km (default 25).
+  *   waqiToken=XXX   — optional WAQI API token (https://aqicn.org/data-platform/token/).
  */
 const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
@@ -393,6 +393,16 @@ function buildReadme(params) {
      "",
      "• action : " + tr("'status' or 'metrics' to view live model accuracy JSON.", null),
     "           " + tr("Example", null) + ": ?action=status",
+    "",
+    "• aqProvider : " + tr("AQI source: auto|openaq|waqi (default auto).", null),
+    "               " + tr("Cascade: Open-Meteo CAMS → OpenAQ v3 → WAQI geo-feed.", null),
+    "               " + tr("Example", null) + ": ?cities=Lagos&aqProvider=auto",
+    "",
+    "• aqRadius : " + tr("OpenAQ station search radius in km (1-100, default 25).", null),
+    "             " + tr("Example", null) + ": ?cities=Lagos&aqRadius=50",
+    "",
+    "• waqiToken : " + tr("Optional WAQI API token for higher rate limit.", null),
+    "              " + tr("Example", null) + ": ?cities=Tokyo&waqiToken=YOUR_TOKEN",
     "",
     "2. " + tr("READY-TO-USE SUBSCRIPTION EXAMPLES", null),
     "------------------------------------------------------------------",
@@ -1084,11 +1094,13 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       if (res.getResponseCode() === 200) {
         const json = JSON.parse(res.getContentText());
-        if (json.data && json.data.aqi !== undefined) {
-          const aqi = Math.round(Number(json.data.aqi));
+        if (json.data && json.data.aqi != null && json.data.aqi !== undefined) {
+          const aqiRaw = Number(json.data.aqi);
+          const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
           const iaqi = json.data.iaqi || {};
-          const pm25v = iaqi.pm25 ? Math.round(Number(iaqi.pm25.v)) : null;
-          const pm10v = iaqi.pm10 ? Math.round(Number(iaqi.pm10.v)) : null;
+          const fill = v => { const n = Number(v); return isNaN(n) ? null : Math.round(n); };
+          const pm25v = iaqi.pm25 && iaqi.pm25.v != null ? fill(iaqi.pm25.v) : null;
+          const pm10v = iaqi.pm10 && iaqi.pm10.v != null ? fill(iaqi.pm10.v) : null;
           dates.forEach(d => {
             r.time.push(d);
             r.european_aqi.push(aqi);

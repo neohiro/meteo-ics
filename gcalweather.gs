@@ -502,11 +502,13 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       if (res.getResponseCode() === 200) {
         const json = JSON.parse(res.getContentText());
-        if (json.data && json.data.aqi !== undefined) {
-          const aqi = Math.round(Number(json.data.aqi));
+        if (json.data && json.data.aqi != null && json.data.aqi !== undefined) {
+          const aqiRaw = Number(json.data.aqi);
+          const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
           const iaqi = json.data.iaqi || {};
-          const pm25v = iaqi.pm25 ? Math.round(Number(iaqi.pm25.v)) : null;
-          const pm10v = iaqi.pm10 ? Math.round(Number(iaqi.pm10.v)) : null;
+          const fill = v => { const n = Number(v); return isNaN(n) ? null : Math.round(n); };
+          const pm25v = iaqi.pm25 && iaqi.pm25.v != null ? fill(iaqi.pm25.v) : null;
+          const pm10v = iaqi.pm10 && iaqi.pm10.v != null ? fill(iaqi.pm10.v) : null;
           dates.forEach(d => {
             r.time.push(d);
             r.european_aqi.push(aqi);

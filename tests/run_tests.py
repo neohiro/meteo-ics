@@ -2199,6 +2199,74 @@ def test_ical_global_aqi_merge_syncs_pollen_arrays():
         'merge must push null to grass_pollen for new dates from global AQI')
 
 
+def test_ical_buildReadme_documents_aqProvider_and_aqRadius():
+    """The in-script buildReadme() output must list the AQI provider parameters
+    so anyone running the help endpoint sees the same capabilities the README
+    advertises. Stale doc strings are a recurring drift problem.
+    """
+    fn = re.search(r'function buildReadme\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('aqProvider' in body,
+        'buildReadme must document the aqProvider URL parameter')
+    assert_true('aqRadius' in body,
+        'buildReadme must document the aqRadius URL parameter')
+    assert_true('waqiToken' in body,
+        'buildReadme must document the waqiToken URL parameter')
+
+
+def test_ical_file_header_drops_openmeteo_option():
+    """The script's top-of-file header (which Apps Script shows in 'doGet'
+    docs) must not advertise the dead 'openmeteo' aqProvider option.
+    """
+    assert_true(
+        'openmeteo' not in ICAL[:80] if 'openmeteo' in ICAL[:2000] else True,
+        'stale openmeteo reference in top-of-file header')
+    # The header comment block — everything between the first '/*' and the
+    # first '*/' at the top of the file
+    m = re.search(r'/\*\*([\s\S]*?)\*/', ICAL)
+    assert_true(m is not None)
+    header = m.group(1)
+    assert_true('openmeteo' not in header,
+        'file header must not list openmeteo as a valid aqProvider value (was dropped in v2.2.0)')
+
+
+def test_ical_waqi_response_handles_null_aqi():
+    """WAQI's json.data.aqi can be null or a string like '-' for stations
+    that haven't reported. The check `json.data.aqi !== undefined` was
+    insufficient because Number(null) === 0 produced a false AQI 0.
+
+    The fix uses `json.data.aqi != null` AND an isNaN guard on the
+    converted number.
+    """
+    fn = re.search(r'function fetchGlobalAQI\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must reject both null and undefined (use the explicit double-check
+    # because !json.data.aqi is the legacy pattern that mis-accepts 0)
+    assert_true(
+        re.search(r'json\.data\.aqi\s*!=\s*null', body) or
+        re.search(r'json\.data\.aqi\s*!==\s*null', body) or
+        re.search(r'Number\.isFinite', body) or
+        re.search(r'isNaN\(.*aqiRaw', body),
+        'WAQI branch must guard against null/NaN aqi (json.data.aqi could be null for no-data stations)')
+
+
+def test_ical_waqi_pm_fills_uses_isfinite_guard():
+    """WAQI's iaqi.pm25.v / iaqi.pm10.v can be null (the field exists with
+    null value when that pollutant isn't measured). The original code used
+    `iaqi.pm25 ? Math.round(Number(iaqi.pm25.v)) : null` which gave 0
+    instead of null for null values. The fix uses `iaqi.pm25.v != null`.
+    """
+    fn = re.search(r'function fetchGlobalAQI\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(
+        re.search(r'iaqi\.pm25(?:\.v)?\s*&&\s*iaqi\.pm25\.v\s*!=\s*null', body) or
+        re.search(r'iaqi\.pm25\.v\s*!=\s*null', body),
+        'WAQI branch must guard against null iaqi.pm25.v (otherwise null is coerced to 0)')
+
+
 def test_ical_openaq_endpoints_in_source():
     """OpenAQ and WAQI endpoints must be defined as constants."""
     assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT\s*=', ICAL))
