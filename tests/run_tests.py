@@ -2774,6 +2774,14 @@ def test_waqi_passphrase_strength_gate():
             f'{name} waqiTokenSave must call validatePassphrase before encrypt')
 
 
+def test_waqi_token_reset():
+    """waqiTokenReset() must be exposed so operators can invalidate the cache
+    when WAQI_PASSPHRASE is edited in ScriptProperties mid-execution."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        assert_true('waqiTokenReset' in src,
+            f'{name} must expose waqiTokenReset() for cache invalidation')
+
+
 def test_fetch_retry_response_alignment():
     """fetchAllWithRetry must store responses by global index so the caller always gets
     a full-length array aligned with the original request order, regardless of which

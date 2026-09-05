@@ -130,6 +130,10 @@ const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
   }
 
   return {
+    waqiTokenReset() {
+      _waqiTokenCache = null;
+      _waqiDecryptWarned = false;
+    },
     waqiTokenSave(plaintextToken, passphrase) {
       if (!plaintextToken || !passphrase) throw new Error("waqiTokenSave: token and passphrase are required");
       const strengthErr = validatePassphrase(passphrase);
