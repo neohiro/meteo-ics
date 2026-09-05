@@ -532,13 +532,20 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
           const aqiRaw = Number(json.data.aqi);
           const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
           const iaqi = json.data.iaqi || {};
-          const fill = v => { const n = Number(v); return isNaN(n) ? null : Math.round(n); };
+          const fill = v => { if (v == null) return null; const n = Number(v); return isNaN(n) ? null : Math.round(n); };
           const pm25v = iaqi.pm25 && iaqi.pm25.v != null ? fill(iaqi.pm25.v) : null;
           const pm10v = iaqi.pm10 && iaqi.pm10.v != null ? fill(iaqi.pm10.v) : null;
           // WAQI iaqi keys are conventional (pm25, pm10, o3, no2) but future-proof
           // against alias variants using the same pattern as OpenAQ.
+          // Guard against `iaqi[k] = {v: null}` which `&&` lets through — without
+          // the v != null check, fill(null) = Math.round(0) = 0 (silent zero).
           const firstDefined = (...keys) => {
-            for (const k of keys) { const v = fill(iaqi[k] && iaqi[k].v); if (v !== null) return v; }
+            for (const k of keys) {
+              const obj = iaqi[k];
+              if (!obj || obj.v == null) continue;
+              const v = fill(obj.v);
+              if (v !== null) return v;
+            }
             return null;
           };
           const o3v = firstDefined("o3", "ozone");

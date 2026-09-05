@@ -2716,6 +2716,32 @@ def test_gcal_waqi_alias_handles_missing_keys():
         'firstDefined must be declared before its calls in the WAQI block')
 
 
+def test_waqi_fill_guard_against_null():
+    """The WAQI `fill` helper must return null for null/undefined input.
+
+    `Number(null) === 0` so without a `v == null` guard, fill(null) returns
+    Math.round(0) = 0 (silent zero). Every fill() in every WAQI branch must
+    check `v == null` before calling Number() to prevent fake zero values.
+    """
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        # Find the fetch*GlobalAQI function body first (not doGet).
+        func_match = re.search(
+            r'function (fetchGlobalAQI|gcalFetchGlobalAQI)\([\s\S]+?\n\}\n', src)
+        assert_true(func_match is not None,
+            f'{name} must have a fetchGlobalAQI function')
+        func_body = func_match.group(0)
+        waqi_idx = func_body.find('WAQI_TOKEN')
+        assert_true(waqi_idx != -1,
+            f'{name} fetchGlobalAQI must read WAQI_TOKEN')
+        waqi_block = func_body[waqi_idx:waqi_idx + 2000]
+        fill_start = waqi_block.find('const fill')
+        assert_true(fill_start != -1,
+            f'{name} WAQI branch must define const fill')
+        fill_snippet = waqi_block[fill_start:fill_start + 200]
+        assert_true('v == null' in fill_snippet,
+            f'{name} WAQI fill() must check v == null before Number() to prevent silent zeros')
+
+
 def test_gcal_merge_propagates_ozone_and_no2():
     """fetchAllAtmosphericDataParallel must propagate ozone and nitrogen_dioxide from globalAqi."""
     fn = re.search(r'function fetchAllAtmosphericDataParallel[\s\S]+?\n\}\n', GCAL)

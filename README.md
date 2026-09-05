@@ -5,7 +5,7 @@
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
 [![Version](https://img.shields.io/badge/Version-2.2.0-brightgreen.svg)](./CHANGELOG.md)
 [![CI](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-209%20%2B%20CI-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-210%20%2B%20CI-brightgreen.svg)](#)
 
 **Your weather, astronomy & air-quality — automatically delivered to any calendar app.**  
 Subscribe once to a live `.ics` feed and your calendar does the rest. No new app, no new login, no new habit. Wake up to per-day events titled `☀️ 22°C Paris` with temperature, rain, UV, AQI, moon phase, pollen and road-hazard advice — all built from real forecast models with a live accuracy audit.
@@ -20,7 +20,7 @@ Subscribe once to a live `.ics` feed and your calendar does the rest. No new app
 
 ## 🚀 Try It Now — Pick Your City
 
-<!-- DEPLOY-URL-TODO: replace `…` with the live Apps Script deploy URL after merge. -->
+<!-- DEPLOY-URL-TODO: replace ALL `…` placeholders with the live Apps Script deploy URL after merge. Occurrences: line 28 (Try It Now table), lines 132-141 (English quick links). -->
 > Copy any URL below and paste it into your calendar app's subscription field.
 
 | Region | Cities | URL |
@@ -129,16 +129,16 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇬🇧 Quick Links
 
 - **British Isles (London & Edinburgh, 30 Days):**  
-  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=London,Edinburgh`
+  `https://script.google.com/macros/s/…/exec?cities=London,Edinburgh`
 
 - **US Metro in Fahrenheit (New York, Chicago, Seattle, 14 Days):**  
-  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
+  `https://script.google.com/macros/s/…/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
 
 - **No Road Hazard Warnings (Sydney & Melbourne):**  
-  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?cities=Sydney,Melbourne&hazards=false`
+  `https://script.google.com/macros/s/…/exec?cities=Sydney,Melbourne&hazards=false`
 
 - **AI Telemetry Endpoint (JSON):**  
-  `https://script.google.com/macros/s/AKfycbw1gKGanPWuP36IcmQDjZ5VxEdwE0utSRuHzLGFv6-JMWBpiJgp9jRWwcMXAr-W0TcaFQ/exec?action=status`
+  `https://script.google.com/macros/s/…/exec?action=status`
 
 ---
 
