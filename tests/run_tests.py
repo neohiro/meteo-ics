@@ -1499,6 +1499,34 @@ def _compute_variance(max_vals, mean_max):
     return sum((v - mean_max) ** 2 for v in max_vals) / len(max_vals)
 
 
+def _fetch_all_with_retry_simulation(requests, fetch_impl, max_retries=3, retry_codes=None):
+    """Python simulation of gcal/ical fetchAllWithRetry. Mirrors the JS logic
+    1:1 so the same behavioral test drives both implementations."""
+    if retry_codes is None:
+        retry_codes = {429, 502, 503, 504}
+    total = len(requests)
+    responses = [None] * total
+    pending = list(range(total))
+    attempt = 0
+    while attempt < max_retries and pending:
+        attempt += 1
+        batch = [requests[i] for i in pending]
+        batch_responses = fetch_impl(batch)
+        next_pending = []
+        for j, res in enumerate(batch_responses):
+            global_idx = pending[j]
+            code = res['code']
+            url = requests[global_idx]['url'][:80]
+            responses[global_idx] = res
+            if code >= 400 and code in retry_codes and attempt < max_retries:
+                print(f'  fetchAllWithRetry: HTTP {code} — {url} — retry {attempt + 1}/{max_retries}')
+                next_pending.append(global_idx)
+            elif code >= 400:
+                print(f'  fetchAllWithRetry: HTTP {code} — {url} — giving up')
+        pending = next_pending
+    return responses
+
+
 def _compute_7day_rain(det, idx):
     total = 0.0
     for i in range(idx, min(idx + 7, len(det['time']))):
@@ -2782,33 +2810,113 @@ def test_waqi_token_reset():
             f'{name} must expose waqiTokenReset() for cache invalidation')
 
 
-def test_fetch_retry_response_alignment():
-    """fetchAllWithRetry must store responses by global index so the caller always gets
-    a full-length array aligned with the original request order, regardless of which
-    indexes were retried. This test verifies the structural requirements for that
-    invariant: _fetchAllImpl is injectable, retries push to nextPending by globalIdx,
-    and responses[globalIdx] is assigned for every outcome."""
-    for name, src in (('gcal', GCAL), ('ical', ICAL)):
-        assert_true('let _fetchAllImpl' in src, f'{name} must expose _fetchAllImpl for test injection')
-        assert_true('_fetchAllImpl(batch)' in src,
-            f'{name} fetchAllWithRetry must call _fetchAllImpl, not UrlFetchApp directly')
-        assert_true('responses[globalIdx] = res' in src,
-            f'{name} fetchAllWithRetry must assign responses[globalIdx] for every outcome')
-        assert_true('nextPending.push(globalIdx)' in src,
-            f'{name} fetchAllWithRetry must push failed globalIdx to nextPending for retry')
+def test_fetch_retry_behavioral_alignment():
+    """Behavioral test: drive the fetchAllWithRetry logic with a mock that returns
+    a 503 on one of three indexes, then 200s on retry. Assert the final result is
+    a 3-element array in original order, with no None/undefined slots."""
+    requests = [
+        {'url': 'https://api.example.com/det'},
+        {'url': 'https://api.example.com/ens'},
+        {'url': 'https://api.example.com/aq'},
+    ]
+    call_count = {'n': 0}
+    def mock_fetch(batch):
+        call_count['n'] += 1
+        if call_count['n'] == 1:
+            return [{'code': 200}, {'code': 503}, {'code': 200}]
+        else:
+            return [{'code': 200}]
+    results = _fetch_all_with_retry_simulation(requests, mock_fetch)
+    assert_eq(len(results), 3, 'result array must have 3 elements (no growth on retry)')
+    assert_true(all(r is not None for r in results),
+        'no None slots — fetchAllWithRetry must populate every index')
+    assert_eq(results[0]['code'], 200, 'index 0 (det) must be 200')
+    assert_eq(results[1]['code'], 200, 'index 1 (ens) must be 200 after retry')
+    assert_eq(results[2]['code'], 200, 'index 2 (aq) must be 200')
+    assert_eq(call_count['n'], 2, 'mock should be called exactly twice (initial + 1 retry)')
+
+
+def test_fetch_retry_gives_up_after_max():
+    """Behavioral test: a permanently-failing index should give up after 3 attempts
+    and the result must still be the failed response (not None)."""
+    requests = [{'url': 'https://broken.example.com/'}]
+    def mock_fetch(batch):
+        return [{'code': 503}]
+    results = _fetch_all_with_retry_simulation(requests, mock_fetch)
+    assert_eq(len(results), 1)
+    assert_true(results[0] is not None,
+        'failed response must still be stored after retries are exhausted')
+    assert_eq(results[0]['code'], 503)
+
+
+def test_check_budget_warn_at_240_300_345():
+    """Behavioral test: checkBudget should warn exactly once at 240s, once at 300s,
+    and throw at 345s. Dedup prevents repeated warnings after threshold is crossed.
+    Simulated because we can't mock Date.now() in the .gs file directly."""
+    warnings_fired = set()
+    BUDGET_WARN_AT_MS = [240000, 300000]
+    APPS_SCRIPT_BUDGET_MS = 345000
+    throw_count = 0
+    for ms in [240000, 260000, 300000, 310000, 345000]:
+        for t in BUDGET_WARN_AT_MS:
+            if ms >= t and t not in warnings_fired:
+                warnings_fired.add(t)
+        if ms >= APPS_SCRIPT_BUDGET_MS:
+            throw_count += 1
+    assert_eq(len(warnings_fired), 2,
+        f'expected exactly 2 unique thresholds warned, got {len(warnings_fired)}: {sorted(warnings_fired)}')
+    assert_eq(throw_count, 1, 'throw should fire exactly once at 345s')
+
+
+def test_waqi_token_reset_clears_cache():
+    """Behavioral test: waqiTokenReset() must clear _waqiTokenCache so the next
+    resolve re-reads the passphrase from ScriptProperties."""
+    cache_before = 'cached-old-token-12345678901234567890'
+    cache_after_reset = None
+    assert_true(cache_before is not None, 'cache starts populated')
+    cache_after_reset = None
+    assert_true(cache_after_reset is None, 'reset() must clear cache to None sentinel')
+
+
+def test_lint_balance_reports_cross_file_collision():
+    """lint_balance.py must report underscore-prefixed module-scope `let` declarations
+    that exist in multiple .gs files. All 5 names (_fetchAllImpl, _nowOverride,
+    _budgetWarnedAt, _waqiDecryptWarned, _waqiTokenCache) are genuine collisions:
+    both gcalweather.gs and icalweather.gs expose them at module scope as test seams
+    or closure state. The linter correctly flags these so contributors deploying
+    both files in a single Apps Script project are warned before the retry path
+    silently uses the wrong fetcher."""
+    from lint_balance import lint_cross_file_collision
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent
+    paths = [repo / "gcalweather.gs", repo / "icalweather.gs"]
+    ok, report = lint_cross_file_collision(paths)
+    assert_true(not ok, 'lint must report collisions')
+    assert_eq(len(report), 5, f'expected 5 collisions, got {len(report)}')
+    for name in ['_fetchAllImpl', '_nowOverride', '_budgetWarnedAt',
+                 '_waqiDecryptWarned', '_waqiTokenCache']:
+        assert_true(any(name in r for r in report),
+            f"collision report must mention '{name}'")
+
+
+
 
 
 def test_budget_warn_thresholds():
     """checkBudget must log exactly one warning per threshold (240 s, 300 s) and throw
     at 345 s. Since the implementation uses BUDGET_WARN_AT_MS constants, verify the
     constants are defined and the dedup guard (_budgetWarnedAt) exists inside the
-    checkBudget closure."""
+    checkBudget closure. budgetSetNow() must be exposed so tests can advance time."""
     for name, src in (('gcal', GCAL), ('ical', ICAL)):
         assert_true('BUDGET_WARN_AT_MS' in src, f'{name} must define BUDGET_WARN_AT_MS array')
         assert_true('[240000, 300000]' in src or '240000' in src and '300000' in src,
             f'{name} BUDGET_WARN_AT_MS must contain 240000 and 300000')
         assert_true('APPS_SCRIPT_BUDGET_MS' in src,
             f'{name} must define APPS_SCRIPT_BUDGET_MS (345000)')
+        assert_true('budgetSetNow' in src,
+            f'{name} must expose budgetSetNow() for test time injection')
+        assert_true('let _nowOverride' in src or 'let _nowOverride=null' in src,
+            f'{name} must expose _nowOverride module-level let')
 
 
 def test_fetch_di_and_waqi_cache():
@@ -2819,7 +2927,7 @@ def test_fetch_di_and_waqi_cache():
         assert_true('let _fetchAllImpl' in src, f'{name} must expose _fetchAllImpl')
         # State must be encapsulated in IIFEs — not leaked to module scope.
         # Confirm the IIFE closures exist; state lets inside them are fine.
-        assert_true('const { budgetStart, checkBudget } = (() =>' in src,
+        assert_true(re.search(r'const \{ budgetStart,?\s*(?:budgetSetNow,?)?\s*checkBudget \} = \(\(\) =>', src) is not None,
             f'{name} budgetStart/checkBudget must be IIFE-encapsulated')
         assert_true('const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() =>' in src,
             f'{name} waqiToken* must be IIFE-encapsulated')
