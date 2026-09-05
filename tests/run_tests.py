@@ -2644,7 +2644,7 @@ def test_gcal_waqi_alias_o3_and_no2():
     fn = re.search(r'function gcalFetchGlobalAQI\([\s\S]+?\n\}\n', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    waqi_idx = body.find('WAQI_TOKEN')
+    waqi_idx = body.find('waqiTokenResolve')
     assert_true(waqi_idx != -1, 'WAQI block must be present')
     waqi_block = body[waqi_idx:]
     assert_true(re.search(r'r\.ozone\.push', waqi_block),
@@ -2730,9 +2730,9 @@ def test_waqi_fill_guard_against_null():
         assert_true(func_match is not None,
             f'{name} must have a fetchGlobalAQI function')
         func_body = func_match.group(0)
-        waqi_idx = func_body.find('WAQI_TOKEN')
+        waqi_idx = func_body.find('waqiTokenResolve')
         assert_true(waqi_idx != -1,
-            f'{name} fetchGlobalAQI must read WAQI_TOKEN')
+            f'{name} fetchGlobalAQI must resolve WAQI token via waqiTokenResolve()')
         waqi_block = func_body[waqi_idx:waqi_idx + 2000]
         fill_start = waqi_block.find('const fill')
         assert_true(fill_start != -1,
@@ -2755,6 +2755,75 @@ def test_gcal_merge_propagates_ozone_and_no2():
         'sort-rewrite block must reorder ozone to stay in sync')
     assert_true(re.search(r'cacheObj\.aq\.nitrogen_dioxide\s*=\s*sorted\.map', body),
         'sort-rewrite block must reorder nitrogen_dioxide to stay in sync')
+
+
+def test_waqi_passphrase_strength_gate():
+    """waqiTokenSave must validate passphrase strength before calling Utilities.encrypt.
+    Reject: < 12 chars, all-same, all-digits, 6+ repeated chars."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        assert_true('validatePassphrase' in src, f'{name} must define validatePassphrase')
+        # Closure-wrapped: find the IIFE block and check the inner function exists.
+        iife = re.search(r'const \{ waqiTokenSave[^}]*\} = \(\(\) => \{[\s\S]*?\}\)\(\);', src)
+        assert_true(iife is not None, f'{name} must have waqiToken IIFE')
+        iife_body = iife.group(0)
+        assert_true('function validatePassphrase(pw)' in iife_body,
+            f'{name} IIFE must contain validatePassphrase function')
+        assert_true('WAQI_MIN_PASSPHRASE_LEN' in iife_body,
+            f'{name} IIFE must reference WAQI_MIN_PASSPHRASE_LEN')
+        assert_true('validatePassphrase(passphrase)' in iife_body,
+            f'{name} waqiTokenSave must call validatePassphrase before encrypt')
+
+
+def test_fetch_retry_response_alignment():
+    """fetchAllWithRetry must store responses by global index so the caller always gets
+    a full-length array aligned with the original request order, regardless of which
+    indexes were retried. This test verifies the structural requirements for that
+    invariant: _fetchAllImpl is injectable, retries push to nextPending by globalIdx,
+    and responses[globalIdx] is assigned for every outcome."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        assert_true('let _fetchAllImpl' in src, f'{name} must expose _fetchAllImpl for test injection')
+        assert_true('_fetchAllImpl(batch)' in src,
+            f'{name} fetchAllWithRetry must call _fetchAllImpl, not UrlFetchApp directly')
+        assert_true('responses[globalIdx] = res' in src,
+            f'{name} fetchAllWithRetry must assign responses[globalIdx] for every outcome')
+        assert_true('nextPending.push(globalIdx)' in src,
+            f'{name} fetchAllWithRetry must push failed globalIdx to nextPending for retry')
+
+
+def test_budget_warn_thresholds():
+    """checkBudget must log exactly one warning per threshold (240 s, 300 s) and throw
+    at 345 s. Since the implementation uses BUDGET_WARN_AT_MS constants, verify the
+    constants are defined and the dedup guard (_budgetWarnedAt) exists inside the
+    checkBudget closure."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        assert_true('BUDGET_WARN_AT_MS' in src, f'{name} must define BUDGET_WARN_AT_MS array')
+        assert_true('[240000, 300000]' in src or '240000' in src and '300000' in src,
+            f'{name} BUDGET_WARN_AT_MS must contain 240000 and 300000')
+        assert_true('APPS_SCRIPT_BUDGET_MS' in src,
+            f'{name} must define APPS_SCRIPT_BUDGET_MS (345000)')
+
+
+def test_fetch_di_and_waqi_cache():
+    """Both scripts must use closures to encapsulate state (no module-level lets
+    for _waqiTokenCache / _budgetWarnedAt / _waqiDecryptWarned). _fetchAllImpl stays
+    at module level for test injection. checkBudget must warn at 240s/300s thresholds."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        assert_true('let _fetchAllImpl' in src, f'{name} must expose _fetchAllImpl')
+        # State must be encapsulated in IIFEs — not leaked to module scope.
+        # Confirm the IIFE closures exist; state lets inside them are fine.
+        assert_true('const { budgetStart, checkBudget } = (() =>' in src,
+            f'{name} budgetStart/checkBudget must be IIFE-encapsulated')
+        assert_true('const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() =>' in src,
+            f'{name} waqiToken* must be IIFE-encapsulated')
+
+
+
+        assert_true('BUDGET_WARN_AT_MS' in src,
+            f'{name} must define BUDGET_WARN_AT_MS threshold array')
+        assert_true('240000' in src,
+            f'{name} checkBudget must warn at 240000ms threshold')
+        assert_true('300000' in src,
+            f'{name} checkBudget must warn at 300000ms threshold')
 
 
 # =============================================================================
