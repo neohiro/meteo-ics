@@ -3304,6 +3304,18 @@ def test_gcal_onthisday_integrated_in_buildDashboardPayload():
     assert_true('getBreakingNewsText' in body, 'buildDashboardPayload must call getBreakingNewsText')
 
 
+def test_gcal_breaking_news_in_future_section():
+    """gcalweather.gs must include breaking news section in the future/forecast section."""
+    fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Check that breakingNews section exists
+    assert_true('BREAKING NEWS (TODAY)' in body, 'buildDashboardPayload must have BREAKING NEWS section')
+    # Count occurrences - should be in both past and future sections (2 total)
+    count = body.count('BREAKING NEWS (TODAY)')
+    assert_true(count >= 2, f'BREAKING NEWS should appear in both sections, found {count}')
+
+
 def test_ical_onthisday_integrated_in_generateIcsFeed():
     """icalweather.gs must integrate OnThisDay in generateIcsFeed."""
     fn = re.search(r'function generateIcsFeed\([\s\S]*?\nfunction ', ICAL)

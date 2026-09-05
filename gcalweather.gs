@@ -1657,12 +1657,17 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     onThisDayText ? [
       `📜 ON THIS DAY`,
       onThisDayText
-    ].join("\n") : ``,
+    ].join("\n") : null,
     
     wikiOnThisDay ? [
       `📖 WIKIPEDIA ON THIS DAY`,
       wikiOnThisDay
-    ].join("\n") : ``,
+    ].join("\n") : null,
+    
+    breakingNews ? [
+      `📰 BREAKING NEWS (TODAY)`,
+      breakingNews
+    ].join("\n") : null,
     
     [
       `🧪 AIR QUALITY & BIO`,
