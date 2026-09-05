@@ -116,7 +116,7 @@ def lint_file(path: Path) -> tuple[bool, dict]:
 
 
 _MODULE_LIT_RE = re.compile(
-    r'^\s*(?:let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=',
+    r'^(let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=',
     re.MULTILINE,
 )
 
@@ -128,11 +128,15 @@ def collect_module_lets(path: Path) -> set[str]:
     deploys them as a single Apps Script project, the second declaration shadows
     the first and the retry path silently uses the wrong fetcher.
 
+    Module scope = column 0 of the source (no indentation). Variables inside
+    IIFEs, function bodies, or any nested block are intentionally excluded
+    because they are function-scoped and cannot collide across files.
+
     We restrict to underscore-prefixed names because those are the test seams
     deliberately exposed at module scope. Names without a leading underscore are
     intended public API (unique per file)."""
     src = path.read_text(encoding="utf-8")
-    return {n for n in _MODULE_LIT_RE.findall(src) if n.startswith("_")}
+    return {n for _, n in _MODULE_LIT_RE.findall(src) if n.startswith("_")}
 
 
 def lint_cross_file_collision(paths: list[Path]) -> tuple[bool, list[str]]:
@@ -152,6 +156,52 @@ def lint_cross_file_collision(paths: list[Path]) -> tuple[bool, list[str]]:
     for n, files in sorted(risky.items()):
         report.append(f"COLLISION: '{n}' is `let`-declared at module scope in: {', '.join(files)}")
     return ok, report
+
+
+# Constants that are intentionally mirrored across gcalweather.gs and icalweather.gs.
+# If one file changes a value (e.g. AQ cap) and the other is forgotten, the
+# deployed runtime behavior diverges silently because each Apps Script project
+# uses only one of the two files. This regex catches drift.
+_SHARED_CONST_RE = re.compile(
+    r'^(const|let|var)\s+([A-Z][A-Z0-9_]+)\s*=\s*([^;{}\n]+?);',
+    re.MULTILINE,
+)
+
+
+def collect_shared_constants(path: Path) -> dict[str, str]:
+    """Return a dict of SCREAMING_SNAKE_CASE constants declared at module scope
+    (column 0), mapped to their RHS string (stripped).
+
+    Only top-level declarations are captured. Assignments inside functions or
+    IIFEs are excluded. We restrict to UPPER_SNAKE_CASE names because those
+    are the conventionally-shared API constants; mixedCase and camelCase
+    constants are typically file-local."""
+    src = path.read_text(encoding="utf-8")
+    return {n: rhs.strip() for _, n, rhs in _SHARED_CONST_RE.findall(src)}
+
+
+def lint_constant_drift(paths: list[Path]) -> tuple[bool, list[str]]:
+    """Detect constants declared with the same name but different values across
+    .gs files. Returns (ok, report). ok=False if any drift is found.
+
+    Conservative by design: only flags a name as drifted if it appears in 2+
+    files with different RHS values. Constants present in only one file are
+    ignored (they may be file-local by design)."""
+    constants: dict[str, dict[str, str]] = {}
+    for p in paths:
+        for n, rhs in collect_shared_constants(p).items():
+            constants.setdefault(n, {})[p.name] = rhs
+    drift: list[tuple[str, dict[str, str]]] = []
+    for n, by_file in constants.items():
+        if len(by_file) > 1 and len(set(by_file.values())) > 1:
+            drift.append((n, by_file))
+    report = []
+    for n, by_file in sorted(drift):
+        report.append(
+            f"DRIFT: constant '{n}' has different values across files: "
+            + ", ".join(f"{f}={v}" for f, v in sorted(by_file.items()))
+        )
+    return not drift, report
 
 
 def main() -> int:
@@ -189,6 +239,14 @@ def main() -> int:
                     if len(files) == 1}
             print(f"cross-file: {len(underscore_names)} underscore lets found, "
                   f"{len(safe)} safe (single-file), 0 collisions")
+        # Constant drift check
+        ok3, report3 = lint_constant_drift(gs_paths)
+        if not ok3:
+            for line in report3:
+                print(line)
+            failed += 1
+        else:
+            print(f"constant-drift: 0 shared-constant mismatches")
     return 1 if failed else 0
 
 
