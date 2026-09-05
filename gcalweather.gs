@@ -762,14 +762,12 @@ function getWikipediaOnThisDayText(dateStr) {
 // ============================================================
 const NEWS_API_URL = "https://newsapi.org/v2/top-headlines";
 
-function fetchBreakingNews(lat, lon) {
-  // NOTE: Requires NEWS_API_KEY in ScriptProperties for full functionality.
-  // Without API key, returns a static fallback message.
+function fetchBreakingNews() {
   try {
     const props = PropertiesService.getScriptProperties();
     const apiKey = props.getProperty("NEWS_API_KEY");
     if (!apiKey) {
-      return "No breaking news API key configured. Set NEWS_API_KEY in ScriptProperties.";
+      return null;
     }
     const url = `${NEWS_API_URL}?q=weather&language=en&pageSize=3&apiKey=${apiKey}`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
@@ -792,8 +790,7 @@ function getBreakingNewsText(dateStr) {
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   if (dateStr !== today) return null; // Only for current day
   
-  // For demo purposes, using a generic location. In production, use actual lat/lon from loc.
-  return fetchBreakingNews(0, 0);
+  return fetchBreakingNews();
 }
 // State is encapsulated in a closure — no module-level lets that can collide
 // with other scripts deployed in the same Apps Script project.
@@ -1478,17 +1475,17 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       onThisDayText ? [
         `📜 ON THIS DAY`,
         onThisDayText
-      ].join("\n") : ``,
+      ].join("\n") : null,
       
       wikiOnThisDay ? [
         `📖 WIKIPEDIA ON THIS DAY`,
         wikiOnThisDay
-      ].join("\n") : ``,
+      ].join("\n") : null,
       
       breakingNews ? [
         `📰 BREAKING NEWS (TODAY)`,
         breakingNews
-      ].join("\n") : ``,
+      ].join("\n") : null,
 
       [
         `🎯 PREDICTION ACCURACY AUDIT`,
@@ -1507,7 +1504,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       ].join("\n")
     ];
 
-    return { title, desc: sections.join("\n\n"), eventColor };
+    return { title, desc: sections.filter(Boolean).join("\n\n"), eventColor };
   }
 
   // B. Future & Today (Forecast Dashboard)
@@ -1713,7 +1710,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     `• Weather & Astronomy: Open-Meteo API`
   ].join("\n"));
 
-  return { title, desc: sections.join("\n\n"), eventColor };
+  return { title, desc: sections.filter(Boolean).join("\n\n"), eventColor };
 }
 
 // ==========================================================

@@ -3194,14 +3194,10 @@ def test_fetch_di_and_waqi_cache():
     at module level for test injection. checkBudget must warn at 240s/300s thresholds."""
     for name, src in (('gcal', GCAL), ('ical', ICAL)):
         assert_true('let _fetchAllImpl' in src, f'{name} must expose _fetchAllImpl')
-        # State must be encapsulated in IIFEs — not leaked to module scope.
-        # Confirm the IIFE closures exist; state lets inside them are fine.
         assert_true(re.search(r'const \{ budgetStart,?\s*(?:budgetSetNow,?)?\s*checkBudget \} = \(\(\) =>', src) is not None,
             f'{name} budgetStart/checkBudget must be IIFE-encapsulated')
         assert_true('const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() =>' in src,
             f'{name} waqiToken* must be IIFE-encapsulated')
-
-
 
         assert_true('BUDGET_WARN_AT_MS' in src,
             f'{name} must define BUDGET_WARN_AT_MS threshold array')
@@ -3209,6 +3205,137 @@ def test_fetch_di_and_waqi_cache():
             f'{name} checkBudget must warn at 240000ms threshold')
         assert_true('300000' in src,
             f'{name} checkBudget must warn at 300000ms threshold')
+
+
+# =============================================================================
+# OnThisDay functionality tests
+# =============================================================================
+group('OnThisDay functionality')
+
+
+def test_gcal_cultural_events_functions_exist():
+    """gcalweather.gs must have cultural events functions defined."""
+    assert_true('function getCulturalEventsForDate' in GCAL, 'getCulturalEventsForDate missing')
+    assert_true('function getOnThisDayText' in GCAL, 'getOnThisDayText missing')
+    assert_true('NATIONAL_HOLIDAYS' in GCAL, 'NATIONAL_HOLIDAYS missing')
+    assert_true('INTERNATIONAL_OBSERVANCES' in GCAL, 'INTERNATIONAL_OBSERVANCES missing')
+
+
+def test_ical_cultural_events_functions_exist():
+    """icalweather.gs must have cultural events functions defined."""
+    assert_true('function getCulturalEventsForDate' in ICAL, 'getCulturalEventsForDate missing')
+    assert_true('function getOnThisDayText' in ICAL, 'getOnThisDayText missing')
+    assert_true('NATIONAL_HOLIDAYS' in ICAL, 'NATIONAL_HOLIDAYS missing')
+    assert_true('INTERNATIONAL_OBSERVANCES' in ICAL, 'INTERNATIONAL_OBSERVANCES missing')
+
+
+def test_gcal_wikipedia_fetcher_exists():
+    """gcalweather.gs must have Wikipedia OnThisDay fetcher."""
+    assert_true('function fetchWikipediaOnThisDay' in GCAL, 'fetchWikipediaOnThisDay missing')
+    assert_true('function fetchWikipediaOnThisDayCached' in GCAL, 'fetchWikipediaOnThisDayCached missing')
+    assert_true('function getWikipediaOnThisDayText' in GCAL, 'getWikipediaOnThisDayText missing')
+    assert_true('WIKIPEDIA_ONTHISDAY_URL' in GCAL, 'WIKIPEDIA_ONTHISDAY_URL missing')
+
+
+def test_ical_wikipedia_fetcher_exists():
+    """icalweather.gs must have Wikipedia OnThisDay fetcher."""
+    assert_true('function fetchWikipediaOnThisDay' in ICAL, 'fetchWikipediaOnThisDay missing')
+    assert_true('function fetchWikipediaOnThisDayCached' in ICAL, 'fetchWikipediaOnThisDayCached missing')
+    assert_true('function getWikipediaOnThisDayText' in ICAL, 'getWikipediaOnThisDayText missing')
+    assert_true('WIKIPEDIA_ONTHISDAY_URL' in ICAL, 'WIKIPEDIA_ONTHISDAY_URL missing')
+
+
+def test_gcal_breaking_news_exists():
+    """gcalweather.gs must have breaking news fetcher."""
+    assert_true('function fetchBreakingNews' in GCAL, 'fetchBreakingNews missing')
+    assert_true('function getBreakingNewsText' in GCAL, 'getBreakingNewsText missing')
+    assert_true('NEWS_API_URL' in GCAL, 'NEWS_API_URL missing')
+
+
+def test_ical_breaking_news_exists():
+    """icalweather.gs must have breaking news fetcher."""
+    assert_true('function fetchBreakingNews' in ICAL, 'fetchBreakingNews missing')
+    assert_true('function getBreakingNewsText' in ICAL, 'getBreakingNewsText missing')
+    assert_true('NEWS_API_URL' in ICAL, 'NEWS_API_URL missing')
+
+
+def test_breaking_news_returns_null_without_api_key():
+    """Breaking news fetch must return null when no API key, not a string."""
+    fn_gcal = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
+    assert_true(fn_gcal is not None)
+    body = fn_gcal.group(0)
+    assert_true('return null' in body, 'fetchBreakingNews must return null when no API key')
+    assert_true('return "No breaking news' not in body, 'fetchBreakingNews must not return error string')
+
+
+def test_breaking_news_today_only_guard():
+    """Breaking news must only appear for today, not future dates."""
+    fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('dateStr !== today' in body or 'dateStr != today' in body,
+        'getBreakingNewsText must have today-only guard')
+
+
+def test_wikipedia_fetcher_has_cache():
+    """Wikipedia fetcher must use caching (24h PropertiesService cache)."""
+    fn = re.search(r'function fetchWikipediaOnThisDayCached\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('PropertiesService' in body, 'Wikipedia cache must use PropertiesService')
+    assert_true('setProperty' in body, 'Wikipedia cache must store data')
+
+
+def test_wikipedia_fetcher_has_user_agent():
+    """Wikipedia fetcher must include User-Agent header (API courtesy)."""
+    fn = re.search(r'function fetchWikipediaOnThisDay\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('User-Agent' in body, 'Wikipedia fetch must include User-Agent header')
+
+
+def test_gcal_onthisday_integrated_in_buildDashboardPayload():
+    """gcalweather.gs must integrate OnThisDay in buildDashboardPayload."""
+    fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('getOnThisDayText' in body, 'buildDashboardPayload must call getOnThisDayText')
+    assert_true('getWikipediaOnThisDayText' in body, 'buildDashboardPayload must call getWikipediaOnThisDayText')
+    assert_true('getBreakingNewsText' in body, 'buildDashboardPayload must call getBreakingNewsText')
+
+
+def test_ical_onthisday_integrated_in_generateIcsFeed():
+    """icalweather.gs must integrate OnThisDay in generateIcsFeed."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\nfunction ', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('getOnThisDayText' in body, 'generateIcsFeed must call getOnThisDayText')
+    assert_true('getWikipediaOnThisDayText' in body, 'generateIcsFeed must call getWikipediaOnThisDayText')
+    assert_true('getBreakingNewsText' in body, 'generateIcsFeed must call getBreakingNewsText')
+
+
+def test_sections_filter_boolean_before_join():
+    """gcalweather.gs sections array must filter empty values before joining."""
+    fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('filter(Boolean)' in body, 'sections must filter(Boolean) before join to skip null/empty')
+
+
+def test_astronomical_events_enhanced():
+    """gcalweather.gs must have enhanced ASTRONOMICAL_EVENTS_DETAILED."""
+    assert_true('ASTRONOMICAL_EVENTS_DETAILED' in GCAL, 'ASTRONOMICAL_EVENTS_DETAILED missing')
+    assert_true('METEOR_SHOWERS' in GCAL, 'METEOR_SHOWERS missing')
+    assert_true('SOLAR_ECLIPSES' in GCAL, 'SOLAR_ECLIPSES missing')
+    assert_true('LUNAR_ECLIPSES' in GCAL, 'LUNAR_ECLIPSES missing')
+
+
+def test_ical_astronomical_events_enhanced():
+    """icalweather.gs must have enhanced ASTRONOMICAL_EVENTS_DETAILED."""
+    assert_true('ASTRONOMICAL_EVENTS_DETAILED' in ICAL, 'ASTRONOMICAL_EVENTS_DETAILED missing')
+    assert_true('METEOR_SHOWERS' in ICAL, 'METEOR_SHOWERS missing')
+    assert_true('SOLAR_ECLIPSES' in ICAL, 'SOLAR_ECLIPSES missing')
+    assert_true('LUNAR_ECLIPSES' in ICAL, 'LUNAR_ECLIPSES missing')
 
 
 # =============================================================================
@@ -3231,51 +3358,4 @@ if fail_n > 0:
         print(f'    {e.split(chr(10))[0]}')
     sys.exit(1)
 sys.exit(0)
-
-
-def test_lint_constant_drift_detects_mismatch():
-    """lint_constant_drift must flag when the same UPPER_SNAKE_CASE constant
-    has different values across .gs files. This catches the common
-    'forgot to update the other file' bug: e.g. if one developer changes
-    OPEN_METEO_AQ_FORECAST_DAYS_CAP from 7 to 5 in gcalweather.gs but
-    forgets icalweather.gs, the AQ cascade logic silently diverges."""
-    from lint_balance import lint_constant_drift
-    import tempfile, os
-    try:
-        # Create two synthetic .gs files with a drifted constant
-        f1 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
-        f2 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
-        f1.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;\n')
-        f1.write('function foo() { const LOCAL = 1; }\n')
-        f2.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 5;\n')  # DIVERGED
-        f2.write('function bar() { const LOCAL = 2; }\n')
-        f1.close(); f2.close()
-        from pathlib import Path
-        ok, report = lint_constant_drift([Path(f1.name), Path(f2.name)])
-        assert_true(not ok, 'must detect drift')
-        assert_true(any('OPEN_METEO_AQ_FORECAST_DAYS_CAP' in r for r in report),
-            f'drift report must mention the drifted constant: {report}')
-        assert_true(any('=7' in r and '=5' in r for r in report),
-            f'report must show both values: {report}')
-    finally:
-        os.unlink(f1.name)
-        os.unlink(f2.name)
-
-
-def test_lint_constant_drift_clean_when_matched():
-    """lint_constant_drift must pass (ok=True) when constants match across files."""
-    from lint_balance import lint_constant_drift
-    import tempfile, os
-    try:
-        f1 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
-        f2 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
-        f1.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;\n')
-        f2.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;\n')
-        f1.close(); f2.close()
-        from pathlib import Path
-        ok, report = lint_constant_drift([Path(f1.name), Path(f2.name)])
-        assert_true(ok, f'must not flag matching constants, got: {report}')
-    finally:
-        os.unlink(f1.name)
-        os.unlink(f2.name)
 

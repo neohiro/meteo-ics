@@ -917,12 +917,12 @@ function getWikipediaOnThisDayText(dateStr) {
 // ============================================================
 const NEWS_API_URL = "https://newsapi.org/v2/top-headlines";
 
-function fetchBreakingNews(lat, lon) {
+function fetchBreakingNews() {
   try {
     const props = PropertiesService.getScriptProperties();
     const apiKey = props.getProperty("NEWS_API_KEY");
     if (!apiKey) {
-      return "No breaking news API key configured. Set NEWS_API_KEY in ScriptProperties.";
+      return null;
     }
     const url = `${NEWS_API_URL}?q=weather&language=en&pageSize=3&apiKey=${apiKey}`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
@@ -944,7 +944,7 @@ function fetchBreakingNews(lat, lon) {
 function getBreakingNewsText(dateStr) {
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   if (dateStr !== today) return null;
-  return fetchBreakingNews(0, 0);
+  return fetchBreakingNews();
 }
 
 function doGet(e) {
