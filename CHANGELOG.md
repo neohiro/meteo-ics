@@ -13,13 +13,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     - `openaq`: force OpenAQ v3 `/v3/latest` endpoint.
     - `waqi`: force WAQI `/feed/geo:` endpoint.
   - `waqiToken` URL param: optional WAQI API token for higher rate limits (stored in `ScriptProperties` after first use).
-  - `aqProvider` CONFIG option (`gcalweather.gs`): same four values at CONFIG level.
+  - `aqProvider` CONFIG option (`gcalweather.gs`): same three values (`auto` / `openaq` / `waqi`) at CONFIG level.
+ - `aqRadius` CONFIG option (`gcalweather.gs`): station search radius in km (default 25, range 1-100).
+ - `aqSource` label in gcal calendar event descriptions: each event's description now shows which provider supplied the AQI value (Open-Meteo / OpenAQ / WAQI).
   - `fetchGlobalAQI()` (ical) and `gcalFetchGlobalAQI()` (gcal) functions: attempt OpenAQ first, then WAQI when neither CAMS nor USAQI data is available for a location.
   - OpenAQ v3 endpoint: `https://api.openaq.org/v3/latest` (200+ countries, free tier, no API key required).
   - WAQI endpoint: `https://api.waqi.info/feed/geo:` (1000+ stations, token-optional, higher rate limit with token).
 - `OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7` constant extracted in both scripts (documents the hard cap, centralizes the value).
 - `parseAqProvider()` helper in `icalweather.gs`: parses `aqProvider` URL param with `"auto"` default.
-  - 22 new Python tests covering the OpenAQ/WAQI integration, `parseAqProvider`, `aqProvider` URL param, `fetchGlobalAQI` existence, WAQI token ScriptProperties storage, AQI source label display, lint/balance helpers.
+  - 24 new Python tests covering the OpenAQ/WAQI integration, `parseAqProvider`, `aqProvider` URL param, `fetchGlobalAQI` existence, WAQI token ScriptProperties storage, AQI source label display, lint/balance helpers, status-endpoint consistency with parser.
 
 ### Changed
 - Version bumped: `2.1.0` → `2.2.0` in both `ICAL_CONFIG` and `CONFIG`.

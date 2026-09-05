@@ -1185,6 +1185,27 @@ def test_ical_statusEndpoint_includes_airQualityData():
         'airQualityData must report whether a WAQI token is stored')
 
 
+def test_ical_statusEndpoint_providerOptions_matches_parseAqProvider():
+    """The providerOptions array in the status endpoint must match exactly the
+    values that parseAqProvider can return.
+
+    parseAqProvider accepts: auto, openaq, waqi (hard-coded string literals).
+    The status endpoint must not list an undocumented value.
+    """
+    fn = re.search(r'function handleStatusEndpoint\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Extract the providerOptions array from the JSON payload.
+    m = re.search(r'providerOptions:\s*\[(.*?)\]', body)
+    assert_true(m is not None, 'providerOptions array must be present')
+    # Split by comma, strip quotes/spaces.
+    options = [x.strip().strip('"').strip("'") for x in m.group(1).split(',')]
+    # parseAqProvider return values: auto, openaq, waqi (verified by other test).
+    expected = {'auto', 'openaq', 'waqi'}
+    assert_true(set(options) == expected,
+        f'providerOptions must be {expected}; got {set(options)}')
+
+
 def test_ical_generatePrioritizedAdvices_nan_safe():
     """generatePrioritizedAdvices must guard ctx.tempMax/tempMin/apparentMax
     against null/undefined/NaN. Without the guard, `null - 32 = NaN` poisons
@@ -2037,6 +2058,11 @@ def test_parseAqProvider_no_openmeteo_branch():
     # 'openmeteo' must not appear as a returnable option
     assert_true('"openmeteo"' not in body and "'openmeteo'" not in body,
         'parseAqProvider must not return "openmeteo" — only auto/openaq/waqi are supported')
+    # "auto" must be the final return fallback (default when no branch matches).
+    # Without this, a future refactor could silently change the default to a
+    # provider that does not exist in the cascade, silently breaking all users.
+    assert_true(re.search(r'return\s+"auto"', body),
+        'parseAqProvider final return must be "auto" (the default when no branch matches)')
 
 
 def test_parseAqRadius_function_exists():
