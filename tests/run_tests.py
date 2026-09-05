@@ -2535,6 +2535,181 @@ def test_lint_balance_helper_finds_mismatch():
         p.unlink(missing_ok=True)
 
 
+def test_ical_statusEndpoint_includes_activeAqRadius():
+    """The airQualityData block must report the active aqRadius so operators
+    can verify the configured station search radius without inspecting source.
+    """
+    fn = re.search(r'function handleStatusEndpoint\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('activeAqRadius' in body,
+        'airQualityData must include activeAqRadius field for operator observability')
+    assert_true(re.search(r'activeAqRadius:\s*parseAqRadius', body),
+        'activeAqRadius must be derived via parseAqRadius() (so it inherits the [1,100] clamp)')
+
+
+def test_ical_aqi_display_includes_scale():
+    """The AQI line in generateIcsFeed must show the scale (e.g. '42/100 EAQI')."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # The scale is computed via a ternary: aqiType === "EAQI" ? 100 : (aqiType === "USAQI" ? 500 : null)
+    assert_true(re.search(r'aqiType\s*===\s*"EAQI"\s*\?\s*100', body),
+        'ical must compute scale 100 for EAQI in the ternary')
+    assert_true(re.search(r'aqiType\s*===\s*"USAQI"\s*\?\s*500', body),
+        'ical must compute scale 500 for USAQI in the ternary')
+    # Template literal must reference the scale value.
+    assert_true(re.search(r'aqiVal\}\$\{aqiScaleVal', body),
+        'ical AQI line must render ${aqiVal}${aqiScaleVal to show the scale')
+
+
+def test_gcal_aqi_display_includes_scale():
+    """gcal buildDashboardPayload must show the AQI scale (e.g. '42/100 EAQI')."""
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r'aqiScale\s*=\s*100', body),
+        'gcal must set aqiScale = 100 for EAQI')
+    assert_true(re.search(r'aqiScale\s*=\s*500', body),
+        'gcal must set aqiScale = 500 for USAQI')
+    assert_true(re.search(r'aqiVal\}\$\{aqiScale\s*\?', body),
+        'gcal AQI line must render ${aqiVal}${aqiScale ? "/" + aqiScale : ""}')
+
+
+def test_gcal_has_getAqiScale_helper():
+    """gcal must define a getAqiScale(aqiType) helper so the scale logic is central."""
+    assert_true(re.search(r'function getAqiScale\(', GCAL),
+        'gcal must define getAqiScale helper')
+    fn = re.search(r'function getAqiScale\([^)]*\)\s*\{([\s\S]*?)\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(1)
+    assert_true(re.search(r'EAQI.*100', body) and re.search(r'USAQI.*500', body),
+        'getAqiScale must return 100 for EAQI and 500 for USAQI')
+
+
+def test_gcal_event_has_sources_section():
+    """Every gcal event description must end with a SOURCES section."""
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r'📡\s*SOURCES', body),
+        'gcal event must have a 📡 SOURCES section')
+    assert_true(re.search(r'Weather.*Open-Meteo|Open-Meteo.*Weather', body),
+        'gcal SOURCES section must credit Open-Meteo as the weather provider')
+
+
+def test_gcal_advice_before_audit():
+    """In the gcal event, actionable advice must come BEFORE the model audit."""
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    advice_idx = body.find('💡 ACTIONABLE ADVICE')
+    audit_idx = body.find('📉 MODEL AUDIT', advice_idx if advice_idx >= 0 else 0)
+    assert_true(advice_idx != -1 and audit_idx != -1,
+        'gcal must have both ACTIONABLE ADVICE and MODEL AUDIT sections')
+    if advice_idx > 0 and audit_idx > 0:
+        assert_true(advice_idx < audit_idx,
+            'gcal ACTIONABLE ADVICE must be pushed before MODEL AUDIT')
+
+
+def test_ical_event_has_sources_section():
+    """Every ical event description must end with a SOURCES section."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r'📡\s*\$\{tSection\("secSources"', body),
+        'ical event must have a 📡 SOURCES section via tSection("secSources")')
+    assert_true('T_SOURCES' in ICAL,
+        'icalweather.gs must define T_SOURCES translation constant at module level')
+    assert_true(re.search(r'secSources:\s*T_SOURCES', ICAL),
+        'tSection must map secSources to T_SOURCES')
+
+
+def test_ical_advice_before_audit():
+    """In the ical event, actionable advice must come BEFORE the model audit."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    advice_idx = body.find('secAdvice')
+    audit_idx = body.find('secAudit', advice_idx if advice_idx >= 0 else 0)
+    assert_true(advice_idx != -1 and audit_idx != -1,
+        'ical must have both secAdvice and secAudit')
+    if advice_idx > 0 and audit_idx > 0:
+        assert_true(advice_idx < audit_idx,
+            'ical secAdvice must be pushed before secAudit')
+
+
+def test_gcal_waqi_alias_o3_and_no2():
+    """gcalFetchGlobalAQI's WAQI branch must alias o3/ozone and no2/nitrogen_dioxide."""
+    fn = re.search(r'function gcalFetchGlobalAQI\([\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    waqi_idx = body.find('WAQI_TOKEN')
+    assert_true(waqi_idx != -1, 'WAQI block must be present')
+    waqi_block = body[waqi_idx:]
+    assert_true(re.search(r'r\.ozone\.push', waqi_block),
+        'gcal WAQI branch must push to r.ozone')
+    assert_true(re.search(r'r\.nitrogen_dioxide\.push', waqi_block),
+        'gcal WAQI branch must push to r.nitrogen_dioxide')
+    assert_true(re.search(r'firstDefined\s*\(\s*"o3"\s*,\s*"ozone"', waqi_block),
+        'gcal WAQI must alias o3/ozone via firstDefined')
+    assert_true(re.search(r'firstDefined\s*\(\s*"no2"\s*,\s*"nitrogen_dioxide"', waqi_block),
+        'gcal WAQI must alias no2/nitrogen_dioxide via firstDefined')
+
+
+def test_gcal_aq_result_has_ozone_and_no2_keys():
+    """gcalFetchGlobalAQI must include ozone and nitrogen_dioxide arrays in the return object."""
+    fn = re.search(r'function gcalFetchGlobalAQI\([\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r"const r\s*=\s*\{[^}]*ozone[^}]*nitrogen_dioxide", body),
+        'gcalFetchGlobalAQI must initialize r with ozone and nitrogen_dioxide arrays')
+
+
+def test_readme_language_jump_above_feature_grid():
+    """The language jump links must appear between the summary and the
+    'What's in Every Calendar Event' feature grid, not after the URL params.
+    """
+    with open(os.path.join(REPO, 'README.md'), encoding='utf-8') as f:
+        readme = f.read()
+    summary_idx = readme.find('Your weather, astronomy & air-quality')
+    links_idx = readme.find('Read in Your Language')
+    features_idx = readme.find("What's in Every Calendar Event")
+    assert_true(summary_idx > 0, 'README must have the tagline summary')
+    assert_true(links_idx > 0, 'README must have a "Read in Your Language" section')
+    assert_true(features_idx > 0, "README must have 'What is in Every Calendar Event' section")
+    assert_true(summary_idx < links_idx < features_idx,
+        'Language links must be positioned between the summary and the feature grid')
+
+
+def test_gcal_past_day_aqi_includes_scale():
+    """The past-day (verified ground truth) AQI line in buildDashboardPayload
+    must also show the scale, not just the future-day one.
+    """
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must appear at least twice: once in past-day block, once in future block.
+    occurrences = len(re.findall(r'aqiVal\}\$\{aqiScale\s*\?', body))
+    assert_true(occurrences >= 2,
+        f'gcal must render the AQI scale in BOTH past-day and future-day blocks; found {occurrences}')
+
+
+def test_gcal_merge_propagates_ozone_and_no2():
+    """fetchAllAtmosphericDataParallel must propagate ozone and nitrogen_dioxide from globalAqi."""
+    fn = re.search(r'function fetchAllAtmosphericDataParallel[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r'cacheObj\.aq\.ozone\.push', body),
+        'merge loop must push to cacheObj.aq.ozone')
+    assert_true(re.search(r'cacheObj\.aq\.nitrogen_dioxide\.push', body),
+        'merge loop must push to cacheObj.aq.nitrogen_dioxide')
+    assert_true(re.search(r'cacheObj\.aq\.ozone\s*=\s*sorted\.map', body),
+        'sort-rewrite block must reorder ozone to stay in sync')
+    assert_true(re.search(r'cacheObj\.aq\.nitrogen_dioxide\s*=\s*sorted\.map', body),
+        'sort-rewrite block must reorder nitrogen_dioxide to stay in sync')
+
+
 # =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================

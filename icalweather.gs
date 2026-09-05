@@ -71,6 +71,7 @@ const T_AGG   = { en:"7-DAY AGGREGATE",            zh:"近7天汇总",          
 const T_AUDIT = { en:"MODEL AUDIT",                zh:"模型校准",               hi:"मॉडल ऑडिट",                  es:"AUDITORÍA DEL MODELO",      fr:"AUDIT DU MODÈLE",            ar:"تدقيق النموذج",                de:"MODELL-AUDIT",                nl:"MODEL-AUDIT" };
 const T_ROAD  = { en:"ROAD SAFETY",                zh:"道路安全",               hi:"सड़क सुरक्षा",                  es:"SEGURIDAD VIAL",             fr:"SÉCURITÉ ROUTIÈRE",          ar:"سلامة الطرق",                  de:"STRAßENSICHERHEIT",          nl:"WEGVEILIGHEID" };
 const T_ADV   = { en:"ACTIONABLE ADVICE",           zh:"行动建议",               hi:"सुझाव",                        es:"CONSEJOS PRÁCTICOS",         fr:"CONSEILS PRATIQUES",         ar:"نصائح عملية",                  de:"PRAKTISCHE TIPPS",           nl:"ADVIES" };
+const T_SOURCES = { en:"SOURCES",                    zh:"数据来源",               hi:"स्रोत",                         es:"FUENTES",                    fr:"SOURCES",                    ar:"المصادر",                    de:"QUELLEN",                     nl:"BRONNEN" };
 const T_L = {
   pin:      { en:"Pin",                          zh:"位置",                  hi:"स्थान",                       es:"Ubicación",                fr:"Lieu",                        ar:"الموقع",                    de:"Ort",                         nl:"Plaats" },
   cal:      { en:"Calendar",                     zh:"日历",                  hi:"कैलेंडर",                     es:"Calendario",                fr:"Calendrier",                  ar:"التقويم",                   de:"Kalender",                    nl:"Kalender" },
@@ -105,7 +106,9 @@ const T_L = {
   drift:     { en:"Expected Lead Drift",          zh:"预计误差",               hi:"अपेक्षित ड्रिफ्ट",                 es:"Deriva esperada",              fr:"Dérive attendue",               ar:"الانحراف المتوقع",               de:"Erwartete Abweichung",          nl:"Verwachte drift" },
   ground:    { en:"Ground",                       zh:"地表",                  hi:"भूमि",                           es:"Suelo",                       fr:"Sol",                          ar:"الأرض",                        de:"Boden",                        nl:"Bodem" },
   advisory:  { en:"Advisory",                     zh:"建议",                  hi:"सलाह",                           es:"Aviso",                       fr:"Avis",                         ar:"تنبيه",                        de:"Hinweis",                      nl:"Advies" },
-  engine:    { en:"Engine",                       zh:"引擎",                  hi:"इंजन",                           es:"Motor",                       fr:"Moteur",                       ar:"المحرك",                       de:"Engine",                       nl:"Engine" },
+  engine:    { en:"Engine",                       zh:"引擎",                  hi:"इंजन",                         es:"Motor",                      fr:"Moteur",                      ar:"المحرك",                      de:"Engine",                       nl:"Engine" },
+  wx:        { en:"Weather",                      zh:"天气",                  hi:"मौसम",                         es:"Clima",                      fr:"Météo",                       ar:"الطقس",                       de:"Wetter",                       nl:"Weer" },
+  aq:        { en:"Air Quality",                  zh:"空气质量",              hi:"वायु गुणवत्ता",                  es:"Calidad del aire",            fr:"Qualité de l'air",            ar:"جودة الهواء",                  de:"Luftqualität",                nl:"Luchtkwaliteit" },
   // --- Road statuses ---
   rdBI:     { en:"BLACK ICE DANGER",            zh:"黑冰危险",              hi:"काली बर्फ का खतरा",             es:"PELIGRO DE HIELO NEGRO",    fr:"DANGER DE VERGLAS",          ar:"خطر الجليد الأسود",          de:"SCHWARZES EIS",              nl:"ZWART IJS-GEVAAR" },
   rdFrost:  { en:"FROST / SLICK SPOTS",         zh:"霜冻/路面湿滑",         hi:"पाला/फिसलन",                   es:"HELADAS / RESBALADIZO",     fr:"GELÉES / GLISSANT",          ar:"صقيع/انزلاق",                de:"FROST / RUTSCHIG",           nl:"VORST / GLADDE" },
@@ -186,7 +189,7 @@ function t(key, lang) {
 function tSection(key, lang) {
   lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
   if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
-  const sections = { secTemp:T_TEMP, secSun:T_SEC, secAir:T_AIR, secAgg:T_AGG, secAudit:T_AUDIT, secRoad:T_ROAD, secAdvice:T_ADV };
+  const sections = { secTemp:T_TEMP, secSun:T_SEC, secAir:T_AIR, secAgg:T_AGG, secAudit:T_AUDIT, secRoad:T_ROAD, secAdvice:T_ADV, secSources:T_SOURCES };
   const map = sections[key];
   if (!map) return key;
   return map[lang] || map.en || key;
@@ -475,6 +478,7 @@ function handleStatusEndpoint(params) {
       },
       openMeteoAqForecastDaysCap: OPEN_METEO_AQ_FORECAST_DAYS_CAP,
       openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + OPEN_METEO_AQ_FORECAST_DAYS_CAP + ". For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
+      activeAqRadius: parseAqRadius(params && params.aqRadius),
       globalFallbackEndpoints: {
         openaq: OPENAQ_LATEST_ENDPOINT,
         waqi: WAQI_BASE_ENDPOINT + "<lat>;<lon>/"
@@ -720,7 +724,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
 
       if (currentMax === null) continue;
 
-      let aqiVal = null, aqiType = "AQI", pm25Val = null, pm10Val = null, pollenVal = null;
+      let aqiVal = null, aqiType = "AQI", aqiScale = null, pm25Val = null, pm10Val = null, pollenVal = null;
       if (data.aq && data.aq.time) {
         const aqIdx = data.aq.time.indexOf(dateKey);
         if (aqIdx !== -1) {
@@ -741,6 +745,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         }
       }
       const aqiTypeKey = aqiType === "USAQI" ? "USAQI" : (aqiType === "EAQI" ? "EAQI" : "AQI");
+      const aqiScaleVal = aqiType === "EAQI" ? 100 : (aqiType === "USAQI" ? 500 : null);
 
       const astroEvent = getAstronomicalEventsForYear(dateKey, targetDate.getUTCFullYear());
       const moonInfo = getMoonPhaseDetails(targetDate);
@@ -797,7 +802,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       const airSec = [
         `🧪 ${tSection("secAir", lang)}`,
         aqiVal !== null
-          ? `• ${t("aqi", lang)}: ${aqiVal} ${getAqiGlyph(aqiVal, aqiTypeKey)} (${getAqiLabel(aqiVal, aqiTypeKey, lang)}) [${aqiTypeKey}]`
+          ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScaleVal ? "/" + aqiScaleVal : ""} ${getAqiGlyph(aqiVal, aqiTypeKey)} (${getAqiLabel(aqiVal, aqiTypeKey, lang)}) [${aqiTypeKey}]`
           : `• ${t("aqi", lang)}: ${t("mon", lang)}`,
         pm25Val !== null ? `• ${t("pm25", lang)}: ${pm25Val} · ${t("pm10", lang)}: ${pm10Val || "--"} µg/m³` : ``,
         pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³` : `• ${t("pollen", lang)}: ${t("polLow", lang)}`
@@ -818,7 +823,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         `• ${t("lS", lang).split(" ")[0]}:±0.8° · ${t("lM", lang).split(" ")[0]}:±1.7° · ${t("lL", lang).split(" ")[0]}:±2.9° · ${t("lN", lang).split(" ")[0]}:±4.3°`
       ].join("\n");
 
-      const sections = [header, tempSec, sunSec, airSec, aggSec, auditSec];
+      const sections = [header, tempSec, sunSec, airSec, aggSec];
 
       if (showHazards && tempMinInC <= 7) {
         const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC, lang);
@@ -831,9 +836,20 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
 
       sections.push([
         `💡 ${tSection("secAdvice", lang)}`,
-        prioritizedAdvice.map(adv => `• ${adv}`).join("\n"),
-        ``,
-        `ℹ️ ${t("engine", lang)}: ${modelLabel}`
+        prioritizedAdvice.map(adv => `• ${adv}`).join("\n")
+      ].join("\n"));
+
+      sections.push([
+        `📉 ${tSection("secAudit", lang)}`,
+        `• ${t("status", lang)}: ${modelAuditStatus}`,
+        `• ${t("drift", lang)}: ±${expectedErr.toFixed(1)}${unitSymbol}`,
+        `• ${t("lS", lang).split(" ")[0]}:±0.8° · ${t("lM", lang).split(" ")[0]}:±1.7° · ${t("lL", lang).split(" ")[0]}:±2.9° · ${t("lN", lang).split(" ")[0]}:±4.3°`
+      ].join("\n"));
+
+      sections.push([
+        `📡 ${tSection("secSources", lang)}`,
+        `• ${t("aq", lang)}: Open-Meteo CAMS / OpenAQ / WAQI`,
+        `• ${t("wx", lang)}: Open-Meteo API`
       ].join("\n"));
 
       const fullDesc = sections.join("\n\n");
