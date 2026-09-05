@@ -2267,6 +2267,37 @@ def test_ical_waqi_pm_fills_uses_isfinite_guard():
         'WAQI branch must guard against null iaqi.pm25.v (otherwise null is coerced to 0)')
 
 
+def test_ical_openaq_aliases_nitrogen_dioxide():
+    """OpenAQ v3 parameter names vary by station: 'no2' is standard but some
+    legacy stations report 'nitrogen_dioxide'. The firstDefined() alias
+    map must cover nitrogen_dioxide so we don't silently return null.
+    """
+    fn = re.search(r'function fetchGlobalAQI\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r'firstDefined', body),
+        'fetchGlobalAQI must use firstDefined() alias map for OpenAQ parameters')
+    assert_true(re.search(r'nitrogen_dioxide', body),
+        'OpenAQ alias map must include "nitrogen_dioxide" as a key for no2')
+
+
+def test_ical_openaq_aliases_all_known_params():
+    """The OpenAQ alias map must cover all params we actually consume
+    (pm25/pm2.5, pm10, o3/ozone, no2/nitrogen_dioxide) so that a
+    station reporting under a non-standard name still produces a value.
+    """
+    fn = re.search(r'function fetchGlobalAQI\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # firstDefined calls with at least the alias pairs we use
+    assert_true(re.search(r'firstDefined\s*\(\s*"pm25"\s*,\s*"pm2\.5"', body),
+        'pm25 must have alias pm2.5 in firstDefined map')
+    assert_true(re.search(r'firstDefined\s*\(\s*"o3"\s*,\s*"ozone"', body),
+        'o3 must have alias ozone in firstDefined map')
+    assert_true(re.search(r'firstDefined\s*\(\s*"no2"\s*,\s*"nitrogen_dioxide"', body),
+        'no2 must have alias nitrogen_dioxide in firstDefined map')
+
+
 def test_ical_openaq_endpoints_in_source():
     """OpenAQ and WAQI endpoints must be defined as constants."""
     assert_true(re.search(r'OPENAQ_LATEST_ENDPOINT\s*=', ICAL))

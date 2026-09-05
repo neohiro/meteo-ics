@@ -1061,11 +1061,18 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
               openaqVals[param + "_ts"] = m.lastUpdated;
             }
           });
+          // OpenAQ v3 parameter names vary by station (pm25 vs pm2.5,
+          // o3 vs ozone, no2 vs nitrogen_dioxide). Pick the first
+          // non-null value across all known aliases.
           const fill = v => (v !== undefined && v !== null && !isNaN(v) ? Math.round(v) : null);
-          const pm25 = fill(openaqVals["pm25"]) || fill(openaqVals["pm2.5"]);
-          const pm10 = fill(openaqVals["pm10"]);
-          const o3 = fill(openaqVals["o3"]) || fill(openaqVals["ozone"]);
-          const no2 = fill(openaqVals["no2"]);
+          const firstDefined = (...keys) => {
+            for (const k of keys) { const v = fill(openaqVals[k]); if (v !== null) return v; }
+            return null;
+          };
+          const pm25 = firstDefined("pm25", "pm2.5");
+          const pm10 = firstDefined("pm10");
+          const o3   = firstDefined("o3", "ozone");
+          const no2  = firstDefined("no2", "nitrogen_dioxide");
           dates.forEach(() => {
             r.european_aqi.push(pm25);
             r.us_aqi.push(pm25);
