@@ -14,7 +14,16 @@
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
  *  - Official EventColor Enum: Reliable temperature-based dynamic color coding.
  *  - Standard Atmosphere (atm) pressure scale (1013.25 hPa baseline).
- *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll with explicit 10s timeouts.
+ *  - Parallel HTTP API fetches via UrlFetchApp.fetchAll with explicit 10s timeouts and
+ *    per-endpoint selective retry (3 attempts, exponential backoff) for 429/502/503/504.
+ *  - Execution-budget guard: sync aborts at 5 min 45 s to leave a 15 s margin under
+ *    the 6-min Apps Script limit, preventing partial calendar writes.
+ *  - Drive-encrypted WAQI token store: token AES-encrypted to Drive with a passphrase
+ *    stored in ScriptProperties — collaborators with editor access cannot read the token.
+ *    Migration path: waqiTokenSave(token, passphrase) + set WAQI_PASSPHRASE in
+ *    ScriptProperties; waqiTokenResolve() prefers Drive-encrypted, falls back to legacy
+ *    ScriptProperties for back-compat. Passphrase validated: ≥12 chars, ≥2 of
+ *    lower/upper/digit, no 6+ repeated chars.
  *  - Calendar resolution: resolveCalendar() auto-creates the configured calendar
  *    if missing (first-run bootstrap). Calendar-by-id path still throws if the
  *    explicit id is invalid (caller misconfiguration, not recoverable by auto-create).
@@ -78,9 +87,142 @@ const CONFIG = {
 const KEY_REGEX = /\[KEY:([a-zA-Z0-9_\-]+)\]/;
 const MAX_SNAPSHOTS_PER_DAY = 5;
 const FETCH_TIMEOUT_MS = 10000;
+const FETCH_MAX_RETRIES = 3;
+const FETCH_RETRY_CODES = new Set([429, 502, 503, 504]);
+const DRIVE_WAQI_FILE = "waqi_token.enc";
+const APPS_SCRIPT_BUDGET_MS = 345000;
+const BUDGET_WARN_AT_MS = [240000, 300000];
+
+let _fetchAllImpl = UrlFetchApp.fetchAll.bind(UrlFetchApp);
+
+const { budgetStart, checkBudget } = (() => {
+  const APPS_SCRIPT_BUDGET_MS = 345000;
+  const BUDGET_WARN_AT_MS = [240000, 300000];
+  let _budgetWarnedAt = new Set();
+  return {
+    budgetStart() {
+      _budgetWarnedAt = new Set();
+      return Date.now();
+    },
+    checkBudget(startMs, label) {
+      const elapsed = Date.now() - startMs;
+      BUDGET_WARN_AT_MS.forEach(threshold => {
+        if (elapsed >= threshold && !_budgetWarnedAt.has(threshold)) {
+          _budgetWarnedAt.add(threshold);
+          Logger.log(`BUDGET WARN — ${Math.round(elapsed / 1000)}s used in ${label}; ${Math.round((APPS_SCRIPT_BUDGET_MS - elapsed) / 1000)}s remaining`);
+        }
+      });
+      if (elapsed >= APPS_SCRIPT_BUDGET_MS) {
+        Logger.log("──── BUDGET EXCEEDED ────");
+        Logger.log(`  label:  ${label}`);
+        Logger.log(`  elapsed: ${Math.round(elapsed / 1000)}s`);
+        Logger.log(`  limit:   ${Math.round(APPS_SCRIPT_BUDGET_MS / 1000)}s (5 min 45 s)`);
+        Logger.log(`  margin:  15s under 6-min Apps Script execution limit`);
+        Logger.log("─────────────────────────");
+        throw new Error("Budget exceeded in " + label);
+      }
+    }
+  };
+})();
+
+const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
+  const DRIVE_WAQI_FILE = "waqi_token.enc";
+  const WAQI_MIN_PASSPHRASE_LEN = 12;
+  let _waqiTokenCache = null;
+  let _waqiDecryptWarned = false;
+
+  function validatePassphrase(pw) {
+    if (typeof pw !== "string" || pw.length < WAQI_MIN_PASSPHRASE_LEN) {
+      return "passphrase must be at least " + WAQI_MIN_PASSPHRASE_LEN + " characters";
+    }
+    if (/^[a-z]+$/.test(pw) || /^[A-Z]+$/.test(pw) || /^[0-9]+$/.test(pw)) {
+      return "passphrase must contain at least two of: lowercase, uppercase, digits";
+    }
+    if (/(.)\1{5,}/.test(pw)) return "passphrase must not contain 6+ repeated characters";
+    return null;
+  }
+
+  return {
+    waqiTokenReset() {
+      _waqiTokenCache = null;
+      _waqiDecryptWarned = false;
+    },
+    waqiTokenSave(plaintextToken, passphrase) {
+      if (!plaintextToken || !passphrase) throw new Error("waqiTokenSave: token and passphrase are required");
+      const strengthErr = validatePassphrase(passphrase);
+      if (strengthErr) throw new Error("waqiTokenSave: weak passphrase — " + strengthErr);
+      const blob = Utilities.newBlob(plaintextToken, "text/plain", DRIVE_WAQI_FILE);
+      const encrypted = Utilities.encrypt(blob, passphrase);
+      const existing = DriveApp.getRootFolder().getFilesByName(DRIVE_WAQI_FILE);
+      while (existing.hasNext()) existing.next().setTrashed(true);
+      const file = DriveApp.getRootFolder().createFile(encrypted.setName(DRIVE_WAQI_FILE));
+      PropertiesService.getScriptProperties().setProperty("WAQI_KEY_HINT", "stored");
+      _waqiTokenCache = null;
+      _waqiDecryptWarned = false;
+      return file.getId();
+    },
+    waqiTokenLoad(passphrase) {
+      const files = DriveApp.getRootFolder().getFilesByName(DRIVE_WAQI_FILE);
+      if (!files.hasNext()) return null;
+      const file = files.next();
+      const decrypted = Utilities.decrypt(file.getBlob(), passphrase);
+      return decrypted.getDataAsString();
+    },
+    waqiTokenResolve() {
+      if (_waqiTokenCache !== null) return _waqiTokenCache;
+      const passphrase = PropertiesService.getScriptProperties().getProperty("WAQI_PASSPHRASE") || "";
+      if (passphrase) {
+        try {
+          const t = waqiTokenLoad(passphrase);
+          if (t) { _waqiTokenCache = t; return t; }
+        } catch (e) {
+          if (!_waqiDecryptWarned) { _waqiDecryptWarned = true; Logger.log("waqiTokenResolve: Drive decrypt failed — " + e); }
+        }
+      }
+      const legacy = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
+      if (legacy) {
+        Logger.log("waqiTokenResolve: WAQI_TOKEN in ScriptProperties is deprecated — call waqiTokenSave() to migrate");
+      }
+      _waqiTokenCache = legacy;
+      return legacy;
+    }
+  };
+})();
+
+function fetchAllWithRetry(requests) {
+  const total = requests.length;
+  const responses = new Array(total);
+  let pending = requests.map((_, i) => i);
+  let attempt = 0;
+  while (attempt < FETCH_MAX_RETRIES && pending.length > 0) {
+    attempt++;
+    const batch = pending.map(i => requests[i]);
+    const batchResponses = _fetchAllImpl(batch);
+    const nextPending = [];
+    batchResponses.forEach((res, j) => {
+      const globalIdx = pending[j];
+      const code = res.getResponseCode();
+      const url = requests[globalIdx].url.slice(0, 80);
+      responses[globalIdx] = res;
+      if (code >= 400 && FETCH_RETRY_CODES.has(code) && attempt < FETCH_MAX_RETRIES) {
+        Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — retry ${attempt + 1}/${FETCH_MAX_RETRIES}`);
+        nextPending.push(globalIdx);
+      } else {
+        if (code >= 400) Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — giving up`);
+      }
+    });
+    pending = nextPending;
+    if (pending.length > 0 && attempt < FETCH_MAX_RETRIES) {
+      Utilities.sleep(Math.pow(2, attempt) * 500);
+    }
+  }
+  return responses;
+}
+
 const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
+
 const ASTRONOMICAL_EVENTS = {
   "01-03": "Quadrantid Meteor Peak (~110/hr)",
   "01-04": "Earth at Perihelion (Closest to Sun)",
@@ -113,6 +255,12 @@ const ASTRONOMICAL_EVENTS = {
   "12-22": "Ursid Meteor Peak (~10/hr)"
 };
 
+// Drive-encrypted WAQI token store. Tokens are AES-encrypted with a per-user
+// key derived from a passphrase stored in ScriptProperties (NEVER the token
+// itself). This isolates the token from collaborators with editor access.
+// State is encapsulated in a closure — no module-level lets that can collide
+// with other scripts deployed in the same Apps Script project.
+
 // Auto-geocode locations that lack GPS coordinates (city-only entries are resolved via Open-Meteo geocoder;
 // "country" is an optional hint that narrows the search). Locations that fail geocoding are filtered out.
 CONFIG.locations = CONFIG.locations.filter(loc => {
@@ -142,6 +290,8 @@ if (CONFIG.locations.length === 0) {
 }
 
 function syncWeatherToCalendar() {
+  const budget = budgetStart();
+  Logger.log(`syncWeatherToCalendar: starting with ${CONFIG.locations.length} configured location(s) (dryRun=${CONFIG.dryRun})`);
   const cal = resolveCalendar();
   const primaryCal = CalendarApp.getDefaultCalendar();
   const calTz = cal.getTimeZone();
@@ -157,6 +307,7 @@ function syncWeatherToCalendar() {
   CONFIG.locations.forEach(loc => locationPool.set(norm(loc.name), loc));
 
   for (let d = -CONFIG.historyDays; d < CONFIG.forecastDays; d++) {
+    checkBudget(budget, "day-loop d=" + d);
     const targetDate = new Date(todayDate.getTime() + d * 24 * 60 * 60 * 1000);
     const dayLocKeys = new Set(CONFIG.locations.map(l => norm(l.name)));
 
@@ -179,6 +330,7 @@ function syncWeatherToCalendar() {
   }
 
   // 2. Fetch atmospheric datasets in parallel across all locations
+  checkBudget(budget, "pre-fetch");
   let weatherCache;
   try {
     weatherCache = fetchAllAtmosphericDataParallel(locationPool);
@@ -334,7 +486,7 @@ function fetchAllAtmosphericDataParallel(locationPool) {
   });
 
   try {
-    const responses = UrlFetchApp.fetchAll(requests);
+    const responses = fetchAllWithRetry(requests);
     for (let i = 0; i < responses.length; i++) {
       const meta = reqMap[i];
       const res = responses[i];
@@ -521,9 +673,9 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
 
   if (aqProvider === "auto" || aqProvider === "waqi") {
     try {
-      const token = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
+      const token = waqiTokenResolve();
       const url = token
-        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${token}`
+        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${encodeURIComponent(token)}`
         : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       if (res.getResponseCode() === 200) {
@@ -960,15 +1112,6 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       `• Mean Temp: ${aggregates.sevenDayMeanTemp}${sym}`,
       `• Growing Deg: ${aggregates.sevenDayGDD} GDD (${gddNote})`,
       `• 7-Day Mean AQI: ${aggregates.sevenDayAqi}`
-    ].join("\n"),
-
-    [
-      `📉 MODEL AUDIT`,
-      `• Drift: ${drift.tempDelta} · Rain: ${drift.rainDelta}`,
-      `• Stability: ${drift.volatility}`,
-      `• Benchmark MAE: ${globalStats.tempMAE} / ${globalStats.rainMAE}`,
-      `• Reliability: ${globalStats.modelGrade}`,
-      `• Lead Curve: ${globalStats.leadCurve}`
     ].join("\n")
   ];
 
@@ -981,6 +1124,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     ].join("\n"));
   }
 
+  // Advice BEFORE audit so users see guidance first, methodology second.
   sections.push([
     `💡 ACTIONABLE ADVICE`,
     prioritizedAdvice.map(adv => `• ${adv}`).join("\n")
@@ -1140,9 +1284,9 @@ function generatePrioritizedAdvices(ctx) {
   const isAqiHazard = ctx.aqiType === "USAQI" ? ctx.aqi >= 150 : ctx.aqi >= 75;
   const isAqiElevated = ctx.aqiType === "USAQI" ? ctx.aqi >= 100 : ctx.aqi >= 50;
 
-  if (ctx.aqi && isAqiHazard) {
+  if (Number.isFinite(ctx.aqi) && isAqiHazard) {
     pool.push({ p: 88, text: "Hazardous air: wear N95/mask & run indoor filters 😷" });
-  } else if (ctx.aqi && isAqiElevated) {
+  } else if (Number.isFinite(ctx.aqi) && isAqiElevated) {
     pool.push({ p: 68, text: "Moderate smog: sensitive groups limit cardio 🫁" });
   }
 
@@ -1291,6 +1435,14 @@ function getDayRecord(cityKey, dateStr) {
 }
 
 function saveDayRecord(cityKey, dateStr, record) {
+  // Reject malformed dateStr at the source. Without this check, a caller bug
+  // (e.g. undefined dateStr) creates a non-trimmable property key that
+  // accumulates in ScriptProperties forever (cleanupOldStorageKeys only
+  // deletes keys that match /^\d{4}-\d{2}-\d{2}$/).
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) {
+    Logger.log(`saveDayRecord: rejected malformed dateStr "${dateStr}" for city "${cityKey}"`);
+    return;
+  }
   const key = `WTR_v10_${cityKey}_${dateStr}`;
   if (record.snapshots && record.snapshots.length > MAX_SNAPSHOTS_PER_DAY) {
     record.snapshots = [

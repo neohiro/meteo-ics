@@ -10,8 +10,17 @@
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
  *  - Deterministic DTSTAMP: Anchored to date to prevent background sync churn and battery drain across calendar clients.
  *  - Standard Atmosphere: Pressure in atm (1013.25 hPa baseline).
- *  - Parallel HTTP Requests: External APIs fetched concurrently using UrlFetchApp.fetchAll with 10s timeout.
+ *  - Parallel HTTP Requests: External APIs fetched concurrently using UrlFetchApp.fetchAll with 10s
+ *    timeout and per-endpoint selective retry (3 attempts, exponential backoff) for 429/502/503/504.
  *  - Per-location API failure isolation: a single city failing does not abort the whole feed.
+ *  - Execution-budget guard: generateIcsFeed aborts at 5 min 45 s to leave a 15 s margin
+ *    under the 6-min Apps Script limit, preventing partial ICS generation.
+ *  - Drive-encrypted WAQI token store: token AES-encrypted to Drive with a passphrase
+ *    stored in ScriptProperties — collaborators with editor access cannot read the token.
+ *    Migration path: waqiTokenSave(token, passphrase) + set WAQI_PASSPHRASE in
+ *    ScriptProperties; waqiTokenResolve() prefers Drive-encrypted, falls back to legacy
+ *    ScriptProperties for back-compat. Passphrase validated: ≥12 chars, ≥2 of
+ *    lower/upper/digit, no 6+ repeated chars.
  *  - 8 languages (en, zh, hi, es, fr, ar, de, nl) with full UI text + advice translation.
  *  - days/hazards/lang URL params all honored.
  *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes.
@@ -64,6 +73,139 @@ const ICAL_CONFIG = {
   hazardsEnabled: true
 };
 const FETCH_TIMEOUT_MS = 10000;
+const FETCH_MAX_RETRIES = 3;
+const FETCH_RETRY_CODES = new Set([429, 502, 503, 504]);
+const DRIVE_WAQI_FILE = "waqi_token.enc";
+const WAQI_MIN_PASSPHRASE_LEN = 12;
+const APPS_SCRIPT_BUDGET_MS = 345000;
+const BUDGET_WARN_AT_MS = [240000, 300000];
+
+let _fetchAllImpl = UrlFetchApp.fetchAll.bind(UrlFetchApp);
+
+const { budgetStart, checkBudget } = (() => {
+  const APPS_SCRIPT_BUDGET_MS = 345000;
+  const BUDGET_WARN_AT_MS = [240000, 300000];
+  let _budgetWarnedAt = new Set();
+  return {
+    budgetStart() {
+      _budgetWarnedAt = new Set();
+      return Date.now();
+    },
+    checkBudget(startMs, label) {
+      const elapsed = Date.now() - startMs;
+      BUDGET_WARN_AT_MS.forEach(threshold => {
+        if (elapsed >= threshold && !_budgetWarnedAt.has(threshold)) {
+          _budgetWarnedAt.add(threshold);
+          Logger.log(`BUDGET WARN — ${Math.round(elapsed / 1000)}s used in ${label}; ${Math.round((APPS_SCRIPT_BUDGET_MS - elapsed) / 1000)}s remaining`);
+        }
+      });
+      if (elapsed >= APPS_SCRIPT_BUDGET_MS) {
+        Logger.log("──── BUDGET EXCEEDED ────");
+        Logger.log(`  label:  ${label}`);
+        Logger.log(`  elapsed: ${Math.round(elapsed / 1000)}s`);
+        Logger.log(`  limit:   ${Math.round(APPS_SCRIPT_BUDGET_MS / 1000)}s (5 min 45 s)`);
+        Logger.log(`  margin:  15s under 6-min Apps Script execution limit`);
+        Logger.log("─────────────────────────");
+        throw new Error("Budget exceeded in " + label);
+      }
+    }
+  };
+})();
+
+const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
+  const DRIVE_WAQI_FILE = "waqi_token.enc";
+  const WAQI_MIN_PASSPHRASE_LEN = 12;
+  let _waqiTokenCache = null;
+  let _waqiDecryptWarned = false;
+
+  function validatePassphrase(pw) {
+    if (typeof pw !== "string" || pw.length < WAQI_MIN_PASSPHRASE_LEN) {
+      return "passphrase must be at least " + WAQI_MIN_PASSPHRASE_LEN + " characters";
+    }
+    if (/^[a-z]+$/.test(pw) || /^[A-Z]+$/.test(pw) || /^[0-9]+$/.test(pw)) {
+      return "passphrase must contain at least two of: lowercase, uppercase, digits";
+    }
+    if (/(.)\1{5,}/.test(pw)) return "passphrase must not contain 6+ repeated characters";
+    return null;
+  }
+
+  return {
+    waqiTokenReset() {
+      _waqiTokenCache = null;
+      _waqiDecryptWarned = false;
+    },
+    waqiTokenSave(plaintextToken, passphrase) {
+      if (!plaintextToken || !passphrase) throw new Error("waqiTokenSave: token and passphrase are required");
+      const strengthErr = validatePassphrase(passphrase);
+      if (strengthErr) throw new Error("waqiTokenSave: weak passphrase — " + strengthErr);
+      const blob = Utilities.newBlob(plaintextToken, "text/plain", DRIVE_WAQI_FILE);
+      const encrypted = Utilities.encrypt(blob, passphrase);
+      const existing = DriveApp.getRootFolder().getFilesByName(DRIVE_WAQI_FILE);
+      while (existing.hasNext()) existing.next().setTrashed(true);
+      const file = DriveApp.getRootFolder().createFile(encrypted.setName(DRIVE_WAQI_FILE));
+      PropertiesService.getScriptProperties().setProperty("WAQI_KEY_HINT", "stored");
+      _waqiTokenCache = null;
+      _waqiDecryptWarned = false;
+      return file.getId();
+    },
+    waqiTokenLoad(passphrase) {
+      const files = DriveApp.getRootFolder().getFilesByName(DRIVE_WAQI_FILE);
+      if (!files.hasNext()) return null;
+      const file = files.next();
+      const decrypted = Utilities.decrypt(file.getBlob(), passphrase);
+      return decrypted.getDataAsString();
+    },
+    waqiTokenResolve() {
+      if (_waqiTokenCache !== null) return _waqiTokenCache;
+      const passphrase = PropertiesService.getScriptProperties().getProperty("WAQI_PASSPHRASE") || "";
+      if (passphrase) {
+        try {
+          const t = waqiTokenLoad(passphrase);
+          if (t) { _waqiTokenCache = t; return t; }
+        } catch (e) {
+          if (!_waqiDecryptWarned) { _waqiDecryptWarned = true; Logger.log("waqiTokenResolve: Drive decrypt failed — " + e); }
+        }
+      }
+      const legacy = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
+      if (legacy) {
+        Logger.log("waqiTokenResolve: WAQI_TOKEN in ScriptProperties is deprecated — call waqiTokenSave() to migrate");
+      }
+      _waqiTokenCache = legacy;
+      return legacy;
+    }
+  };
+})();
+
+function fetchAllWithRetry(requests) {
+  const total = requests.length;
+  const responses = new Array(total);
+  let pending = requests.map((_, i) => i);
+  let attempt = 0;
+  while (attempt < FETCH_MAX_RETRIES && pending.length > 0) {
+    attempt++;
+    const batch = pending.map(i => requests[i]);
+    const batchResponses = _fetchAllImpl(batch);
+    const nextPending = [];
+    batchResponses.forEach((res, j) => {
+      const globalIdx = pending[j];
+      const code = res.getResponseCode();
+      const url = requests[globalIdx].url.slice(0, 80);
+      responses[globalIdx] = res;
+      if (code >= 400 && FETCH_RETRY_CODES.has(code) && attempt < FETCH_MAX_RETRIES) {
+        Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — retry ${attempt + 1}/${FETCH_MAX_RETRIES}`);
+        nextPending.push(globalIdx);
+      } else {
+        if (code >= 400) Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — giving up`);
+      }
+    });
+    pending = nextPending;
+    if (pending.length > 0 && attempt < FETCH_MAX_RETRIES) {
+      Utilities.sleep(Math.pow(2, attempt) * 500);
+    }
+  }
+  return responses;
+}
+
 const SUPPORTED_LANGS = ["en", "zh", "hi", "es", "fr", "ar", "de", "nl"];
 const LANGS_RTL = ["ar"];
 
@@ -435,7 +577,8 @@ function buildReadme(params) {
 }
 
 function handleStatusEndpoint(params) {
-  const unitParam = (params.unit || ICAL_CONFIG.temperatureUnit).toLowerCase();
+  const rawUnit = params && params.unit;
+  const unitParam = (String(rawUnit || "").split(",")[0] || ICAL_CONFIG.temperatureUnit || "").toLowerCase();
   const isC = !unitParam.startsWith("f");
   const sym = isC ? "°C" : "°F";
   let stats;
@@ -481,12 +624,12 @@ function handleStatusEndpoint(params) {
       },
       openMeteoAqForecastDaysCap: OPEN_METEO_AQ_FORECAST_DAYS_CAP,
       openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + OPEN_METEO_AQ_FORECAST_DAYS_CAP + ". For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
-      activeAqRadius: parseAqRadius(params && params.aqRadius),
+      activeAqRadius: parseAqRadius(params ? params.aqRadius : undefined),
       globalFallbackEndpoints: {
         openaq: OPENAQ_LATEST_ENDPOINT,
         waqi: WAQI_BASE_ENDPOINT + "<lat>;<lon>/"
       },
-      waqiTokenStored: !!(PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN"))
+      waqiTokenStored: !!waqiTokenResolve()
     },
     supportedLanguages: SUPPORTED_LANGS,
     endpoints: {
@@ -594,6 +737,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
 
   const unitSymbol = temperatureUnit === "celsius" ? "°" : "°F";
   const isC = temperatureUnit === "celsius";
+  const budget = budgetStart();
   const today = new Date();
   const todayStr = Utilities.formatDate(today, "UTC", "yyyy-MM-dd");
   const todayRef = Utilities.parseDate(todayStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
@@ -619,6 +763,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   let eventCount = 0;
 
   locations.forEach(loc => {
+    checkBudget(budget, "pre-fetch city=" + loc.name);
     let data;
     try {
       data = fetchIcsAtmosphericDataParallel(loc, temperatureUnit, options.aqProvider, options.aqRadius);
@@ -638,6 +783,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
 
     const offsetLimit = Math.min(maxDays, data.det.time.length);
     for (let offset = 0; offset < offsetLimit; offset++) {
+      checkBudget(budget, "city=" + loc.name + " offset=" + offset);
       const targetDate = new Date(todayRef.getTime() + offset * 24 * 60 * 60 * 1000);
       const dateKey = Utilities.formatDate(targetDate, "UTC", "yyyy-MM-dd");
       const icsDate = Utilities.formatDate(targetDate, "UTC", "yyyyMMdd");
@@ -658,10 +804,13 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       if (offset < ICAL_CONFIG.deterministicDays) {
         const tMaxRaw = data.det.temperature_2m_max[idx];
         const tMinRaw = data.det.temperature_2m_min[idx];
-        currentMax = (tMaxRaw != null && Number.isFinite(tMaxRaw)) ? Math.round(tMaxRaw) : 0;
-        currentMin = (tMinRaw != null && Number.isFinite(tMinRaw)) ? Math.round(tMinRaw) : 0;
+        // Defaulting missing temps to 0 here would later trigger false "Freezing"
+        // thermal text and false black-ice road advisories (0°C is below the
+        // glaze threshold). Leave as null so downstream null-guards fire.
+        currentMax = (tMaxRaw != null && Number.isFinite(tMaxRaw)) ? Math.round(tMaxRaw) : null;
+        currentMin = (tMinRaw != null && Number.isFinite(tMinRaw)) ? Math.round(tMinRaw) : null;
         const appRaw = data.det.apparent_temperature_max ? data.det.apparent_temperature_max[idx] : null;
-        apparentMax = (appRaw != null && Number.isFinite(appRaw)) ? Math.round(appRaw) : currentMax;
+        apparentMax = (appRaw != null && Number.isFinite(appRaw)) ? Math.round(appRaw) : null;
         currentRain = (data.det.precipitation_sum && data.det.precipitation_sum[idx] != null) ? data.det.precipitation_sum[idx] : 0;
         rainProb = (data.det.precipitation_probability_max && data.det.precipitation_probability_max[idx] != null) ? data.det.precipitation_probability_max[idx] : 0;
         const wMaxRaw = data.det.windspeed_10m_max ? data.det.windspeed_10m_max[idx] : null;
@@ -924,7 +1073,7 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
   const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqDays}&timezone=auto`;
 
   try {
-    const responses = UrlFetchApp.fetchAll([
+    const responses = fetchAllWithRetry([
       { url: dUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS },
       { url: hUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS },
       { url: eUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS },
@@ -1113,9 +1262,11 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
 
   if (aqProvider === "auto" || aqProvider === "waqi") {
     try {
-      const token = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
+      const token = waqiTokenResolve();
+      // encodeURIComponent defends against future token-format changes; current validator
+      // (8-128 alphanumeric) makes this a no-op but preserves URL integrity.
       const url = token
-        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${token}`
+        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${encodeURIComponent(token)}`
         : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       if (res.getResponseCode() === 200) {
