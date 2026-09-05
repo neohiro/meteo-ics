@@ -20,15 +20,15 @@ Subscribe once to a live `.ics` feed and your calendar does the rest. No new app
 
 ## 🚀 Try It Now — Pick Your City
 
-<!-- DEPLOY-URL-TODO: replace ALL `…` placeholders with the live Apps Script deploy URL after merge. Occurrences: line 28 (Try It Now table), lines 132-141 (English quick links). -->
+<!-- DEPLOY-URL: https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec -->
 > Copy any URL below and paste it into your calendar app's subscription field.
 
 | Region | Cities | URL |
 |---|---|---|
-| 🇬🇧 British Isles | London, Edinburgh · 30 days | `https://script.google.com/macros/s/…/exec?cities=London,Edinburgh` |
-| 🇺🇸 United States | New York, Chicago, Seattle · °F · 14 days | `https://script.google.com/macros/s/…/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14` |
-| 🇦🇺 Australia | Sydney, Melbourne · hazards off | `https://script.google.com/macros/s/…/exec?cities=Sydney,Melbourne&hazards=false` |
-| 🌐 JSON Telemetry | Live diagnostics | `https://script.google.com/macros/s/…/exec?action=status` |
+| 🇬🇧 British Isles | London, Edinburgh · 30 days | `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?cities=London,Edinburgh` |
+| 🇺🇸 United States | New York, Chicago, Seattle · °F · 14 days | `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14` |
+| 🇦🇺 Australia | Sydney, Melbourne · hazards off | `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?cities=Sydney,Melbourne&hazards=false` |
+| 🌐 JSON Telemetry | Live diagnostics | `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?action=status` |
 
 *(Click any cell to copy. Replace `…` with your deployed script ID.)*
 
@@ -129,16 +129,16 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇬🇧 Quick Links
 
 - **British Isles (London & Edinburgh, 30 Days):**  
-  `https://script.google.com/macros/s/…/exec?cities=London,Edinburgh`
+  `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?cities=London,Edinburgh`
 
 - **US Metro in Fahrenheit (New York, Chicago, Seattle, 14 Days):**  
-  `https://script.google.com/macros/s/…/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
+  `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
 
 - **No Road Hazard Warnings (Sydney & Melbourne):**  
-  `https://script.google.com/macros/s/…/exec?cities=Sydney,Melbourne&hazards=false`
+  `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?cities=Sydney,Melbourne&hazards=false`
 
 - **AI Telemetry Endpoint (JSON):**  
-  `https://script.google.com/macros/s/…/exec?action=status`
+  `https://script.google.com/macros/s/AKfycbwvZ2tHKrTMsI8VZvCdpMUIRE4XRvFnUNyspuCLBPtvm-MAdixNYEYoa7SR_yN1YCn-jw/exec?action=status`
 
 ---
 
