@@ -81,18 +81,23 @@ const APPS_SCRIPT_BUDGET_MS = 345000;
 const BUDGET_WARN_AT_MS = [240000, 300000];
 
 let _fetchAllImpl = UrlFetchApp.fetchAll.bind(UrlFetchApp);
+let _nowOverride = null;
+const _now = () => _nowOverride !== null ? _nowOverride : Date.now();
 
-const { budgetStart, checkBudget } = (() => {
+const { budgetStart, budgetSetNow, checkBudget } = (() => {
   const APPS_SCRIPT_BUDGET_MS = 345000;
   const BUDGET_WARN_AT_MS = [240000, 300000];
   let _budgetWarnedAt = new Set();
   return {
     budgetStart() {
       _budgetWarnedAt = new Set();
-      return Date.now();
+      return _now();
+    },
+    budgetSetNow(fn) {
+      _nowOverride = typeof fn === "number" ? fn : null;
     },
     checkBudget(startMs, label) {
-      const elapsed = Date.now() - startMs;
+      const elapsed = _now() - startMs;
       BUDGET_WARN_AT_MS.forEach(threshold => {
         if (elapsed >= threshold && !_budgetWarnedAt.has(threshold)) {
           _budgetWarnedAt.add(threshold);

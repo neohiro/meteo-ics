@@ -115,20 +115,80 @@ def lint_file(path: Path) -> tuple[bool, dict]:
     return ok, counts
 
 
+_MODULE_LIT_RE = re.compile(
+    r'^\s*(?:let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=',
+    re.MULTILINE,
+)
+
+
+def collect_module_lets(path: Path) -> set[str]:
+    """Return names declared at module scope with `let` or `var`. We use this to
+    detect cross-file name collisions: if gcalweather.gs and icalweather.gs both
+    declare the same leading-underscore name (e.g. _fetchAllImpl) and someone
+    deploys them as a single Apps Script project, the second declaration shadows
+    the first and the retry path silently uses the wrong fetcher.
+
+    We restrict to underscore-prefixed names because those are the test seams
+    deliberately exposed at module scope. Names without a leading underscore are
+    intended public API (unique per file)."""
+    src = path.read_text(encoding="utf-8")
+    return {n for n in _MODULE_LIT_RE.findall(src) if n.startswith("_")}
+
+
+def lint_cross_file_collision(paths: list[Path]) -> tuple[bool, list[str]]:
+    name_sets = {p.name: collect_module_lets(p) for p in paths}
+    collisions: list[tuple[str, str, str]] = []
+    # Special-case: identical leading-underscore names that map to test seams
+    # ARE the cross-file collision risk. Whitelist only the single-file seams
+    # (none today) — every underscore-prefixed module-level let is a risk.
+    underscore_names: dict[str, list[str]] = {}
+    for fname, names in name_sets.items():
+        for n in names:
+            if n.startswith("_"):
+                underscore_names.setdefault(n, []).append(fname)
+    risky = {n: files for n, files in underscore_names.items() if len(files) > 1}
+    ok = not risky
+    report = []
+    for n, files in sorted(risky.items()):
+        report.append(f"COLLISION: '{n}' is `let`-declared at module scope in: {', '.join(files)}")
+    return ok, report
+
+
 def main() -> int:
     repo = Path(__file__).resolve().parent.parent
     targets = sys.argv[1:] or ["gcalweather.gs", "icalweather.gs"]
     failed = 0
+    file_paths = []
     for name in targets:
         p = Path(name) if Path(name).is_absolute() else repo / name
         if not p.exists():
             print(f"{name}: NOT FOUND")
             failed += 1
             continue
+        file_paths.append(p)
         ok, counts = lint_file(p)
         print(f"{p.name}: {counts} -> {'OK' if ok else 'FAIL'}")
         if not ok:
             failed += 1
+    # Cross-file collision check when multiple .gs files are provided
+    gs_paths = [p for p in file_paths if p.suffix == ".gs"]
+    if len(gs_paths) > 1:
+        ok2, report2 = lint_cross_file_collision(gs_paths)
+        if not ok2:
+            for line in report2:
+                print(line)
+            failed += 1
+        else:
+            underscore_names = {
+                n: files
+                for p in gs_paths
+                for n in collect_module_lets(p)
+                if n.startswith("_")
+            }
+            safe = {n: files for n, files in underscore_names.items()
+                    if len(files) == 1}
+            print(f"cross-file: {len(underscore_names)} underscore lets found, "
+                  f"{len(safe)} safe (single-file), 0 collisions")
     return 1 if failed else 0
 
 
