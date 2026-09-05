@@ -2852,7 +2852,9 @@ def test_fetch_retry_gives_up_after_max():
 def test_check_budget_warn_at_240_300_345():
     """Behavioral test: checkBudget should warn exactly once at 240s, once at 300s,
     and throw at 345s. Dedup prevents repeated warnings after threshold is crossed.
-    Simulated because we can't mock Date.now() in the .gs file directly."""
+    Note: budgetSetNow uses Number.isFinite (not typeof) to guard against NaN,
+    since typeof NaN === "number" === true — a NaN override would silently
+    suppress all warnings and budget-exceeded throws."""
     warnings_fired = set()
     BUDGET_WARN_AT_MS = [240000, 300000]
     APPS_SCRIPT_BUDGET_MS = 345000
@@ -2866,6 +2868,30 @@ def test_check_budget_warn_at_240_300_345():
     assert_eq(len(warnings_fired), 2,
         f'expected exactly 2 unique thresholds warned, got {len(warnings_fired)}: {sorted(warnings_fired)}')
     assert_eq(throw_count, 1, 'throw should fire exactly once at 345s')
+
+
+def test_budget_set_now_rejects_nan():
+    """budgetSetNow must use Number.isFinite (not typeof) to guard its input.
+    typeof NaN === "number" is true, so budgetSetNow(NaN) with the old
+    `typeof fn === "number" ? fn : null` pattern would set _nowOverride = NaN.
+    Then _now() returns NaN, elapsed = NaN, and all budget warnings/thresholds
+    silently fail to fire. The fix (Number.isFinite) rejects NaN/Infinity."""
+    import math
+    def budget_set_now(old_value, fn):
+        # Mirrors the fixed JS: _nowOverride = Number.isFinite(fn) ? fn : null
+        return (fn if isinstance(fn, (int, float)) and math.isfinite(fn) else None)
+    assert_eq(budget_set_now(None, 1700000000000), 1700000000000,
+        'valid timestamp must be accepted')
+    assert_eq(budget_set_now(None, float('nan')), None,
+        'NaN must be rejected (Number.isFinite guard)')
+    assert_eq(budget_set_now(None, float('inf')), None,
+        'Infinity must be rejected (Number.isFinite guard)')
+    assert_eq(budget_set_now(None, None), None,
+        'null/undefined must be rejected')
+    assert_eq(budget_set_now(None, "1700000000000"), None,
+        'string timestamp must be rejected (type guard)')
+    assert_eq(budget_set_now(None, 0), 0,
+        'elapsed=0 is valid (clock just started)')
 
 
 def test_waqi_token_reset_clears_cache():
@@ -3021,6 +3047,18 @@ def test_probe_binary_search_finds_seven():
     API today allows forecast_days=7 and rejects 8. Simulator: {7:200, 8:400}."""
     cap = _simulate_probe({7: 200, 8: 400})
     assert_eq(cap, 7, 'cap must be 7 when 7 succeeds and 8 fails')
+
+
+def test_budget_set_now_uses_isfinite_in_source():
+    """budgetSetNow must use Number.isFinite in source (not typeof) so NaN
+    is rejected. typeof NaN === 'number' is true, so the old pattern
+    silently accepted NaN and poisoned all budget checks."""
+    for path in ['icalweather.gs', 'gcalweather.gs']:
+        body = open(path, encoding='utf-8').read()
+        assert_true('Number.isFinite(fn) ? fn : null' in body,
+            f'{path} budgetSetNow must use Number.isFinite(fn) ? fn : null')
+        assert_true('typeof fn === "number" ? fn : null' not in body,
+            f'{path} budgetSetNow must not use typeof (catches NaN: typeof NaN === "number")')
 
 
 def test_probe_handles_rate_limit():

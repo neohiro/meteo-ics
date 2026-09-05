@@ -157,7 +157,10 @@ const { budgetStart, budgetSetNow, checkBudget } = (() => {
       return _now();
     },
     budgetSetNow(fn) {
-      _nowOverride = typeof fn === "number" ? fn : null;
+      // Use Number.isFinite to reject NaN/Infinity — typeof NaN === "number"
+      // is true, so a test passing budgetSetNow(NaN) would silently poison
+      // every elapsed comparison and the budget check would never fire.
+      _nowOverride = Number.isFinite(fn) ? fn : null;
     },
     checkBudget(startMs, label) {
       const elapsed = _now() - startMs;
