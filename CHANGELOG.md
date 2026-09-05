@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - WAQI endpoint: `https://api.waqi.info/feed/geo:` (1000+ stations, token-optional, higher rate limit with token).
 - `OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7` constant extracted in both scripts (documents the hard cap, centralizes the value).
 - `parseAqProvider()` helper in `icalweather.gs`: parses `aqProvider` URL param with `"auto"` default.
-- 13 new Python tests covering the OpenAQ/WAQI integration, `parseAqProvider`, `aqProvider` URL param, `fetchGlobalAQI` existence, WAQI token ScriptProperties storage.
+  - 22 new Python tests covering the OpenAQ/WAQI integration, `parseAqProvider`, `aqProvider` URL param, `fetchGlobalAQI` existence, WAQI token ScriptProperties storage, AQI source label display, lint/balance helpers.
 
 ### Changed
 - Version bumped: `2.1.0` → `2.2.0` in both `ICAL_CONFIG` and `CONFIG`.

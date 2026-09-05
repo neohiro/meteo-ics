@@ -8,6 +8,7 @@
  *  - Clean single empty line (\n\n) separation between all category cards.
  *  - Global AQI Engine: Automatic fallback between European AQI (0-100), US EPA AQI (0-500),
  *    OpenAQ (200+ countries, free, no key), and WAQI (1000+ stations, token-optional).
+ *    The calendar event description labels which provider supplied the AQI (Open-Meteo / OpenAQ / WAQI).
  *  - 100% Guaranteed Deduplication: Keyed with [KEY:YYYY-MM-DD_city] + orphaned event sweep.
  *  - Timezone Drift Immunity: UTC-anchored date keys (T00:00:00Z / Date.UTC) match Open-Meteo's UTC date strings, so server timezone never misclassifies past vs future days.
  *  - Continuous 7-Day Aggregates: Seamless date-key bridging between Deterministic (<14d) and Ensemble (14d+) datasets.
