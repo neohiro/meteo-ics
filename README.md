@@ -20,6 +20,7 @@ Subscribe once to a live `.ics` feed and your calendar does the rest. No new app
 
 ## 🚀 Try It Now — Pick Your City
 
+<!-- DEPLOY-URL-TODO: replace `…` with the live Apps Script deploy URL after merge. -->
 > Copy any URL below and paste it into your calendar app's subscription field.
 
 | Region | Cities | URL |
