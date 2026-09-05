@@ -5,7 +5,7 @@
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
 [![Version](https://img.shields.io/badge/Version-2.2.0-brightgreen.svg)](./CHANGELOG.md)
 [![CI](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-206%20%2B%20CI-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-209%20%2B%20CI-brightgreen.svg)](#)
 
 **Your weather, astronomy & air-quality — automatically delivered to any calendar app.**  
 Subscribe once to a live `.ics` feed and your calendar does the rest. No new app, no new login, no new habit. Wake up to per-day events titled `☀️ 22°C Paris` with temperature, rain, UV, AQI, moon phase, pollen and road-hazard advice — all built from real forecast models with a live accuracy audit.

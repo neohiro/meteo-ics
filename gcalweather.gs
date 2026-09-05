@@ -31,6 +31,9 @@
  *  - generatePrioritizedAdvices() falls back to safe defaults for null ctx.tempMax/Min.
  *  - fetchAllAtmosphericDataParallel() logs non-200 responses per endpoint (no silent drops).
  *  - Ensemble key lists hoisted out of per-day loops in buildDashboardPayload + aggregates.
+ *  - AQI Scale Display: every AQI line shows the reference scale (e.g. '42/100 EAQI', '88/500 USAQI') for instant interpretability.
+ *  - Event structure: actionable advice rendered BEFORE model audit so users see guidance first, methodology second.
+ *  - SOURCES footer on every event listing data providers, so operators can audit which upstream API fed each value.
  *
  * Location Config Example:
  *   locations: [

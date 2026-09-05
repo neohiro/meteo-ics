@@ -26,6 +26,9 @@
  *  - unitParam String-coerced before .toLowerCase() (array values would otherwise crash).
  *  - fetchIcsAtmosphericDataParallel() logs per-endpoint non-200 responses (deterministic/ensemble/air-quality).
  *  - Ensemble key lists hoisted out of per-offset and per-day loops in generateIcsFeed + aggregates.
+ *  - AQI Scale Display: every AQI line shows the reference scale (e.g. '42/100 EAQI', '88/500 USAQI') for instant interpretability.
+ *  - Event structure: actionable advice rendered BEFORE model audit so users see guidance first, methodology second.
+ *  - SOURCES footer on every event listing data providers, so operators can audit which upstream API fed each value.
  *
  * URL Parameters:
  *   cities=X,Y,Z        — city names, auto-geocoded via Open-Meteo (e.g. ?cities=London,Paris) (max 4)

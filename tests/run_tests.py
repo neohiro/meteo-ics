@@ -2695,6 +2695,27 @@ def test_gcal_past_day_aqi_includes_scale():
         f'gcal must render the AQI scale in BOTH past-day and future-day blocks; found {occurrences}')
 
 
+def test_gcal_waqi_alias_handles_missing_keys():
+    """The WAQI firstDefined helper must return null (not 0) when the iaqi key
+    is absent, so absent data does not pollute the ozone/nitrogen_dioxide arrays
+    with a fake zero value.
+    """
+    fn = re.search(r'function gcalFetchGlobalAQI\([\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # firstDefined is defined inside the WAQI block, after the iaqi extraction.
+    # Verify the helper is called with o3/no2 keys.
+    assert_true(re.search(r'firstDefined\s*\(\s*"o3"\s*,\s*"ozone"\s*\)', body),
+        'gcal WAQI block must call firstDefined for o3/ozone alias')
+    assert_true(re.search(r'firstDefined\s*\(\s*"no2"\s*,\s*"nitrogen_dioxide"\s*\)', body),
+        'gcal WAQI block must call firstDefined for no2/nitrogen_dioxide alias')
+    # The helper must be declared BEFORE the calls.
+    decl_idx = body.find('const firstDefined')
+    o3_idx = body.find('firstDefined("o3"')
+    assert_true(decl_idx != -1 and o3_idx != -1 and decl_idx < o3_idx,
+        'firstDefined must be declared before its calls in the WAQI block')
+
+
 def test_gcal_merge_propagates_ozone_and_no2():
     """fetchAllAtmosphericDataParallel must propagate ozone and nitrogen_dioxide from globalAqi."""
     fn = re.search(r'function fetchAllAtmosphericDataParallel[\s\S]+?\n\}\n', GCAL)
