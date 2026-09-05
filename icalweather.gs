@@ -59,6 +59,69 @@
 const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
+const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
+
+let _probedAqCap = null;
+
+function getOpenMeteoAqCap() {
+  if (_probedAqCap !== null) return _probedAqCap;
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty(_AQ_CAP_PROP);
+  if (cached !== null) {
+    const parts = cached.split(",");
+    if (parts.length === 2) {
+      const cachedCap = parseInt(parts[0], 10);
+      const cachedDay = parts[1];
+      const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+      if (cachedDay === today && cachedCap >= 5 && cachedCap <= 16) {
+        _probedAqCap = cachedCap;
+        return _probedAqCap;
+      }
+    }
+  }
+  const detected = _probeOpenMeteoAqCap();
+  _probedAqCap = detected;
+  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+  props.setProperty(_AQ_CAP_PROP, String(detected) + "," + today);
+  return _probedAqCap;
+}
+
+function _probeOpenMeteoAqCap() {
+  const PROBE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
+  const PROBE_LAT = 50.95, PROBE_LON = 5.97;
+  const lo = 5, hi = 16;
+  let cap = OPEN_METEO_AQ_FORECAST_DAYS_CAP;
+  const tryFetch = (days) => {
+    try {
+      const url = PROBE_URL + "?latitude=" + PROBE_LAT + "&longitude=" + PROBE_LON +
+        "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 10000 });
+      return res.getResponseCode();
+    } catch (e) {
+      return 0;
+    }
+  };
+  let l = lo, r = hi;
+  while (l <= r) {
+    const mid = Math.floor((l + r) / 2);
+    const code = tryFetch(mid);
+    if (code === 200) {
+      cap = mid;
+      l = mid + 1;
+    } else if (code >= 400) {
+      r = mid - 1;
+    } else {
+      break;
+    }
+  }
+  if (cap < OPEN_METEO_AQ_FORECAST_DAYS_CAP) {
+    Logger.log("Open-Meteo AQ API cap probe: API returned HTTP " +
+      "400 at forecast_days=" + OPEN_METEO_AQ_FORECAST_DAYS_CAP +
+      " (hardcoded default). Detected cap: " + cap + ". " +
+      "Update OPEN_METEO_AQ_FORECAST_DAYS_CAP to " + cap + " in both files.");
+  }
+  return cap;
+}
 
 const ICAL_CONFIG = {
   calendarName: "Weather & Celestial Feed",
@@ -627,8 +690,8 @@ function handleStatusEndpoint(params) {
         openaq: "OpenAQ v3 latest measurements (200+ countries, no key required)",
         waqi: "WAQI /feed/geo: endpoint (1000+ stations, optional token for higher rate limit)"
       },
-      openMeteoAqForecastDaysCap: OPEN_METEO_AQ_FORECAST_DAYS_CAP,
-      openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + OPEN_METEO_AQ_FORECAST_DAYS_CAP + ". For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
+      openMeteoAqForecastDaysCap: getOpenMeteoAqCap(),
+      openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + getOpenMeteoAqCap() + " (probed at runtime; cached for 24h via PropertiesService). For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
       activeAqRadius: parseAqRadius(params ? params.aqRadius : undefined),
       globalFallbackEndpoints: {
         openaq: OPENAQ_LATEST_ENDPOINT,
@@ -1074,7 +1137,7 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
   const dUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,windgusts_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const hUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm,relative_humidity_2m,dew_point_2m,cloud_cover&temperature_unit=${unit}&forecast_days=${ICAL_CONFIG.deterministicDays}&timezone=auto`;
   const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${ICAL_CONFIG.forecastDays}&temperature_unit=${unit}&timezone=auto`;
-  const aqDays = Math.min(ICAL_CONFIG.deterministicDays, OPEN_METEO_AQ_FORECAST_DAYS_CAP);
+  const aqDays = Math.min(ICAL_CONFIG.deterministicDays, getOpenMeteoAqCap());
   const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqDays}&timezone=auto`;
 
   try {

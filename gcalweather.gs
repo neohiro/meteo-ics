@@ -227,6 +227,69 @@ function fetchAllWithRetry(requests) {
 const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
+const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
+
+let _probedAqCap = null;
+
+function getOpenMeteoAqCap() {
+  if (_probedAqCap !== null) return _probedAqCap;
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty(_AQ_CAP_PROP);
+  if (cached !== null) {
+    const parts = cached.split(",");
+    if (parts.length === 2) {
+      const cachedCap = parseInt(parts[0], 10);
+      const cachedDay = parts[1];
+      const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+      if (cachedDay === today && cachedCap >= 5 && cachedCap <= 16) {
+        _probedAqCap = cachedCap;
+        return _probedAqCap;
+      }
+    }
+  }
+  const detected = _probeOpenMeteoAqCap();
+  _probedAqCap = detected;
+  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+  props.setProperty(_AQ_CAP_PROP, String(detected) + "," + today);
+  return _probedAqCap;
+}
+
+function _probeOpenMeteoAqCap() {
+  const PROBE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
+  const PROBE_LAT = 50.95, PROBE_LON = 5.97;
+  const lo = 5, hi = 16;
+  let cap = OPEN_METEO_AQ_FORECAST_DAYS_CAP;
+  const tryFetch = (days) => {
+    try {
+      const url = PROBE_URL + "?latitude=" + PROBE_LAT + "&longitude=" + PROBE_LON +
+        "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 10000 });
+      return res.getResponseCode();
+    } catch (e) {
+      return 0;
+    }
+  };
+  let l = lo, r = hi;
+  while (l <= r) {
+    const mid = Math.floor((l + r) / 2);
+    const code = tryFetch(mid);
+    if (code === 200) {
+      cap = mid;
+      l = mid + 1;
+    } else if (code >= 400) {
+      r = mid - 1;
+    } else {
+      break;
+    }
+  }
+  if (cap < OPEN_METEO_AQ_FORECAST_DAYS_CAP) {
+    Logger.log("Open-Meteo AQ API cap probe: API returned HTTP " +
+      "400 at forecast_days=" + OPEN_METEO_AQ_FORECAST_DAYS_CAP +
+      " (hardcoded default). Detected cap: " + cap + ". " +
+      "Update OPEN_METEO_AQ_FORECAST_DAYS_CAP to " + cap + " in both files.");
+  }
+  return cap;
+}
 
 const ASTRONOMICAL_EVENTS = {
   "01-03": "Quadrantid Meteor Peak (~110/hr)",
@@ -472,7 +535,7 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     // Open-Meteo Air-Quality API hard-caps forecast_days at 7 (anything higher returns HTTP 400).
     // For regions outside EU/US, the global OpenAQ/WAQI fallback (see fetchGlobalAQI) provides
     // additional coverage when aqProvider is "auto" or explicitly "openaq" or "waqi".
-    const aqForecastDays = Math.min(CONFIG.deterministicDays, OPEN_METEO_AQ_FORECAST_DAYS_CAP);
+    const aqForecastDays = Math.min(CONFIG.deterministicDays, getOpenMeteoAqCap());
     const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqForecastDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
 
     requests.push({ url: dDailyUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
