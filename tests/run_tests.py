@@ -2401,6 +2401,96 @@ def test_lint_balance_helper_ok():
         assert_true(ok, f'{name} lint should pass but got {counts}')
 
 
+def test_gcal_fetchAllAtmosphericDataParallel_tags_aqSource():
+    """The parallel fetcher must tag cacheObj.aq._source with the actual provider.
+
+    Operator-observability feature: the source label (Open-Meteo / OpenAQ / WAQI)
+    is plumbed through to the calendar event description so operators can see
+    which upstream fed the displayed AQI value.
+    """
+    # The OpenAQ branch in gcalFetchGlobalAQI must tag r._source = "OpenAQ".
+    m = re.search(r'gcalFetchGlobalAQI[\s\S]+?r\._source\s*=\s*"OpenAQ"', GCAL)
+    assert_true(m is not None, 'gcalFetchGlobalAQI must tag r._source = "OpenAQ" on success path')
+    # The WAQI branch must tag r._source = "WAQI".
+    assert_true(re.search(r'r\._source\s*=\s*"WAQI"', GCAL),
+        'gcalFetchGlobalAQI must tag r._source = "WAQI" on success path')
+    # fetchAllAtmosphericDataParallel must propagate _source into cacheObj.aq._source.
+    parallel = re.search(r'function fetchAllAtmosphericDataParallel[\s\S]+?\n\}\n', GCAL)
+    assert_true(parallel is not None)
+    body = parallel.group(0)
+    assert_true(re.search(r'cacheObj\.aq\._source\s*=\s*globalAqi\._source', body),
+        'fetchAllAtmosphericDataParallel must propagate globalAqi._source into cacheObj.aq._source')
+    # Open-Meteo (untouched) path must tag cacheObj.aq._source = "Open-Meteo".
+    assert_true(re.search(r'cacheObj\.aq\._source\s*=\s*"Open-Meteo"', body),
+        'fetchAllAtmosphericDataParallel must tag cacheObj.aq._source = "Open-Meteo" when OM data is used as-is')
+
+
+def test_gcal_buildDashboardPayload_renders_aqSource():
+    """The dashboard payload must surface the aqSource label next to AQI/label.
+
+    Operators reading the calendar event need to know whether the displayed AQI
+    came from Open-Meteo, OpenAQ, or WAQI. The label is appended inside the
+    parentheses of the existing AQI line.
+    """
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None, 'buildDashboardPayload must exist')
+    body = fn.group(0)
+    # Must read the source field from data.aq.
+    assert_true(re.search(r'aqSource\s*=\s*data\.aq\s*&&\s*data\.aq\._source', body),
+        'buildDashboardPayload must read data.aq._source into a local aqSource variable')
+    # Must append it to the AQI display line(s) when present.
+    # Pattern in source: aqSource ? ", " + aqSource : ""  (with literal space between + and aqSource)
+    assert_true(re.search(r'aqSource\s*\?[^:]*?\+\s*aqSource\s*:\s*""', body),
+        'buildDashboardPayload must conditionally append aqSource in the AQI display line')
+
+
+def test_gcal_aqSource_routing_values():
+    """The aqSource label must use only documented values: Open-Meteo / OpenAQ / WAQI.
+
+    Stale strings like "openmeteo" or unknown provider names must not appear
+    as the value of cacheObj.aq._source or r._source.
+    """
+    # Extract all r._source / cacheObj.aq._source assignments.
+    assignments = re.findall(r'(?:r|cacheObj\.aq)\._source\s*=\s*"([^"]+)"', GCAL)
+    assert_true(len(assignments) > 0, 'must have at least one _source assignment')
+    allowed = {"Open-Meteo", "OpenAQ", "WAQI"}
+    bad = [v for v in assignments if v not in allowed]
+    assert_true(not bad, f'_source values must be one of {allowed}; got unexpected: {bad}')
+
+
+def test_gcal_aqSource_does_not_appear_in_event_title():
+    """The aqSource label must NOT pollute the event title (only the description).
+
+    The event title is short (max 1024 chars) and rendered in calendar UIs as
+    the headline. Source attribution goes in the description, not the title.
+    """
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Find all `title = ` lines and ensure none of them reference aqSource.
+    titles = re.findall(r'title\s*=\s*[`"][^`"]*[`"]', body)
+    polluted = [t for t in titles if 'aqSource' in t]
+    assert_true(not polluted, f'event title must not reference aqSource; found: {polluted}')
+
+
+def test_gcal_aqSource_null_safe():
+    """When _source is absent (older cache, partial data), display must not show "undefined".
+
+    aqSource must default to null when data.aq._source is falsy, so the
+    conditional ternary produces an empty string instead of the literal "undefined".
+    """
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Pattern: aqSource = data.aq && data.aq._source ? data.aq._source : null
+    m = re.search(
+        r'aqSource\s*=\s*data\.aq\s*&&\s*data\.aq\._source\s*\?\s*data\.aq\._source\s*:\s*null',
+        body
+    )
+    assert_true(m is not None,
+        'buildDashboardPayload must default aqSource to null when data.aq._source is missing')
+
+
 def test_lint_balance_helper_finds_mismatch():
     """The CI lint helper must detect a deliberate imbalance."""
     import importlib.util

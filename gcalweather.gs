@@ -414,31 +414,38 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     const cacheObj = weatherCache.get(key);
     if (!cacheObj) return;
     const openMeteoAqiMissing = !cacheObj.aq || !cacheObj.aq.time
-      || (cacheObj.aq.european_aqi.every(v => v === null) && cacheObj.aq.us_aqi.every(v => v === null));
-    if (openMeteoAqiMissing || forceGlobalAqi) {
-      const globalAqi = gcalFetchGlobalAQI(loc, aqProvider, CONFIG.aqRadius);
-      if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
-        if (cacheObj.aq && cacheObj.aq.time) {
-          globalAqi.time.forEach((d, i) => {
-            const exIdx = cacheObj.aq.time.indexOf(d);
-            if (exIdx === -1) {
-              cacheObj.aq.time.push(d);
-              cacheObj.aq.european_aqi.push(globalAqi.european_aqi[i]);
-              cacheObj.aq.us_aqi.push(globalAqi.us_aqi[i]);
-              cacheObj.aq.pm2_5.push(globalAqi.pm2_5[i]);
-              cacheObj.aq.pm10.push(globalAqi.pm10[i]);
-            }
-          });
+      || ((cacheObj.aq.european_aqi || []).every(v => v === null) && (cacheObj.aq.us_aqi || []).every(v => v === null));
+    if (cacheObj.aq && cacheObj.aq.time && !openMeteoAqiMissing && !forceGlobalAqi) {
+      cacheObj.aq._source = "Open-Meteo";
+      return;
+    }
+    const globalAqi = gcalFetchGlobalAQI(loc, aqProvider, CONFIG.aqRadius);
+    if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
+      if (cacheObj.aq && cacheObj.aq.time) {
+        globalAqi.time.forEach((d, i) => {
+          const exIdx = cacheObj.aq.time.indexOf(d);
+          if (exIdx === -1) {
+            cacheObj.aq.time.push(d);
+            cacheObj.aq.european_aqi.push(globalAqi.european_aqi[i]);
+            cacheObj.aq.us_aqi.push(globalAqi.us_aqi[i]);
+            cacheObj.aq.pm2_5.push(globalAqi.pm2_5[i]);
+            cacheObj.aq.pm10.push(globalAqi.pm10[i]);
+            cacheObj.aq._source = globalAqi._source;
+          }
+        });
+        if (cacheObj.aq.time.length > 0) {
           const sorted = cacheObj.aq.time.map((d, i) => ({ d, i })).sort((a, b) => a.d.localeCompare(b.d));
           cacheObj.aq.time = sorted.map(x => x.d);
           cacheObj.aq.european_aqi = sorted.map(x => cacheObj.aq.european_aqi[x.i]);
           cacheObj.aq.us_aqi = sorted.map(x => cacheObj.aq.us_aqi[x.i]);
           cacheObj.aq.pm2_5 = sorted.map(x => cacheObj.aq.pm2_5[x.i]);
           cacheObj.aq.pm10 = sorted.map(x => cacheObj.aq.pm10[x.i]);
-        } else {
-          cacheObj.aq = globalAqi;
         }
+      } else {
+        cacheObj.aq = globalAqi;
       }
+    } else if (cacheObj.aq) {
+      cacheObj.aq._source = "Open-Meteo";
     }
   });
 
@@ -474,8 +481,12 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
             }
           });
           const fill = v => (v !== undefined && v !== null && !isNaN(v) ? Math.round(v) : null);
-          const pm25 = fill(openaqVals["pm25"]) || fill(openaqVals["pm2.5"]);
-          const pm10 = fill(openaqVals["pm10"]);
+          const firstDefined = (...keys) => {
+            for (const k of keys) { const v = fill(openaqVals[k]); if (v !== null) return v; }
+            return null;
+          };
+          const pm25 = firstDefined("pm25", "pm2.5");
+          const pm10 = firstDefined("pm10");
           dates.forEach(d => {
             r.time.push(d);
             r.european_aqi.push(pm25);
@@ -483,6 +494,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
             r.pm2_5.push(pm25);
             r.pm10.push(pm10);
           });
+          r._source = "OpenAQ";
           return r;
         }
       } else {
@@ -516,6 +528,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
             r.pm2_5.push(pm25v);
             r.pm10.push(pm10v);
           });
+          r._source = "WAQI";
           return r;
         }
       } else {
@@ -671,6 +684,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const snapshots = record.snapshots || [];
 
   let aqiVal = null, aqiType = "AQI", pm25Val = null, pm10Val = null, pollenVal = null;
+  const aqSource = data.aq && data.aq._source ? data.aq._source : null;
   if (data.aq && data.aq.time) {
     const idx = data.aq.time.indexOf(targetDateStr);
     if (idx !== -1) {
@@ -729,7 +743,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
         `• Sky: ${weatherGlyph} ${getWeatherName(actualCode)}`,
         `• Rain: ${Number(actualRain).toFixed(1)} mm`,
-        aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)})` : ``,
+        aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : ``,
         astroEvent ? `• Event: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
 
@@ -902,7 +916,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
     [
       `🧪 AIR QUALITY & BIO`,
-      aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)})` : `• AQI: Monitoring`,
+      aqiVal !== null ? `• AQI: ${aqiVal} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : `• AQI: Monitoring${aqSource ? " (" + aqSource + ")" : ""}`,
       pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
       pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
     ].filter(Boolean).join("\n"),
