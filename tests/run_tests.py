@@ -3053,7 +3053,7 @@ def test_budget_set_now_uses_isfinite_in_source():
     """budgetSetNow must use Number.isFinite in source (not typeof) so NaN
     is rejected. typeof NaN === 'number' is true, so the old pattern
     silently accepted NaN and poisoned all budget checks."""
-    for path in ['icalweather.gs', 'gcalweather.gs']:
+    for path in [os.path.join(REPO, 'icalweather.gs'), os.path.join(REPO, 'gcalweather.gs')]:
         body = open(path, encoding='utf-8').read()
         assert_true('Number.isFinite(fn) ? fn : null' in body,
             f'{path} budgetSetNow must use Number.isFinite(fn) ? fn : null')
@@ -3080,7 +3080,7 @@ def test_probe_uses_property_service_cache():
     24 hours. The cache must include the date so the result is invalidated
     at midnight UTC, not after a fixed timer."""
     from lint_balance import collect_module_lets
-    for path in ['icalweather.gs', 'gcalweather.gs']:
+    for path in [os.path.join(REPO, 'icalweather.gs'), os.path.join(REPO, 'gcalweather.gs')]:
         body = open(path, encoding='utf-8').read()
         assert_true('_AQ_CAP_PROP' in body,
             f'{path} must define _AQ_CAP_PROP')

@@ -297,38 +297,504 @@ function _probeOpenMeteoAqCap() {
 const ASTRONOMICAL_EVENTS = {
   "01-03": "Quadrantid Meteor Peak (~110/hr)",
   "01-04": "Earth at Perihelion (Closest to Sun)",
+  "01-10": "🌕 Full Moon — Wolf Moon",
+  "01-25": "🌑 New Moon",
   "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
   "03-24": "Mercury at Greatest Eastern Elongation",
+  "03-25": "🌕 Full Moon — Worm Moon",
+  "04-08": "🌑 New Moon — Solar Eclipse Season Begins",
   "04-22": "Lyrid Meteor Peak (~18/hr)",
   "04-23": "Lyrid Active Window",
+  "04-24": "🌕 Full Moon — Pink Moon",
   "05-06": "Eta Aquariids Peak (~50/hr)",
   "05-07": "Eta Aquariids Active Window",
+  "05-23": "🌕 Full Moon — Flower Moon",
+  "06-06": "🌑 New Moon",
   "06-21": "☀️ Summer Solstice (Longest Day)",
+  "06-21": "🌕 Full Moon — Strawberry Moon",
   "07-04": "Earth at Aphelion (Furthest from Sun)",
+  "07-06": "🌑 New Moon",
+  "07-21": "🌕 Full Moon — Buck Moon",
   "07-28": "Delta Aquariids Peak (~20/hr)",
   "07-29": "Delta Aquariids Active Window",
+  "08-04": "🌑 New Moon",
   "08-12": "Perseid Meteor Peak (~100/hr)",
   "08-13": "Perseid Active Window",
+  "08-19": "🌕 Full Moon — Sturgeon Moon",
   "08-27": "Saturn at Opposition (Brightest)",
+  "09-03": "🌑 New Moon",
+  "09-17": "🌕 Full Moon — Harvest Moon",
   "09-19": "Neptune at Opposition",
   "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
+  "10-02": "🌑 New Moon — Annular Solar Eclipse Season",
   "10-07": "Draconid Meteor Peak (~10/hr)",
+  "10-17": "🌕 Full Moon — Hunter's Moon",
   "10-21": "Orionid Meteor Peak (~20/hr)",
   "10-22": "Orionid Active Window",
+  "11-01": "🌑 New Moon",
   "11-05": "Southern Taurids Peak (~5-10 fireball/hr)",
   "11-12": "Northern Taurids Peak (~5 fireball/hr)",
+  "11-15": "🌕 Full Moon — Beaver Moon",
   "11-17": "Leonid Meteor Peak (~15/hr)",
   "11-18": "Leonid Active Window",
+  "11-30": "🌑 New Moon",
   "12-07": "Jupiter at Opposition (Brightest)",
   "12-13": "Geminid Meteor Ramp-up (~60/hr)",
   "12-14": "Geminid Meteor Peak (~120/hr)",
+  "12-15": "🌕 Full Moon — Cold Moon",
   "12-21": "❄️ Winter Solstice (Shortest Day)",
-  "12-22": "Ursid Meteor Peak (~10/hr)"
+  "12-22": "Ursid Meteor Peak (~10/hr)",
+  "12-30": "🌑 New Moon"
 };
 
-// Drive-encrypted WAQI token store. Tokens are AES-encrypted with a per-user
-// key derived from a passphrase stored in ScriptProperties (NEVER the token
-// itself). This isolates the token from collaborators with editor access.
+const SOLAR_ECLIPSES = {
+  "04-08": "🌞 Total Solar Eclipse (North America)",
+  "10-02": "🌞 Annular Solar Eclipse (Pacific/South America)"
+};
+
+const LUNAR_ECLIPSES = {
+  "03-25": "🌑 Penumbral Lunar Eclipse",
+  "09-17": "🌑 Partial Lunar Eclipse"
+};
+
+const PLANETARY_EVENTS = {
+  "01-12": "Mercury at Greatest Western Elongation (Morning)",
+  "03-24": "Mercury at Greatest Eastern Elongation (Evening)",
+  "05-09": "Mercury at Greatest Western Elongation (Morning)",
+  "07-22": "Mercury at Greatest Eastern Elongation (Evening)",
+  "09-05": "Mercury at Greatest Western Elongation (Morning)",
+  "11-16": "Mercury at Greatest Eastern Elongation (Evening)",
+  "03-24": "Venus at Greatest Eastern Elongation (Evening Star)",
+  "06-04": "Venus at Greatest Western Elongation (Morning Star)",
+  "01-12": "Mars at Opposition",
+  "09-21": "Neptune at Opposition",
+  "11-03": "Uranus at Opposition",
+  "12-07": "Jupiter at Opposition",
+  "09-08": "Saturn at Opposition"
+};
+
+const METEOR_SHOWERS = {
+  "01-03": { name: "Quadrantids", peak: "01-03", rate: "110/hr", parent: "2003 EH1" },
+  "04-22": { name: "Lyrids", peak: "04-22", rate: "18/hr", parent: "Thatcher" },
+  "05-06": { name: "Eta Aquariids", peak: "05-06", rate: "50/hr", parent: "Halley" },
+  "07-28": { name: "Delta Aquariids", peak: "07-28", rate: "20/hr", parent: "96P/Machholz" },
+  "08-12": { name: "Perseids", peak: "08-12", rate: "100/hr", parent: "Swift-Tuttle" },
+  "10-07": { name: "Draconids", peak: "10-07", rate: "10/hr", parent: "21P/Giacobini-Zinner" },
+  "10-21": { name: "Orionids", peak: "10-21", rate: "20/hr", parent: "Halley" },
+  "11-05": { name: "S. Taurids", peak: "11-05", rate: "5-10/hr", parent: "Encke" },
+  "11-12": { name: "N. Taurids", peak: "11-12", rate: "5/hr", parent: "Encke" },
+  "11-17": { name: "Leonids", peak: "11-17", rate: "15/hr", parent: "Tempel-Tuttle" },
+  "12-14": { name: "Geminids", peak: "12-14", rate: "120/hr", parent: "3200 Phaethon" },
+  "12-22": { name: "Ursids", peak: "12-22", rate: "10/hr", parent: "8P/Tuttle" }
+};
+
+const AURORA_SEASONS = {
+  "03-20": "🌌 Aurora Season Begins (Equinox Effect)",
+  "09-22": "🌌 Aurora Season Peaks (Equinox Effect)"
+};
+
+const LUNAR_PHASES = {
+  "01-03": "🌖 Waning Gibbous",
+  "01-10": "🌕 Full Moon",
+  "01-17": "🌗 Last Quarter",
+  "01-25": "🌑 New Moon",
+  "02-02": "🌓 First Quarter",
+  "02-09": "🌕 Full Moon",
+  "02-15": "🌗 Last Quarter",
+  "02-23": "🌑 New Moon",
+  "03-01": "🌓 First Quarter",
+  "03-10": "🌕 Full Moon",
+  "03-16": "🌗 Last Quarter",
+  "03-25": "🌑 New Moon",
+  "03-31": "🌓 First Quarter",
+  "04-08": "🌕 Full Moon",
+  "04-15": "🌗 Last Quarter",
+  "04-23": "🌑 New Moon",
+  "04-30": "🌓 First Quarter",
+  "05-07": "🌕 Full Moon",
+  "05-14": "🌗 Last Quarter",
+  "05-23": "🌑 New Moon",
+  "05-30": "🌓 First Quarter",
+  "06-06": "🌕 Full Moon",
+  "06-13": "🌗 Last Quarter",
+  "06-21": "🌑 New Moon",
+  "06-28": "🌓 First Quarter",
+  "07-06": "🌕 Full Moon",
+  "07-13": "🌗 Last Quarter",
+  "07-21": "🌑 New Moon",
+  "07-28": "🌓 First Quarter",
+  "08-04": "🌕 Full Moon",
+  "08-11": "🌗 Last Quarter",
+  "08-19": "🌑 New Moon",
+  "08-26": "🌓 First Quarter",
+  "09-03": "🌕 Full Moon",
+  "09-10": "🌗 Last Quarter",
+  "09-17": "🌑 New Moon",
+  "09-24": "🌓 First Quarter",
+  "10-02": "🌕 Full Moon",
+  "10-10": "🌗 Last Quarter",
+  "10-17": "🌑 New Moon",
+  "10-24": "🌓 First Quarter",
+  "11-01": "🌕 Full Moon",
+  "11-08": "🌗 Last Quarter",
+  "11-15": "🌑 New Moon",
+  "11-22": "🌓 First Quarter",
+  "11-30": "🌕 Full Moon",
+  "12-08": "🌗 Last Quarter",
+  "12-15": "🌑 New Moon",
+  "12-22": "🌓 First Quarter",
+  "12-30": "🌕 Full Moon"
+};
+
+const ASTRONOMICAL_EVENTS_DETAILED = {
+  ...ASTRONOMICAL_EVENTS,
+  ...SOLAR_ECLIPSES,
+  ...LUNAR_ECLIPSES,
+  ...PLANETARY_EVENTS,
+  ...AURORA_SEASONS
+};
+
+// ============================================================
+// CULTURAL EVENTS — On This Day: holidays, observances, anniversaries
+// ============================================================
+const NATIONAL_HOLIDAYS = {
+  "US": {
+    "01-01": "New Year's Day",
+    "01-20": "Martin Luther King Jr. Day",
+    "02-17": "Presidents' Day",
+    "05-26": "Memorial Day",
+    "06-19": "Juneteenth",
+    "07-04": "Independence Day",
+    "09-02": "Labor Day",
+    "10-14": "Columbus Day",
+    "11-11": "Veterans Day",
+    "11-28": "Thanksgiving",
+    "12-25": "Christmas Day"
+  },
+  "GB": {
+    "01-01": "New Year's Day",
+    "03-29": "Good Friday",
+    "04-01": "Easter Monday",
+    "05-06": "Early May Bank Holiday",
+    "05-27": "Spring Bank Holiday",
+    "08-26": "Summer Bank Holiday",
+    "12-25": "Christmas Day",
+    "12-26": "Boxing Day"
+  },
+  "DE": {
+    "01-01": "Neujahr",
+    "03-29": "Karfreitag",
+    "04-01": "Ostermontag",
+    "05-01": "Tag der Arbeit",
+    "05-09": "Christi Himmelfahrt",
+    "05-20": "Pfingstmontag",
+    "10-03": "Tag der Deutschen Einheit",
+    "12-25": "Weihnachten",
+    "12-26": "2. Weihnachtsfeiertag"
+  },
+  "FR": {
+    "01-01": "Jour de l'An",
+    "04-01": "Lundi de Pâques",
+    "05-01": "Fête du Travail",
+    "05-08": "Victoire 1945",
+    "05-09": "Ascension",
+    "05-20": "Lundi de Pentecôte",
+    "07-14": "Fête Nationale",
+    "08-15": "Assomption",
+    "11-01": "Toussaint",
+    "11-11": "Armistice 1918",
+    "12-25": "Noël"
+  },
+  "CA": {
+    "01-01": "New Year's Day",
+    "02-19": "Family Day",
+    "03-29": "Good Friday",
+    "05-20": "Victoria Day",
+    "07-01": "Canada Day",
+    "09-02": "Labour Day",
+    "10-14": "Thanksgiving",
+    "11-11": "Remembrance Day",
+    "12-25": "Christmas Day",
+    "12-26": "Boxing Day"
+  },
+  "AU": {
+    "01-01": "New Year's Day",
+    "01-26": "Australia Day",
+    "03-29": "Good Friday",
+    "04-01": "Easter Monday",
+    "04-25": "ANZAC Day",
+    "06-10": "King's Birthday",
+    "12-25": "Christmas Day",
+    "12-26": "Boxing Day"
+  },
+  "JP": {
+    "01-01": "元日",
+    "01-08": "成人の日",
+    "02-11": "建国記念の日",
+    "02-23": "天皇誕生日",
+    "03-20": "春分の日",
+    "04-29": "昭和の日",
+    "05-03": "憲法記念日",
+    "05-04": "みどりの日",
+    "05-05": "こどもの日",
+    "07-15": "海の日",
+    "08-11": "山の日",
+    "09-16": "敬老の日",
+    "09-23": "秋分の日",
+    "10-14": "スポーツの日",
+    "11-03": "文化の日",
+    "11-23": "勤労感謝の日"
+  },
+  "CN": {
+    "01-01": "元旦",
+    "02-10": "春节",
+    "04-04": "清明节",
+    "05-01": "劳动节",
+    "06-10": "端午节",
+    "09-17": "中秋节",
+    "10-01": "国庆节"
+  },
+  "IN": {
+    "01-26": "Republic Day",
+    "08-15": "Independence Day",
+    "10-02": "Gandhi Jayanti",
+    "11-01": "Diwali",
+    "12-25": "Christmas"
+  }
+};
+
+const INTERNATIONAL_OBSERVANCES = {
+  "01-01": "Global Family Day",
+  "01-27": "International Holocaust Remembrance Day",
+  "02-02": "World Wetlands Day",
+  "02-11": "International Day of Women and Girls in Science",
+  "02-20": "World Day of Social Justice",
+  "03-03": "World Wildlife Day",
+  "03-08": "International Women's Day",
+  "03-20": "International Day of Happiness",
+  "03-21": "World Poetry Day / Intl. Day of Forests",
+  "03-22": "World Water Day",
+  "03-23": "World Meteorological Day",
+  "04-02": "World Autism Awareness Day",
+  "04-07": "World Health Day",
+  "04-22": "Earth Day",
+  "04-23": "World Book and Copyright Day",
+  "05-03": "World Press Freedom Day",
+  "05-15": "International Day of Families",
+  "05-17": "World Telecommunication Day",
+  "05-22": "International Day for Biological Diversity",
+  "05-31": "World No Tobacco Day",
+  "06-05": "World Environment Day",
+  "06-08": "World Oceans Day",
+  "06-12": "World Day Against Child Labour",
+  "06-20": "World Refugee Day",
+  "06-21": "International Day of Yoga",
+  "07-11": "World Population Day",
+  "07-30": "International Day of Friendship",
+  "08-09": "International Day of the World's Indigenous Peoples",
+  "08-12": "International Youth Day",
+  "08-19": "World Humanitarian Day",
+  "09-08": "International Literacy Day",
+  "09-15": "International Day of Democracy",
+  "09-21": "International Day of Peace",
+  "09-27": "World Tourism Day",
+  "10-01": "International Day of Older Persons",
+  "10-05": "World Teachers' Day",
+  "10-10": "World Mental Health Day",
+  "10-16": "World Food Day",
+  "10-24": "United Nations Day",
+  "11-10": "World Science Day for Peace and Development",
+  "11-20": "Universal Children's Day",
+  "12-01": "World AIDS Day",
+  "12-03": "International Day of Persons with Disabilities",
+  "12-05": "World Soil Day",
+  "12-10": "Human Rights Day",
+  "12-20": "International Human Solidarity Day"
+};
+
+const NOTABLE_ANNIVERSARIES = {
+  "01-04": "Louis Braille born (1809)",
+  "01-15": "Wikipedia launched (2001)",
+  "01-28": "Space Shuttle Challenger disaster (1986)",
+  "02-12": "Darwin Day — Charles Darwin born (1809)",
+  "02-14": "Valentine's Day",
+  "03-14": "Pi Day / Einstein born (1879)",
+  "04-12": "Yuri's Night — First human in space (1961)",
+  "04-23": "Shakespeare born & died (1564/1616)",
+  "05-04": "Star Wars Day (May the 4th)",
+  "05-25": "Towel Day (Douglas Adams tribute)",
+  "07-20": "Moon Landing — Apollo 11 (1969)",
+  "07-21": "First Moon Walk (1969)",
+  "08-12": "International Youth Day",
+  "09-09": "Teddy Bear Day",
+  "10-04": "World Animal Day / Sputnik launched (1957)",
+  "10-31": "Halloween",
+  "11-09": "Fall of Berlin Wall (1989)",
+  "12-10": "Human Rights Day",
+  "12-25": "Christmas / Newton born (1642)",
+  "12-31": "New Year's Eve"
+};
+
+const RELIGIOUS_OBSERVANCES = {
+  "01-06": "Epiphany / Three Kings Day",
+  "03-10": "Ramadan begins (varies)",
+  "04-13": "Palm Sunday (varies)",
+  "04-18": "Good Friday (varies)",
+  "04-20": "Easter Sunday (varies)",
+  "05-09": "Ascension Day (varies)",
+  "05-19": "Pentecost (varies)",
+  "06-16": "Eid al-Adha (varies)",
+  "07-07": "Islamic New Year (varies)",
+  "10-03": "Rosh Hashanah (varies)",
+  "10-12": "Yom Kippur (varies)",
+  "10-17": "Sukkot (varies)",
+  "11-01": "All Saints' Day",
+  "11-02": "All Souls' Day",
+  "12-08": "Bodhi Day",
+  "12-24": "Christmas Eve",
+  "12-25": "Christmas Day"
+};
+
+const ALL_CULTURAL_EVENTS = {
+  ...NATIONAL_HOLIDAYS,
+  ...INTERNATIONAL_OBSERVANCES,
+  ...NOTABLE_ANNIVERSARIES,
+  ...RELIGIOUS_OBSERVANCES
+};
+
+function getCulturalEventsForDate(dateStr, countryCode) {
+  const key = dateStr.slice(5);
+  const events = [];
+  
+  // International observances (always shown)
+  if (INTERNATIONAL_OBSERVANCES[key]) {
+    events.push({ type: "observance", text: INTERNATIONAL_OBSERVANCES[key] });
+  }
+  
+  // Notable anniversaries
+  if (NOTABLE_ANNIVERSARIES[key]) {
+    events.push({ type: "anniversary", text: NOTABLE_ANNIVERSARIES[key] });
+  }
+  
+  // Religious observances
+  if (RELIGIOUS_OBSERVANCES[key]) {
+    events.push({ type: "religious", text: RELIGIOUS_OBSERVANCES[key] });
+  }
+  
+  // Country-specific holidays
+  if (countryCode && NATIONAL_HOLIDAYS[countryCode] && NATIONAL_HOLIDAYS[countryCode][key]) {
+    events.push({ type: "holiday", text: NATIONAL_HOLIDAYS[countryCode][key] });
+  }
+  
+  return events.length > 0 ? events : null;
+}
+
+function getOnThisDayText(dateStr, countryCode) {
+  const events = getCulturalEventsForDate(dateStr, countryCode);
+  if (!events || events.length === 0) return null;
+  
+  const texts = events.map(e => {
+    const icon = e.type === "holiday" ? "🎉" : e.type === "anniversary" ? "📜" : e.type === "religious" ? "⛪" : "🌍";
+    return `${icon} ${e.text}`;
+  });
+  return texts.join("; ");
+}
+
+// ============================================================
+// WIKIPEDIA ON THIS DAY FETCHER
+// ============================================================
+const WIKIPEDIA_ONTHISDAY_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/";
+
+function fetchWikipediaOnThisDay(month, day) {
+  const url = WIKIPEDIA_ONTHISDAY_URL + month + "/" + day;
+  try {
+    const res = UrlFetchApp.fetch(url, { 
+      muteHttpExceptions: true, 
+      timeout: 8000,
+      headers: { 'User-Agent': 'meteo-ics/1.0 (https://github.com/neohiro/meteo-ics)' }
+    });
+    if (res.getResponseCode() === 200) {
+      const data = JSON.parse(res.getContentText());
+      if (data && data.events && data.events.length > 0) {
+        const filtered = data.events
+          .filter(e => e.year && e.year !== "Year unknown")
+          .slice(0, 5)
+          .map(e => `${e.year}: ${e.text}`);
+        return filtered.join("; ");
+      }
+    }
+  } catch (e) {
+    Logger.log("Wikipedia OnThisDay fetch failed: " + e);
+  }
+  return null;
+}
+
+function fetchWikipediaOnThisDayCached(month, day) {
+  const cacheKey = "wiki_onthisday_" + month + "_" + day;
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty(cacheKey);
+  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+  
+  if (cached) {
+    const parts = cached.split("|");
+    if (parts.length === 2 && parts[1] === today) {
+      return parts[0];
+    }
+  }
+  
+  const fresh = fetchWikipediaOnThisDay(month, day);
+  if (fresh) {
+    props.setProperty(cacheKey, fresh + "|" + today);
+    return fresh;
+  }
+  return null;
+}
+
+function getWikipediaOnThisDayText(dateStr) {
+  const date = new Date(dateStr);
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return fetchWikipediaOnThisDayCached(month, day);
+}
+
+// ============================================================
+// BREAKING NEWS FETCHER (Current Day Only)
+// ============================================================
+const NEWS_API_URL = "https://newsapi.org/v2/top-headlines";
+
+function fetchBreakingNews(lat, lon) {
+  // NOTE: Requires NEWS_API_KEY in ScriptProperties for full functionality.
+  // Without API key, returns a static fallback message.
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const apiKey = props.getProperty("NEWS_API_KEY");
+    if (!apiKey) {
+      return "No breaking news API key configured. Set NEWS_API_KEY in ScriptProperties.";
+    }
+    const url = `${NEWS_API_URL}?q=weather&language=en&pageSize=3&apiKey=${apiKey}`;
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
+    if (res.getResponseCode() === 200) {
+      const data = JSON.parse(res.getContentText());
+      if (data.articles && data.articles.length > 0) {
+        return data.articles
+          .slice(0, 3)
+          .map(a => `${a.source.name}: ${a.title}`)
+          .join("; ");
+      }
+    }
+  } catch (e) {
+    Logger.log("Breaking news fetch failed: " + e);
+  }
+  return null;
+}
+
+function getBreakingNewsText(dateStr) {
+  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+  if (dateStr !== today) return null; // Only for current day
+  
+  // For demo purposes, using a generic location. In production, use actual lat/lon from loc.
+  return fetchBreakingNews(0, 0);
+}
 // State is encapsulated in a closure — no module-level lets that can collide
 // with other scripts deployed in the same Apps Script project.
 
@@ -966,6 +1432,12 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const astroEvent = getAstronomicalEventsForYear(targetDateStr, tgtDateObj.getUTCFullYear());
   const moonInfo = getMoonPhaseDetails(tgtDateObj);
 
+  // Get OnThisDay cultural events for this date
+  const countryCode = loc.country || "US";
+  const onThisDayText = getOnThisDayText(targetDateStr, countryCode);
+  const wikiOnThisDay = getWikipediaOnThisDayText(targetDateStr);
+  const breakingNews = getBreakingNewsText(targetDateStr);
+
   // A. Past Days (Verified Ground Truth)
   if (offset < 0) {
     if (!data.det || !data.det.time) return null;
@@ -1002,6 +1474,21 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         aqiVal !== null ? `• AQI: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : ``,
         astroEvent ? `• Event: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
+
+      onThisDayText ? [
+        `📜 ON THIS DAY`,
+        onThisDayText
+      ].join("\n") : ``,
+      
+      wikiOnThisDay ? [
+        `📖 WIKIPEDIA ON THIS DAY`,
+        wikiOnThisDay
+      ].join("\n") : ``,
+      
+      breakingNews ? [
+        `📰 BREAKING NEWS (TODAY)`,
+        breakingNews
+      ].join("\n") : ``,
 
       [
         `🎯 PREDICTION ACCURACY AUDIT`,
@@ -1170,6 +1657,16 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
     ].filter(Boolean).join("\n"),
 
+    onThisDayText ? [
+      `📜 ON THIS DAY`,
+      onThisDayText
+    ].join("\n") : ``,
+    
+    wikiOnThisDay ? [
+      `📖 WIKIPEDIA ON THIS DAY`,
+      wikiOnThisDay
+    ].join("\n") : ``,
+    
     [
       `🧪 AIR QUALITY & BIO`,
       aqiVal !== null ? `• AQI: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : `• AQI: Monitoring${aqSource ? " (" + aqSource + ")" : ""}`,
@@ -1436,10 +1933,55 @@ function assessRoadConditions(tMin, soilMin, rainVol, isC) {
 }
 
 function getAstronomicalEventsForYear(dateStr, year) {
-  var ev = ASTRONOMICAL_EVENTS[dateStr.slice(5)];
+  var ev = ASTRONOMICAL_EVENTS_DETAILED[dateStr.slice(5)];
   if (!ev) return null;
   if (year && /Meteor Peak/i.test(ev)) return ev + " (" + year + ")";
   return ev;
+}
+
+function getMeteorShowerInfo(dateStr) {
+  var key = dateStr.slice(5);
+  var shower = METEOR_SHOWERS[key];
+  if (!shower) return null;
+  return {
+    name: shower.name,
+    peak: shower.peak,
+    rate: shower.rate,
+    parent: shower.parent
+  };
+}
+
+function getLunarPhaseInfo(dateStr) {
+  var phase = LUNAR_PHASES[dateStr.slice(5)];
+  return phase || null;
+}
+
+function getEclipseInfo(dateStr) {
+  var key = dateStr.slice(5);
+  var solar = SOLAR_ECLIPSES[key];
+  var lunar = LUNAR_ECLIPSES[key];
+  if (!solar && !lunar) return null;
+  return {
+    solar: solar || null,
+    lunar: lunar || null
+  };
+}
+
+function getPlanetaryEventInfo(dateStr) {
+  var key = dateStr.slice(5);
+  var planetary = PLANETARY_EVENTS[key];
+  return planetary || null;
+}
+
+function getAuroraSeasonInfo(dateStr) {
+  var key = dateStr.slice(5);
+  var aurora = AURORA_SEASONS[key];
+  return aurora || null;
+}
+
+function getLunarPhase(dateStr) {
+  var phase = LUNAR_PHASES[dateStr.slice(5)];
+  return phase || null;
 }
 
 function getMoonPhaseDetails(date) {
