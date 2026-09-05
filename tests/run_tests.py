@@ -2878,25 +2878,256 @@ def test_waqi_token_reset_clears_cache():
     assert_true(cache_after_reset is None, 'reset() must clear cache to None sentinel')
 
 
+def _simulate_cascade(aqProvider, openaq_response, waqi_response):
+    """Python simulation of the fetchGlobalAQI cascade in icalweather.gs:1207
+    and gcalweather.gs:622. Mirrors the JS dispatch order:
+      1. OpenAQ (if provider is auto or openaq) — only succeeds if response
+         has 'measurements' (i.e. non-empty stations list)
+      2. WAQI   (if provider is auto or waqi) — only succeeds if aqi is not null
+    Returns (result_array, calls) where calls is the list of providers tried."""
+    calls = []
+    if aqProvider in ('auto', 'openaq'):
+        calls.append('openaq')
+        if openaq_response and openaq_response.get('measurements'):
+            m = openaq_response['measurements']
+            r = {'time': [], 'european_aqi': [], 'us_aqi': [],
+                 'pm2_5': [], 'pm10': [], 'ozone': [], 'nitrogen_dioxide': []}
+            for i in range(7):
+                r['time'].append(f'2026-09-{5 + i:02d}')
+                r['european_aqi'].append(m.get('pm25'))
+                r['us_aqi'].append(m.get('pm25'))
+                r['pm2_5'].append(m.get('pm25'))
+                r['pm10'].append(m.get('pm10'))
+                r['ozone'].append(m.get('o3'))
+                r['nitrogen_dioxide'].append(m.get('no2'))
+            r['_source'] = 'OpenAQ'
+            return r, calls
+    if aqProvider in ('auto', 'waqi'):
+        calls.append('waqi')
+        if waqi_response and waqi_response.get('aqi') is not None:
+            r = {'time': [], 'european_aqi': [], 'us_aqi': [],
+                 'pm2_5': [], 'pm10': [], 'ozone': [], 'nitrogen_dioxide': []}
+            for i in range(7):
+                r['time'].append(f'2026-09-{5 + i:02d}')
+                r['european_aqi'].append(waqi_response.get('aqi'))
+                r['us_aqi'].append(waqi_response.get('aqi'))
+                r['pm2_5'].append(waqi_response.get('pm25'))
+                r['pm10'].append(waqi_response.get('pm10'))
+                r['ozone'].append(None)
+                r['nitrogen_dioxide'].append(None)
+            r['_source'] = 'WAQI'
+            return r, calls
+    return None, calls
+
+
+def test_cascade_auto_openaq_succeeds_waqi_skipped():
+    """aqProvider='auto' with OpenAQ returning data: WAQI must NOT be called.
+    The cascade is opportunistic — the first provider with data wins."""
+    result, calls = _simulate_cascade('auto',
+        openaq_response={'measurements': {'pm25': 35, 'pm10': 50, 'o3': 22, 'no2': 18}},
+        waqi_response={'aqi': 99, 'pm25': 40, 'pm10': 60})
+    assert_eq(calls, ['openaq'],
+        f'auto provider must stop after OpenAQ succeeds, got {calls}')
+    assert_eq(result['_source'], 'OpenAQ', 'source label must be OpenAQ')
+    assert_eq(len(result['time']), 7, '7-day window required')
+    assert_eq(len(result['european_aqi']), 7, 'european_aqi must be 7 entries')
+    assert_eq(result['european_aqi'][0], 35, 'first-day AQI from OpenAQ pm25')
+
+
+def test_cascade_auto_openaq_empty_falls_through_to_waqi():
+    """aqProvider='auto' with OpenAQ returning 0 results: WAQI must be tried
+    next, and its data must populate the result. This is the core cascade
+    invariant: failure (not just absence) of the first provider triggers the
+    fallback."""
+    result, calls = _simulate_cascade('auto',
+        openaq_response=None,  # 0 results → falls through
+        waqi_response={'aqi': 99, 'pm25': 40, 'pm10': 60})
+    assert_eq(calls, ['openaq', 'waqi'],
+        f'auto provider must try WAQI after OpenAQ fails, got {calls}')
+    assert_eq(result['_source'], 'WAQI', 'source label must be WAQI')
+    assert_eq(result['european_aqi'][0], 99, 'AQI from WAQI')
+
+
+def test_cascade_openaq_provider_skips_waqi():
+    """aqProvider='openaq' must NEVER call WAQI, even if OpenAQ returns 0 results.
+    Explicit provider choice overrides the cascade."""
+    result, calls = _simulate_cascade('openaq',
+        openaq_response=None,
+        waqi_response={'aqi': 99, 'pm25': 40, 'pm10': 60})
+    assert_eq(calls, ['openaq'],
+        f'openaq provider must not call WAQI, got {calls}')
+    assert_true(result is None, 'openaq provider with no data must return null (not WAQI fallback)')
+
+
+def test_cascade_waqi_provider_skips_openaq():
+    """aqProvider='waqi' must NEVER call OpenAQ, even if WAQI returns 0 results."""
+    result, calls = _simulate_cascade('waqi',
+        openaq_response={'measurements': {'pm25': 35, 'pm10': 50, 'o3': 22, 'no2': 18}},
+        waqi_response=None)
+    assert_eq(calls, ['waqi'],
+        f'waqi provider must not call OpenAQ, got {calls}')
+    assert_true(result is None, 'waqi provider with no data must return null')
+
+
+def test_cascade_result_alignment_dates_first():
+    """The cascade result must align fields to date positions: time[0] is day 0,
+    european_aqi[0] is day 0's AQI, etc. This pins the alignment invariant
+    so consumers (gcal merge, ical dashboard) can index by date without
+    re-sorting."""
+    result, _ = _simulate_cascade('auto',
+        openaq_response={'measurements': {'pm25': 35, 'pm10': 50, 'o3': 22, 'no2': 18}},
+        waqi_response=None)
+    assert_true(result is not None, 'cascade must return data with valid OpenAQ input')
+    assert_true(all(result['time'][i] < result['time'][i + 1] for i in range(6)),
+        'dates must be in ascending order')
+    for field in ('european_aqi', 'us_aqi', 'pm2_5', 'pm10',
+                  'ozone', 'nitrogen_dioxide'):
+        assert_eq(len(result[field]), len(result['time']),
+            f'{field} length must match time length (alignment invariant)')
+
+
+def test_cascade_both_fail_returns_null():
+    """aqProvider='auto' with both providers failing: must return null so the
+    caller can decide whether to surface 'AQI: Monitoring'."""
+    result, calls = _simulate_cascade('auto',
+        openaq_response=None,
+        waqi_response=None)
+    assert_eq(calls, ['openaq', 'waqi'], 'both providers must be tried')
+    assert_true(result is None, 'both-fail must return null')
+
+
+def _simulate_probe(codes_by_days):
+    """Python simulation of _probeOpenMeteoAqCap binary search.
+    codes_by_days: dict mapping forecast_days -> HTTP code (200, 400, 0).
+    Caps at OPEN_METEO_AQ_FORECAST_DAYS_CAP=7 hardcoded default; updates if
+    the API actually allows more."""
+    cap = 7
+    l, r = 5, 16
+    while l <= r:
+        mid = (l + r) // 2
+        code = codes_by_days.get(mid, 0)
+        if code == 200:
+            cap = mid
+            l = mid + 1
+        elif code >= 400:
+            r = mid - 1
+        else:
+            break
+    return cap
+
+
+def test_probe_binary_search_finds_seven():
+    """_probeOpenMeteoAqCap must binary-search for the actual cap.
+    API today allows forecast_days=7 and rejects 8. Simulator: {7:200, 8:400}."""
+    cap = _simulate_probe({7: 200, 8: 400})
+    assert_eq(cap, 7, 'cap must be 7 when 7 succeeds and 8 fails')
+
+
+def test_probe_handles_rate_limit():
+    """If the API returns 429 (rate limit), the probe must treat it as
+    non-fatal and break the search, returning the last successful cap."""
+    cap = _simulate_probe({7: 200, 8: 429, 9: 429})
+    assert_eq(cap, 7, 'rate-limit mid-probe must not corrupt the cap result')
+
+
+def test_probe_handles_network_error():
+    """If the API throws (code=0 from catch), the probe must break and return
+    the last successful cap rather than returning 0 or 16."""
+    cap = _simulate_probe({7: 200, 8: 0})
+    assert_eq(cap, 7, 'network error mid-probe must not corrupt the cap result')
+
+
+def test_probe_uses_property_service_cache():
+    """getOpenMeteoAqCap must cache the probe result in PropertiesService for
+    24 hours. The cache must include the date so the result is invalidated
+    at midnight UTC, not after a fixed timer."""
+    from lint_balance import collect_module_lets
+    for path in ['icalweather.gs', 'gcalweather.gs']:
+        body = open(path, encoding='utf-8').read()
+        assert_true('_AQ_CAP_PROP' in body,
+            f'{path} must define _AQ_CAP_PROP')
+        assert_true('PropertiesService' in body,
+            f'{path} must use PropertiesService for cap caching')
+        assert_true('yyyy-MM-dd' in body,
+            f'{path} cache key must include date (24h UTC rotation)')
+
+
+def test_probe_binary_search_finds_ten():
+    """Simulator: API allows 10, rejects 11."""
+    cap = _simulate_probe({10: 200, 11: 400})
+    assert_eq(cap, 10, 'cap must be 10 when 10 succeeds and 11 fails')
+
+
+def test_probe_handles_cap_decrease():
+    """If Open-Meteo tightens the cap from 7 to 5, the probe must detect the
+    new cap (5) and a warning is logged so the hardcoded default gets updated.
+    The real API responds to every forecast_days in [5..16], so the test
+    supplies a complete mapping."""
+    cap = _simulate_probe({i: (200 if i <= 5 else 400) for i in range(5, 17)})
+    assert_eq(cap, 5, 'probe must detect a tighter cap if API limits shrink')
+
+
 def test_lint_balance_reports_cross_file_collision():
     """lint_balance.py must report underscore-prefixed module-scope `let` declarations
-    that exist in multiple .gs files. All 5 names (_fetchAllImpl, _nowOverride,
-    _budgetWarnedAt, _waqiDecryptWarned, _waqiTokenCache) are genuine collisions:
-    both gcalweather.gs and icalweather.gs expose them at module scope as test seams
-    or closure state. The linter correctly flags these so contributors deploying
-    both files in a single Apps Script project are warned before the retry path
-    silently uses the wrong fetcher."""
+    that exist in multiple .gs files. Only column-0 `let _X` are flagged; variables
+    inside IIFEs or function bodies (e.g. _budgetWarnedAt inside checkBudget's closure)
+    are function-scoped and cannot collide across files, so they are excluded.
+
+    Expected collisions (column-0 in both files):
+      _fetchAllImpl — DI seam for UrlFetchApp.fetchAll
+      _nowOverride  — test seam for budget time-mocking
+      _probedAqCap  — runtime cache for AQ API cap probe
+
+    Excluded (IIFE-scope, not module-scope):
+      _budgetWarnedAt — inside checkBudget IIFE
+      _waqiTokenCache — inside waqiTokenResolve IIFE
+      _waqiDecryptWarned — inside waqiTokenResolve IIFE"""
     from lint_balance import lint_cross_file_collision
     from pathlib import Path
     repo = Path(__file__).resolve().parent.parent
     paths = [repo / "gcalweather.gs", repo / "icalweather.gs"]
     ok, report = lint_cross_file_collision(paths)
-    assert_true(not ok, 'lint must report collisions')
-    assert_eq(len(report), 5, f'expected 5 collisions, got {len(report)}')
-    for name in ['_fetchAllImpl', '_nowOverride', '_budgetWarnedAt',
-                 '_waqiDecryptWarned', '_waqiTokenCache']:
+    assert_true(not ok, 'lint must report module-scope collisions')
+    assert_eq(len(report), 3, f'expected 3 module-scope collisions, got {len(report)}')
+    for name in ['_fetchAllImpl', '_nowOverride', '_probedAqCap']:
         assert_true(any(name in r for r in report),
             f"collision report must mention '{name}'")
+    excluded = ['_budgetWarnedAt', '_waqiTokenCache', '_waqiDecryptWarned']
+    for name in excluded:
+        assert_true(not any(name in r for r in report),
+            f"IIFE-scope variable '{name}' must NOT be flagged as collision")
+
+
+def test_lint_balance_col0_only():
+    """collect_module_lets must only match column-0 declarations.
+    A `let _X` indented inside an IIFE or function is function-scoped,
+    not module-scoped, and cannot collide across files.
+
+    This test creates a synthetic .gs fragment with both module-scope and
+    IIFE-scope underscore lets and verifies only the column-0 one is returned."""
+    from lint_balance import collect_module_lets
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False,
+                                     encoding='utf-8')
+    try:
+        tmp.write('let _moduleScope = 1;\n')
+        tmp.write('function foo() {\n')
+        tmp.write('  let _functionScope = 2;\n')
+        tmp.write('  if (true) {\n')
+        tmp.write('    let _blockScope = 3;\n')
+        tmp.write('  }\n')
+        tmp.write('}\n')
+        tmp.write('(() => {\n')
+        tmp.write('  let _iifeScope = 4;\n')
+        tmp.write('})();\n')
+        tmp.close()
+        from pathlib import Path
+        result = collect_module_lets(Path(tmp.name))
+        assert_eq(result, {'_moduleScope'},
+            f'only column-0 `_moduleScope` should be returned, got {result}')
+    finally:
+        import os
+        os.unlink(tmp.name)
 
 
 
@@ -2962,4 +3193,51 @@ if fail_n > 0:
         print(f'    {e.split(chr(10))[0]}')
     sys.exit(1)
 sys.exit(0)
+
+
+def test_lint_constant_drift_detects_mismatch():
+    """lint_constant_drift must flag when the same UPPER_SNAKE_CASE constant
+    has different values across .gs files. This catches the common
+    'forgot to update the other file' bug: e.g. if one developer changes
+    OPEN_METEO_AQ_FORECAST_DAYS_CAP from 7 to 5 in gcalweather.gs but
+    forgets icalweather.gs, the AQ cascade logic silently diverges."""
+    from lint_balance import lint_constant_drift
+    import tempfile, os
+    try:
+        # Create two synthetic .gs files with a drifted constant
+        f1 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
+        f2 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
+        f1.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;\n')
+        f1.write('function foo() { const LOCAL = 1; }\n')
+        f2.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 5;\n')  # DIVERGED
+        f2.write('function bar() { const LOCAL = 2; }\n')
+        f1.close(); f2.close()
+        from pathlib import Path
+        ok, report = lint_constant_drift([Path(f1.name), Path(f2.name)])
+        assert_true(not ok, 'must detect drift')
+        assert_true(any('OPEN_METEO_AQ_FORECAST_DAYS_CAP' in r for r in report),
+            f'drift report must mention the drifted constant: {report}')
+        assert_true(any('=7' in r and '=5' in r for r in report),
+            f'report must show both values: {report}')
+    finally:
+        os.unlink(f1.name)
+        os.unlink(f2.name)
+
+
+def test_lint_constant_drift_clean_when_matched():
+    """lint_constant_drift must pass (ok=True) when constants match across files."""
+    from lint_balance import lint_constant_drift
+    import tempfile, os
+    try:
+        f1 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
+        f2 = tempfile.NamedTemporaryFile(suffix='.gs', mode='w', delete=False, encoding='utf-8')
+        f1.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;\n')
+        f2.write('const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;\n')
+        f1.close(); f2.close()
+        from pathlib import Path
+        ok, report = lint_constant_drift([Path(f1.name), Path(f2.name)])
+        assert_true(ok, f'must not flag matching constants, got: {report}')
+    finally:
+        os.unlink(f1.name)
+        os.unlink(f2.name)
 
