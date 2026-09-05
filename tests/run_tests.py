@@ -3326,6 +3326,20 @@ def test_ical_onthisday_integrated_in_generateIcsFeed():
     assert_true('getBreakingNewsText' in body, 'generateIcsFeed must call getBreakingNewsText')
 
 
+def test_ical_translation_keys_for_onthisday():
+    """icalweather.gs must have translation tables for OnThisDay sections."""
+    assert_true('const T_ONTHISDAY' in ICAL, 'T_ONTHISDAY translation table missing')
+    assert_true('const T_WIKI' in ICAL, 'T_WIKI translation table missing')
+    assert_true('const T_BREAKING' in ICAL, 'T_BREAKING translation table missing')
+    # tSection must include these keys
+    fn = re.search(r'function tSection\([\s\S]*?\n\}', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('secOnThisDay' in body, 'tSection must include secOnThisDay')
+    assert_true('secWiki' in body, 'tSection must include secWiki')
+    assert_true('secBreaking' in body, 'tSection must include secBreaking')
+
+
 def test_sections_filter_boolean_before_join():
     """gcalweather.gs sections array must filter empty values before joining."""
     fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)

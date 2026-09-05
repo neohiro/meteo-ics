@@ -288,6 +288,9 @@ const T_AUDIT = { en:"MODEL AUDIT",                zh:"模型校准",           
 const T_ROAD  = { en:"ROAD SAFETY",                zh:"道路安全",               hi:"सड़क सुरक्षा",                  es:"SEGURIDAD VIAL",             fr:"SÉCURITÉ ROUTIÈRE",          ar:"سلامة الطرق",                  de:"STRAßENSICHERHEIT",          nl:"WEGVEILIGHEID" };
 const T_ADV   = { en:"ACTIONABLE ADVICE",           zh:"行动建议",               hi:"सुझाव",                        es:"CONSEJOS PRÁCTICOS",         fr:"CONSEILS PRATIQUES",         ar:"نصائح عملية",                  de:"PRAKTISCHE TIPPS",           nl:"ADVIES" };
 const T_SOURCES = { en:"SOURCES",                    zh:"数据来源",               hi:"स्रोत",                         es:"FUENTES",                    fr:"SOURCES",                    ar:"المصادر",                    de:"QUELLEN",                     nl:"BRONNEN" };
+const T_ONTHISDAY = { en:"ON THIS DAY",               zh:"今日回顾",               hi:"आज के दिन",                    es:"EN ESTE DÍA",               fr:"CE JOUR-LÀ",                ar:"في مثل هذا اليوم",              de:"AN DIESEM TAG",              nl:"OP DEZE DAG" };
+const T_WIKI = { en:"WIKIPEDIA ON THIS DAY",         zh:"维基今日",               hi:"विकिपीडिया पर इस दिन",        es:"WIKIPEDIA EN ESTE DÍA",     fr:"WIKIPEDIA CE JOUR-LÀ",      ar:"ويكيبيديا في مثل هذا اليوم",  de:"WIKIPEDIA AN DIESEM TAG",   nl:"WIKIPEDIA OP DEZE DAG" };
+const T_BREAKING = { en:"BREAKING NEWS (TODAY)",      zh:"今日突发新闻",           hi:"आज की ताज़ा खबर",             es:"ÚLTIMAS NOTICIAS (HOY)",    fr:"DERNIÈRES NOUVELLES (AUJ.)", ar:"الأخبار العاجلة (اليوم)",    de:"BREAKING NEWS (HEUTE)",       nl:"NIEUWS VANDAAG" };
 const T_L = {
   pin:      { en:"Pin",                          zh:"位置",                  hi:"स्थान",                       es:"Ubicación",                fr:"Lieu",                        ar:"الموقع",                    de:"Ort",                         nl:"Plaats" },
   cal:      { en:"Calendar",                     zh:"日历",                  hi:"कैलेंडर",                     es:"Calendario",                fr:"Calendrier",                  ar:"التقويم",                   de:"Kalender",                    nl:"Kalender" },
@@ -405,7 +408,7 @@ function t(key, lang) {
 function tSection(key, lang) {
   lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
   if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
-  const sections = { secTemp:T_TEMP, secSun:T_SEC, secAir:T_AIR, secAgg:T_AGG, secAudit:T_AUDIT, secRoad:T_ROAD, secAdvice:T_ADV, secSources:T_SOURCES };
+  const sections = { secTemp:T_TEMP, secSun:T_SEC, secAir:T_AIR, secAgg:T_AGG, secAudit:T_AUDIT, secRoad:T_ROAD, secAdvice:T_ADV, secSources:T_SOURCES, secOnThisDay:T_ONTHISDAY, secWiki:T_WIKI, secBreaking:T_BREAKING };
   const map = sections[key];
   if (!map) return key;
   return map[lang] || map.en || key;
@@ -1511,21 +1514,21 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       
       if (onThisDayText) {
         sections.push([
-          `${tSection("secOnThisDay", lang) || "📜 ON THIS DAY"}`,
+          `📜 ${tSection("secOnThisDay", lang)}`,
           onThisDayText
         ].join("\n"));
       }
       
       if (wikiOnThisDay) {
         sections.push([
-          `${tSection("secWiki", lang) || "📖 WIKIPEDIA ON THIS DAY"}`,
+          `📖 ${tSection("secWiki", lang)}`,
           wikiOnThisDay
         ].join("\n"));
       }
       
       if (breakingNews) {
         sections.push([
-          `${tSection("secBreaking", lang) || "📰 BREAKING NEWS (TODAY)"}`,
+          `📰 ${tSection("secBreaking", lang)}`,
           breakingNews
         ].join("\n"));
       }
