@@ -826,7 +826,9 @@ const RELIGIOUS_OBSERVANCES = {
 };
 
 function getCulturalEventsForDate(dateStr, countryCode) {
+  if (!dateStr || typeof dateStr !== "string") return null;
   const key = dateStr.slice(5);
+  if (key.length !== 5 || !/^\d{2}-\d{2}$/.test(key)) return null;
   const events = [];
   
   if (INTERNATIONAL_OBSERVANCES[key]) {
@@ -849,14 +851,17 @@ function getCulturalEventsForDate(dateStr, countryCode) {
 }
 
 function getOnThisDayText(dateStr, countryCode) {
+  if (!dateStr) return null;
   const events = getCulturalEventsForDate(dateStr, countryCode);
   if (!events || events.length === 0) return null;
   
-  const texts = events.map(e => {
-    const icon = e.type === "holiday" ? "🎉" : e.type === "anniversary" ? "📜" : e.type === "religious" ? "⛪" : "🌍";
-    return `${icon} ${e.text}`;
-  });
-  return texts.join("; ");
+  const texts = events
+    .filter(e => e && e.text)
+    .map(e => {
+      const icon = e.type === "holiday" ? "🎉" : e.type === "anniversary" ? "📜" : e.type === "religious" ? "⛪" : "🌍";
+      return `${icon} ${e.text}`;
+    });
+  return texts.length > 0 ? texts.join("; ") : null;
 }
 
 // ============================================================
@@ -865,6 +870,10 @@ function getOnThisDayText(dateStr, countryCode) {
 const WIKIPEDIA_ONTHISDAY_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/";
 
 function fetchWikipediaOnThisDay(month, day) {
+  // Validate month/day inputs
+  if (!/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) {
+    return null;
+  }
   // Check in-memory cache first for execution deduplication
   const inMemKey = month + "_" + day;
   if (_wikiCache[inMemKey] !== undefined) {
@@ -903,9 +912,14 @@ function fetchWikipediaOnThisDayCached(month, day) {
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   
   if (cached) {
-    const parts = cached.split("|");
-    if (parts.length === 2 && parts[1] === today) {
-      return parts[0];
+    // Split on LAST pipe only to handle text containing pipe characters
+    const lastPipeIdx = cached.lastIndexOf("|");
+    if (lastPipeIdx > 0) {
+      const cachedText = cached.substring(0, lastPipeIdx);
+      const cachedDay = cached.substring(lastPipeIdx + 1);
+      if (cachedDay === today) {
+        return cachedText;
+      }
     }
   }
   
@@ -918,7 +932,11 @@ function fetchWikipediaOnThisDayCached(month, day) {
 }
 
 function getWikipediaOnThisDayText(dateStr) {
+  if (!dateStr || typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return null;
+  }
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return null;
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
   return fetchWikipediaOnThisDayCached(month, day);
@@ -940,9 +958,15 @@ function fetchBreakingNews() {
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
     if (res.getResponseCode() === 200) {
       const data = JSON.parse(res.getContentText());
-      if (data.articles && data.articles.length > 0) {
+      // NewsAPI returns status:"error" for API errors even with HTTP 200
+      if (data.status === "error") {
+        Logger.log("Breaking news API error: " + (data.message || "unknown"));
+        return null;
+      }
+      if (data.articles && Array.isArray(data.articles) && data.articles.length > 0) {
         return data.articles
           .slice(0, 3)
+          .filter(a => a && a.title && a.source && a.source.name)
           .map(a => `${a.source.name}: ${a.title}`)
           .join("; ");
       }
@@ -955,7 +979,7 @@ function fetchBreakingNews() {
 
 function getBreakingNewsText(dateStr) {
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
-  if (dateStr !== today) return null;
+  if (!dateStr || dateStr !== today) return null; // Only for current day
   return fetchBreakingNews();
 }
 

@@ -3453,6 +3453,110 @@ def test_astronomical_enhanced_with_checks():
 
 
 # =============================================================================
+# Robustness / input-validation tests
+# =============================================================================
+group('OnThisDay robustness')
+
+
+def test_getWikipediaOnThisDayText_validates_input():
+    """getWikipediaOnThisDayText must reject invalid dateStr to avoid NaN month/day 404s."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function getWikipediaOnThisDayText\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} getWikipediaOnThisDayText missing')
+        body = fn.group(0)
+        # Must validate the dateStr format before parsing
+        assert_true('/^\\d{4}-\\d{2}-\\d{2}$/' in body or 'isNaN' in body,
+            f'{name} getWikipediaOnThisDayText must validate input')
+
+
+def test_getBreakingNewsText_validates_input():
+    """getBreakingNewsText must handle null/empty dateStr without crash."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} getBreakingNewsText missing')
+        body = fn.group(0)
+        # Must check !dateStr before comparison
+        assert_true('!dateStr' in body,
+            f'{name} getBreakingNewsText must guard against null/empty dateStr')
+
+
+def test_fetchBreakingNews_handles_api_error_status():
+    """fetchBreakingNews must check NewsAPI status:error field to avoid silent failures."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} fetchBreakingNews missing')
+        body = fn.group(0)
+        # Must check data.status === "error"
+        assert_true('status === "error"' in body or 'status=="error"' in body,
+            f'{name} fetchBreakingNews must handle NewsAPI error status')
+        # Must filter articles for required fields
+        assert_true('.title' in body and '.source' in body,
+            f'{name} fetchBreakingNews must validate article shape')
+
+
+def test_fetchWikipediaOnThisDayCached_handles_pipe_in_text():
+    """Cache must split on last pipe only (text may contain pipe characters)."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function fetchWikipediaOnThisDayCached\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} fetchWikipediaOnThisDayCached missing')
+        body = fn.group(0)
+        # Must use lastIndexOf for safe splitting
+        assert_true('lastIndexOf' in body,
+            f'{name} cache parser must use lastIndexOf to handle pipe chars in text')
+
+
+def test_fetchWikipediaOnThisDay_validates_month_day():
+    """fetchWikipediaOnThisDay must validate month/day are 2-digit strings."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function fetchWikipediaOnThisDay\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} fetchWikipediaOnThisDay missing')
+        body = fn.group(0)
+        # Must validate /^\d{2}$/ before constructing URL
+        assert_true('/^\\\\d{2}$/' in body or '/^\\d{2}$/' in body or 'd{2}$/' in body,
+            f'{name} fetchWikipediaOnThisDay must validate month/day format')
+
+
+def test_getCulturalEventsForDate_validates_input():
+    """getCulturalEventsForDate must reject null/non-string input and bad key length."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function getCulturalEventsForDate\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} getCulturalEventsForDate missing')
+        body = fn.group(0)
+        # Must check dateStr is a string
+        assert_true('typeof dateStr' in body or 'dateStr.slice' in body,
+            f'{name} getCulturalEventsForDate must validate input')
+        # Must validate key format
+        assert_true('\\d{2}-\\d{2}' in body,
+            f'{name} getCulturalEventsForDate must validate MM-DD format')
+
+
+def test_getOnThisDayText_filters_null_events():
+    """getOnThisDayText must filter null/invalid events before mapping."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        fn = re.search(r'function getOnThisDayText\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} getOnThisDayText missing')
+        body = fn.group(0)
+        # Must filter e && e.text to avoid crash on bad data
+        assert_true('e.text' in body and 'filter' in body,
+            f'{name} getOnThisDayText must filter invalid events')
+
+
+def test_buildDashboardPayload_guards_null_inputs():
+    """buildDashboardPayload must guard against null loc, data, or malformed targetDateStr."""
+    fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
+    assert_true(fn is not None, 'buildDashboardPayload missing')
+    body = fn.group(0)
+    # Must have early return for null loc or data
+    assert_true('!loc' in body or '!loc ||' in body,
+        'buildDashboardPayload must guard against null loc')
+    assert_true('!data' in body or '!loc ||' in body or '!data ||' in body,
+        'buildDashboardPayload must guard against null data')
+    # Must validate targetDateStr format
+    assert_true('/^\\d{4}-\\d{2}-\\d{2}$/' in body,
+        'buildDashboardPayload must validate targetDateStr format')
+
+
+# =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================
 for name, fn in list(globals().items()):
