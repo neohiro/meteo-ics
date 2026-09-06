@@ -150,6 +150,112 @@ const _WIKI_CACHE_MAX = 50; // Cap in-memory Wikipedia cache per execution
 let _wikiCache = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
 const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
+// ============================================================
+// CIRCUIT BREAKER — prevents cascade failures from API outages
+// ============================================================
+const CB = (() => {
+  const STATES = { CLOSED: 0, OPEN: 1, HALF_OPEN: 2 };
+  const defaults = {
+    failureThreshold: 3,     // failures before opening
+    recoveryTimeoutMs: 30000, // 30s before testing recovery
+    halfOpenMaxCalls: 2,    // test calls in half-open before deciding
+    backoffMultiplier: 2,    // exponential backoff base
+    maxBackoffMs: 60000     // max 60s backoff
+  };
+
+  const circuits = {};
+
+  const create = (name, opts = {}) => {
+    const cfg = { ...defaults, ...opts };
+    circuits[name] = {
+      state: STATES.CLOSED,
+      failures: 0,
+      lastFailureTime: 0,
+      halfOpenCalls: 0,
+      backoffMs: 0
+    };
+  };
+
+  const _recordSuccess = (name) => {
+    const cb = circuits[name];
+    if (!cb) return;
+    if (cb.state === STATES.HALF_OPEN) {
+      cb.halfOpenCalls++;
+      if (cb.halfOpenCalls >= defaults.halfOpenMaxCalls) {
+        cb.state = STATES.CLOSED;
+        cb.failures = 0;
+        cb.halfOpenCalls = 0;
+        cb.backoffMs = 0;
+        Logger.log(`Circuit [${name}] CLOSED (recovered after ${cb.halfOpenCalls} half-open successes)`);
+      }
+    } else if (cb.state === STATES.CLOSED) {
+      cb.failures = 0;
+      cb.backoffMs = 0;
+    }
+  };
+
+  const _recordFailure = (name) => {
+    const cb = circuits[name];
+    if (!cb) return;
+    cb.lastFailureTime = Date.now();
+    if (cb.state === STATES.HALF_OPEN) {
+      cb.state = STATES.OPEN;
+      cb.halfOpenCalls = 0;
+      cb.backoffMs = Math.min(cb.backoffMs * defaults.backoffMultiplier || 1000, defaults.maxBackoffMs);
+      Logger.log(`Circuit [${name}] OPEN (half-open failure, backoff ${cb.backoffMs}ms)`);
+    } else {
+      cb.failures++;
+      if (cb.failures >= defaults.failureThreshold) {
+        cb.state = STATES.OPEN;
+        cb.backoffMs = 1000;
+        Logger.log(`Circuit [${name}] OPEN (${cb.failures} failures)`);
+      }
+    }
+  };
+
+  const isCallAllowed = (name) => {
+    const cb = circuits[name];
+    if (!cb) return true;
+
+    if (cb.state === STATES.CLOSED) return true;
+
+    if (cb.state === STATES.OPEN) {
+      const elapsed = Date.now() - cb.lastFailureTime;
+      if (elapsed >= Math.max(cb.backoffMs, defaults.recoveryTimeoutMs)) {
+        cb.state = STATES.HALF_OPEN;
+        cb.halfOpenCalls = 0;
+        Logger.log(`Circuit [${name}] HALF_OPEN (recovery timeout elapsed)`);
+        return true;
+      }
+      return false;
+    }
+
+    if (cb.state === STATES.HALF_OPEN) {
+      return cb.halfOpenCalls < defaults.halfOpenMaxCalls;
+    }
+
+    return true;
+  };
+
+  const recordSuccess = (name) => _recordSuccess(name);
+  const recordFailure = (name) => _recordFailure(name);
+
+  const getState = (name) => {
+    const cb = circuits[name];
+    if (!cb) return 'UNKNOWN';
+    return ['CLOSED', 'OPEN', 'HALF_OPEN'][cb.state];
+  };
+
+  // Initialize standard circuits
+  create('openmeteo');
+  create('wikipedia');
+  create('newsapi');
+  create('openaq');
+  create('waqi');
+
+  return { create, isCallAllowed, recordSuccess, recordFailure, getState, STATES };
+})();
+
 const { budgetStart, budgetSetNow, checkBudget } = (() => {
   const APPS_SCRIPT_BUDGET_MS = 345000;
   const BUDGET_WARN_AT_MS = [240000, 300000];
@@ -253,8 +359,16 @@ const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
 function fetchAllWithRetry(requests) {
   const total = requests.length;
   const responses = new Array(total);
+
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('openmeteo')) {
+    Logger.log("Circuit [openmeteo] OPEN — skipping all requests");
+    return responses.map(() => ({ getResponseCode: () => 503, getContentText: () => '{"error":"circuit_open"}' }));
+  }
+
   let pending = requests.map((_, i) => i);
   let attempt = 0;
+  let hasFailure = false;
   while (attempt < FETCH_MAX_RETRIES && pending.length > 0) {
     attempt++;
     const batch = pending.map(i => requests[i]);
@@ -269,13 +383,22 @@ function fetchAllWithRetry(requests) {
         Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — retry ${attempt + 1}/${FETCH_MAX_RETRIES}`);
         nextPending.push(globalIdx);
       } else {
-        if (code >= 400) Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — giving up`);
+        if (code >= 400) {
+          Logger.log(`fetchAllWithRetry: HTTP ${code} — ${url} — giving up`);
+          hasFailure = true;
+        }
       }
     });
     pending = nextPending;
     if (pending.length > 0 && attempt < FETCH_MAX_RETRIES) {
       Utilities.sleep(Math.pow(2, attempt) * 500);
     }
+  }
+  // Record circuit state based on outcome
+  if (hasFailure) {
+    CB.recordFailure('openmeteo');
+  } else {
+    CB.recordSuccess('openmeteo');
   }
   return responses;
 }
@@ -884,6 +1007,11 @@ function fetchWikipediaOnThisDay(month, day) {
   if (_wikiCache[inMemKey] !== undefined) {
     return _wikiCache[inMemKey];
   }
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('wikipedia')) {
+    Logger.log("Circuit [wikipedia] OPEN — skipping fetch");
+    return null;
+  }
   const url = WIKIPEDIA_ONTHISDAY_URL + month + "/" + day;
   try {
     const res = UrlFetchApp.fetch(url, {
@@ -891,7 +1019,9 @@ function fetchWikipediaOnThisDay(month, day) {
       timeout: 8000,
       headers: { 'User-Agent': 'meteo-ics/1.0 (https://github.com/neohiro/meteo-ics)' }
     });
-    if (res.getResponseCode() === 200) {
+    const code = res.getResponseCode();
+    if (code === 200) {
+      CB.recordSuccess('wikipedia');
       const data = JSON.parse(res.getContentText());
       if (data && data.events && data.events.length > 0) {
         const filtered = data.events
@@ -907,8 +1037,12 @@ function fetchWikipediaOnThisDay(month, day) {
         _wikiCache[inMemKey] = result;
         return result;
       }
+    } else {
+      CB.recordFailure('wikipedia');
+      Logger.log(`Wikipedia OnThisDay fetch HTTP ${code} — circuit failure recorded`);
     }
   } catch (e) {
+    CB.recordFailure('wikipedia');
     Logger.log("Wikipedia OnThisDay fetch failed: " + e);
   }
   // Don't cache failures to allow retry on next call
@@ -957,6 +1091,11 @@ function getWikipediaOnThisDayText(dateStr) {
 const NEWS_API_URL = "https://newsapi.org/v2/top-headlines";
 
 function fetchBreakingNews() {
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('newsapi')) {
+    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
+    return null;
+  }
   try {
     const apiKey = _scriptProps.getProperty("NEWS_API_KEY");
     if (!apiKey) {
@@ -964,7 +1103,9 @@ function fetchBreakingNews() {
     }
     const url = `${NEWS_API_URL}?q=weather&language=en&pageSize=3&apiKey=${apiKey}`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
-    if (res.getResponseCode() === 200) {
+    const code = res.getResponseCode();
+    if (code === 200) {
+      CB.recordSuccess('newsapi');
       const data = JSON.parse(res.getContentText());
       // NewsAPI returns status:"error" for API errors even with HTTP 200
       if (data.status === "error") {
@@ -978,8 +1119,12 @@ function fetchBreakingNews() {
           .map(a => `${a.source.name}: ${a.title}`)
           .join("; ");
       }
+    } else {
+      CB.recordFailure('newsapi');
+      Logger.log(`Breaking news fetch HTTP ${code} — circuit failure recorded`);
     }
   } catch (e) {
+    CB.recordFailure('newsapi');
     Logger.log("Breaking news fetch failed: " + e);
   }
   return null;
@@ -1816,91 +1961,109 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
   }
 
   if (aqProvider === "auto" || aqProvider === "openaq") {
-    try {
-      const res = UrlFetchApp.fetch(
-        `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&radius=${radius}&limit=1`,
-        { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
-      );
-      if (res.getResponseCode() === 200) {
-        const json = JSON.parse(res.getContentText());
-        if (json.results && json.results.length > 0) {
-          const measurements = json.results[0].measurements || [];
-          const now = new Date();
-          dates.forEach(d => r.time.push(d));
-          const openaqVals = {};
-          measurements.forEach(m => {
-            const param = (m.parameter || "").toLowerCase();
-            if (openaqVals[param] === undefined || (m.lastUpdated && new Date(m.lastUpdated) > new Date(openaqVals[param + "_ts"] || 0))) {
-              openaqVals[param] = m.value;
-              openaqVals[param + "_ts"] = m.lastUpdated;
-            }
-          });
-          // OpenAQ v3 parameter names vary by station (pm25 vs pm2.5,
-          // o3 vs ozone, no2 vs nitrogen_dioxide). Pick the first
-          // non-null value across all known aliases.
-          const fill = v => (v !== undefined && v !== null && !isNaN(v) ? Math.round(v) : null);
-          const firstDefined = (...keys) => {
-            for (const k of keys) { const v = fill(openaqVals[k]); if (v !== null) return v; }
-            return null;
-          };
-          const pm25 = firstDefined("pm25", "pm2.5");
-          const pm10 = firstDefined("pm10");
-          const o3   = firstDefined("o3", "ozone");
-          const no2  = firstDefined("no2", "nitrogen_dioxide");
-          dates.forEach(() => {
-            r.european_aqi.push(pm25);
-            r.us_aqi.push(pm25);
-            r.pm2_5.push(pm25);
-            r.pm10.push(pm10);
-            r.ozone.push(o3);
-            r.nitrogen_dioxide.push(no2);
-            r.dust.push(null);
-          });
-          return r;
+    // Circuit breaker: skip if open
+    if (!CB.isCallAllowed('openaq')) {
+      Logger.log("Circuit [openaq] OPEN — skipping OpenAQ fetch");
+    } else {
+      try {
+        const res = UrlFetchApp.fetch(
+          `${OPENAQ_LATEST_ENDPOINT}?coordinates=${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}&radius=${radius}&limit=1`,
+          { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
+        );
+        const code = res.getResponseCode();
+        if (code === 200) {
+          CB.recordSuccess('openaq');
+          const json = JSON.parse(res.getContentText());
+          if (json.results && json.results.length > 0) {
+            const measurements = json.results[0].measurements || [];
+            const now = new Date();
+            dates.forEach(d => r.time.push(d));
+            const openaqVals = {};
+            measurements.forEach(m => {
+              const param = (m.parameter || "").toLowerCase();
+              if (openaqVals[param] === undefined || (m.lastUpdated && new Date(m.lastUpdated) > new Date(openaqVals[param + "_ts"] || 0))) {
+                openaqVals[param] = m.value;
+                openaqVals[param + "_ts"] = m.lastUpdated;
+              }
+            });
+            // OpenAQ v3 parameter names vary by station (pm25 vs pm2.5,
+            // o3 vs ozone, no2 vs nitrogen_dioxide). Pick the first
+            // non-null value across all known aliases.
+            const fill = v => (v !== undefined && v !== null && !isNaN(v) ? Math.round(v) : null);
+            const firstDefined = (...keys) => {
+              for (const k of keys) { const v = fill(openaqVals[k]); if (v !== null) return v; }
+              return null;
+            };
+            const pm25 = firstDefined("pm25", "pm2.5");
+            const pm10 = firstDefined("pm10");
+            const o3   = firstDefined("o3", "ozone");
+            const no2  = firstDefined("no2", "nitrogen_dioxide");
+            dates.forEach(() => {
+              r.european_aqi.push(pm25);
+              r.us_aqi.push(pm25);
+              r.pm2_5.push(pm25);
+              r.pm10.push(pm10);
+              r.ozone.push(o3);
+              r.nitrogen_dioxide.push(no2);
+              r.dust.push(null);
+            });
+            return r;
+          }
+        } else {
+          CB.recordFailure('openaq');
+          Logger.log(`fetchGlobalAQI/OpenAQ: ${loc.name} returned HTTP ${code}`);
         }
-      } else {
-        Logger.log(`fetchGlobalAQI/OpenAQ: ${loc.name} returned HTTP ${res.getResponseCode()}`);
+      } catch (e) {
+        CB.recordFailure('openaq');
+        Logger.log(`fetchGlobalAQI/OpenAQ error for ${loc.name}: ${e}`);
       }
-    } catch (e) {
-      Logger.log(`fetchGlobalAQI/OpenAQ error for ${loc.name}: ${e}`);
     }
   }
 
   if (aqProvider === "auto" || aqProvider === "waqi") {
-    try {
-      const token = waqiTokenResolve();
-      // encodeURIComponent defends against future token-format changes; current validator
-      // (8-128 alphanumeric) makes this a no-op but preserves URL integrity.
-      const url = token
-        ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${encodeURIComponent(token)}`
-        : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
-      if (res.getResponseCode() === 200) {
-        const json = JSON.parse(res.getContentText());
-        if (json.data && json.data.aqi != null && json.data.aqi !== undefined) {
-          const aqiRaw = Number(json.data.aqi);
-          const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
-          const iaqi = json.data.iaqi || {};
-          const fill = v => { if (v == null) return null; const n = Number(v); return isNaN(n) ? null : Math.round(n); };
-          const pm25v = iaqi.pm25 && iaqi.pm25.v != null ? fill(iaqi.pm25.v) : null;
-          const pm10v = iaqi.pm10 && iaqi.pm10.v != null ? fill(iaqi.pm10.v) : null;
-          dates.forEach(d => {
-            r.time.push(d);
-            r.european_aqi.push(aqi);
-            r.us_aqi.push(aqi);
-            r.pm2_5.push(pm25v);
-            r.pm10.push(pm10v);
-            r.ozone.push(null);
-            r.nitrogen_dioxide.push(null);
-            r.dust.push(null);
-          });
-          return r;
+    // Circuit breaker: skip if open
+    if (!CB.isCallAllowed('waqi')) {
+      Logger.log("Circuit [waqi] OPEN — skipping WAQI fetch");
+    } else {
+      try {
+        const token = waqiTokenResolve();
+        // encodeURIComponent defends against future token-format changes; current validator
+        // (8-128 alphanumeric) makes this a no-op but preserves URL integrity.
+        const url = token
+          ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${encodeURIComponent(token)}`
+          : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
+        const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
+        const code = res.getResponseCode();
+        if (code === 200) {
+          CB.recordSuccess('waqi');
+          const json = JSON.parse(res.getContentText());
+          if (json.data && json.data.aqi != null && json.data.aqi !== undefined) {
+            const aqiRaw = Number(json.data.aqi);
+            const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
+            const iaqi = json.data.iaqi || {};
+            const fill = v => { if (v == null) return null; const n = Number(v); return isNaN(n) ? null : Math.round(n); };
+            const pm25v = iaqi.pm25 && iaqi.pm25.v != null ? fill(iaqi.pm25.v) : null;
+            const pm10v = iaqi.pm10 && iaqi.pm10.v != null ? fill(iaqi.pm10.v) : null;
+            dates.forEach(d => {
+              r.time.push(d);
+              r.european_aqi.push(aqi);
+              r.us_aqi.push(aqi);
+              r.pm2_5.push(pm25v);
+              r.pm10.push(pm10v);
+              r.ozone.push(null);
+              r.nitrogen_dioxide.push(null);
+              r.dust.push(null);
+            });
+            return r;
+          }
+        } else {
+          CB.recordFailure('waqi');
+          Logger.log(`fetchGlobalAQI/WAQI: ${loc.name} returned HTTP ${code}`);
         }
-      } else {
-        Logger.log(`fetchGlobalAQI/WAQI: ${loc.name} returned HTTP ${res.getResponseCode()}`);
+      } catch (e) {
+        CB.recordFailure('waqi');
+        Logger.log(`fetchGlobalAQI/WAQI error for ${loc.name}: ${e}`);
       }
-    } catch (e) {
-      Logger.log(`fetchGlobalAQI/WAQI error for ${loc.name}: ${e}`);
     }
   }
 
