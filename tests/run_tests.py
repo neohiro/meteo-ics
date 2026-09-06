@@ -2627,17 +2627,22 @@ def test_gcal_event_has_sources_section():
 
 
 def test_gcal_advice_before_audit():
-    """In the gcal event, actionable advice must come BEFORE the model audit."""
+    """In the gcal event, actionable advice must come BEFORE the model audit.
+    New layout: advice bullets at top (no title), then audit later."""
     fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    advice_idx = body.find('💡 ACTIONABLE ADVICE')
-    audit_idx = body.find('📉 MODEL AUDIT', advice_idx if advice_idx >= 0 else 0)
+    # Advice now at top as bullets (prioritizedAdvice) without title
+    # Check that prioritizedAdvice is used and rendered before MODEL AUDIT
+    assert_true('prioritizedAdvice' in body, 'gcal must use prioritizedAdvice')
+    audit_idx = body.find('📉 MODEL AUDIT')
+    # prioritizedAdvice.map() used to render advice bullets
+    advice_idx = body.find('prioritizedAdvice.map')
     assert_true(advice_idx != -1 and audit_idx != -1,
-        'gcal must have both ACTIONABLE ADVICE and MODEL AUDIT sections')
+        'gcal must have prioritizedAdvice and MODEL AUDIT')
     if advice_idx > 0 and audit_idx > 0:
         assert_true(advice_idx < audit_idx,
-            'gcal ACTIONABLE ADVICE must be pushed before MODEL AUDIT')
+            'gcal advice bullets must appear before MODEL AUDIT')
 
 
 def test_ical_event_has_sources_section():
@@ -3306,15 +3311,18 @@ def test_gcal_onthisday_integrated_in_buildDashboardPayload():
 
 
 def test_gcal_breaking_news_in_future_section():
-    """gcalweather.gs must include breaking news section in the future/forecast section."""
+    """gcalweather.gs must include breaking news in the future/forecast section.
+    New layout: breaking news is combined into ON THIS DAY section."""
     fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Check that breakingNews section exists
-    assert_true('BREAKING NEWS (TODAY)' in body, 'buildDashboardPayload must have BREAKING NEWS section')
-    # Count occurrences - should be in both past and future sections (2 total)
-    count = body.count('BREAKING NEWS (TODAY)')
-    assert_true(count >= 2, f'BREAKING NEWS should appear in both sections, found {count}')
+    # Breaking news now combined into ON THIS DAY section
+    # Check that breakingNews is called and its content appears in ON THIS DAY
+    assert_true('getBreakingNewsText' in body, 'buildDashboardPayload must call getBreakingNewsText')
+    assert_true('ON THIS DAY' in body, 'buildDashboardPayload must have ON THIS DAY section')
+    # The ON THIS DAY section should contain breakingNews when available
+    # Check that breakingNews variable is used in ON THIS DAY construction
+    assert_true('breakingNews' in body, 'buildDashboardPayload must reference breakingNews variable')
 
 
 def test_ical_onthisday_integrated_in_generateIcsFeed():
@@ -3342,15 +3350,17 @@ def test_ical_translation_keys_for_onthisday():
 
 
 def test_onthisday_smoke_gcal():
-    """Smoke test: OnThisDay sections appear correctly in gcalweather.gs past section."""
-    # Verify OnThisDay sections appear in the gcalweather.gs past section
+    """Smoke test: OnThisDay sections appear correctly in gcalweather.gs.
+    New layout: single ON THIS DAY section combining cultural events, Wikipedia, breaking news."""
+    # Verify OnThisDay sections appear in the gcalweather.gs
     fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Check that OnThisDay sections are present in the structure
+    # Check that ON THIS DAY section title is present
     assert_true('ON THIS DAY' in body, 'OnThisDay section title must appear')
-    assert_true('WIKIPEDIA ON THIS DAY' in body, 'Wikipedia OnThisDay section title must appear')
-    assert_true('BREAKING NEWS (TODAY)' in body, 'Breaking news section title must appear')
+    # Wikipedia and Breaking News are now combined into ON THIS DAY (no separate titles)
+    assert_true('getWikipediaOnThisDayText' in body, 'buildDashboardPayload must call getWikipediaOnThisDayText')
+    assert_true('getBreakingNewsText' in body, 'buildDashboardPayload must call getBreakingNewsText')
     # Check that the structure uses filter(Boolean) for null-safe rendering
     assert_true('sections.filter(Boolean)' in body, 'sections must filter(Boolean) to skip null/empty sections')
 

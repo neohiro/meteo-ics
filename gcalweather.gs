@@ -1494,11 +1494,10 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym);
 
     const sections = [
-      [
-        `📍 ${loc.name} · Verified Log`,
-        `📅 ${targetDateStr} (${Math.abs(offset)}d ago)`
-      ].join("\n"),
+      // 1. ACTIONABLE ADVICE — bullets only (past day still gets advice from today's forecast context)
+      prioritizedAdvice.map(adv => `${adv}`).filter(Boolean).join("\n"),
 
+      // 2. GROUND TRUTH (MEASURED)
       [
         `📊 GROUND TRUTH (MEASURED)`,
         `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
@@ -1508,21 +1507,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         astroEvent ? `• Event: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
 
-      onThisDayText ? [
-        `📜 ON THIS DAY`,
-        onThisDayText
-      ].join("\n") : null,
-      
-      wikiOnThisDay ? [
-        `📖 WIKIPEDIA ON THIS DAY`,
-        wikiOnThisDay
-      ].join("\n") : null,
-      
-      breakingNews ? [
-        `📰 BREAKING NEWS (TODAY)`,
-        breakingNews
-      ].join("\n") : null,
-
+      // 3. PREDICTION ACCURACY AUDIT
       [
         `🎯 PREDICTION ACCURACY AUDIT`,
         `• Temp Delta: ${audit.tempDelta}`,
@@ -1531,12 +1516,28 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         `• Snapshots Tracked: ${audit.snapshotsTaken}`
       ].join("\n"),
 
+      // 4. MODEL BENCHMARK
       [
         `🌐 MODEL BENCHMARK`,
         `• Lifetime Temp MAE: ${globalStats.tempMAE}`,
         `• Lifetime Rain MAE: ${globalStats.rainMAE}`,
         `• Reliability: ${globalStats.modelGrade}`,
         `• Lead Curve: ${globalStats.leadCurve}`
+      ].join("\n"),
+
+      // 5. ON THIS DAY — Wikipedia + Breaking News combined
+      (() => {
+        const parts = [];
+        if (onThisDayText) parts.push(onThisDayText);
+        if (wikiOnThisDay) parts.push(wikiOnThisDay);
+        if (breakingNews) parts.push(breakingNews);
+        return parts.length > 0 ? `📜 ON THIS DAY\n${parts.join("\n")}` : null;
+      })(),
+
+      // 6. LOCATION & DATE — at the bottom
+      [
+        `📍 ${loc.name} · Verified Log`,
+        `📅 ${targetDateStr} (${Math.abs(offset)}d ago)`
       ].join("\n")
     ];
 
@@ -1662,11 +1663,10 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const prioritizedAdvice = generatePrioritizedAdvices(adviceContext);
 
   const sections = [
-    [
-      `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
-      `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${targetDateStr}`
-    ].join("\n"),
+    // 1. ACTIONABLE ADVICE — bullets only, top for quick glance
+    prioritizedAdvice.map(adv => `${adv}`).filter(Boolean).join("\n"),
 
+    // 2. TEMPERATURE & COMFORT
     [
       `🌡️ TEMPERATURE & COMFORT`,
       `• High: ${currentMax}${sym} (${getThermalText(currentMax, isC)})`,
@@ -1678,6 +1678,15 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       offset < CONFIG.deterministicDays ? `• Barometer: ${pressureAtm} atm` : ``
     ].filter(Boolean).join("\n"),
 
+    // 3. AIR QUALITY & BIO (above SUN)
+    [
+      `🧪 AIR QUALITY & BIO`,
+      aqiVal !== null ? `• AQI: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : `• AQI: Monitoring${aqSource ? " (" + aqSource + ")" : ""}`,
+      pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
+      pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
+    ].filter(Boolean).join("\n"),
+
+    // 4. SUN & CELESTIAL
     [
       `☀️ SUN & CELESTIAL`,
       astroEvent ? `• ${astroEvent}` : ``,
@@ -1690,34 +1699,45 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
     ].filter(Boolean).join("\n"),
 
-    onThisDayText ? [
-      `📜 ON THIS DAY`,
-      onThisDayText
-    ].join("\n") : null,
-    
-    wikiOnThisDay ? [
-      `📖 WIKIPEDIA ON THIS DAY`,
-      wikiOnThisDay
-    ].join("\n") : null,
-    
-    breakingNews ? [
-      `📰 BREAKING NEWS (TODAY)`,
-      breakingNews
-    ].join("\n") : null,
-    
-    [
-      `🧪 AIR QUALITY & BIO`,
-      aqiVal !== null ? `• AQI: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : `• AQI: Monitoring${aqSource ? " (" + aqSource + ")" : ""}`,
-      pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
-      pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
-    ].filter(Boolean).join("\n"),
-
+    // 5. 7-DAY AGGREGATE
     [
       `📅 7-DAY AGGREGATE`,
       `• Rain Sum: ${aggregates.sevenDayRain} mm`,
       `• Mean Temp: ${aggregates.sevenDayMeanTemp}${sym}`,
       `• Growing Deg: ${aggregates.sevenDayGDD} GDD (${gddNote})`,
       `• 7-Day Mean AQI: ${aggregates.sevenDayAqi}`
+    ].join("\n"),
+
+    // 6. ON THIS DAY — Wikipedia + Breaking News combined (one section)
+    (() => {
+      const parts = [];
+      if (onThisDayText) parts.push(onThisDayText);
+      if (wikiOnThisDay) parts.push(wikiOnThisDay);
+      if (breakingNews) parts.push(breakingNews);
+      return parts.length > 0 ? `📜 ON THIS DAY\n${parts.join("\n")}` : null;
+    })(),
+
+    // 7. MODEL AUDIT
+    [
+      `📉 MODEL AUDIT`,
+      `• Drift: ${drift.tempDelta} · Rain: ${drift.rainDelta}`,
+      `• Stability: ${drift.volatility}`,
+      `• Benchmark MAE: ${globalStats.tempMAE} / ${globalStats.rainMAE}`,
+      `• Reliability: ${globalStats.modelGrade}`,
+      `• Lead Curve: ${globalStats.leadCurve}`
+    ].join("\n"),
+
+    // 8. SOURCES
+    [
+      `📡 SOURCES`,
+      aqSource ? `• Air Quality: ${aqSource}` : `• Air Quality: Open-Meteo`,
+      `• Weather & Astronomy: Open-Meteo API`
+    ].join("\n"),
+
+    // 9. LOCATION & DATE — at the bottom
+    [
+      `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
+      `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${targetDateStr}`
     ].join("\n")
   ];
 
@@ -1729,27 +1749,6 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       `• Ground: ${Math.round(soilTempMin)}${sym} (${roadHazard.advisory})`
     ].join("\n"));
   }
-
-  // Advice BEFORE audit so users see guidance first, methodology second.
-  sections.push([
-    `💡 ACTIONABLE ADVICE`,
-    prioritizedAdvice.map(adv => `• ${adv}`).join("\n")
-  ].join("\n"));
-
-  sections.push([
-    `📉 MODEL AUDIT`,
-    `• Drift: ${drift.tempDelta} · Rain: ${drift.rainDelta}`,
-    `• Stability: ${drift.volatility}`,
-    `• Benchmark MAE: ${globalStats.tempMAE} / ${globalStats.rainMAE}`,
-    `• Reliability: ${globalStats.modelGrade}`,
-    `• Lead Curve: ${globalStats.leadCurve}`
-  ].join("\n"));
-
-  sections.push([
-    `📡 SOURCES`,
-    aqSource ? `• Air Quality: ${aqSource}` : `• Air Quality: Open-Meteo`,
-    `• Weather & Astronomy: Open-Meteo API`
-  ].join("\n"));
 
   return { title, desc: sections.filter(Boolean).join("\n\n"), eventColor };
 }
