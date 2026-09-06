@@ -1492,6 +1492,24 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
     const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym);
 
+    // Generate actionable advice for past day based on actual measured conditions
+    const pastAdviceContext = {
+      tempMax: actualMax,
+      tempMin: actualMin,
+      apparentMax: actualMax,
+      rainProb: actualRain > 0 ? 100 : 0,
+      rainVol: actualRain,
+      wind: (data.det.windspeed_10m_max && data.det.windspeed_10m_max[pastIdx] != null) ? Math.round(data.det.windspeed_10m_max[pastIdx]) : 0,
+      aqi: aqiVal,
+      aqiType: aqiType,
+      uv: 0,
+      pollen: pollenVal,
+      weatherCode: actualCode,
+      et0: 0,
+      isC: isC
+    };
+    const prioritizedAdvice = generatePrioritizedAdvices(pastAdviceContext);
+
     let sunrisePast = null, sunsetPast = null;
     if (data.det.sunrise && data.det.sunset && data.det.sunrise[pastIdx] && data.det.sunset[pastIdx]) {
       sunrisePast = data.det.sunrise[pastIdx].slice(11, 16);
@@ -1524,8 +1542,6 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
           totalRain += dRain;
           totalMax += dMax;
           totalMin += dMin;
-          const meanT = (dMax + dMin) / 2;
-          if (meanT > base10) {}
           wDays++;
         }
       }
