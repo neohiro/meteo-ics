@@ -69,7 +69,7 @@ function geocodeCity(name) {
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
-  version: "2.2.0",
+  version: "2.3.0",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,

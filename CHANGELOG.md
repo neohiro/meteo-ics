@@ -4,6 +4,64 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.3.0] — 2026-09-06
+
+### Added
+- **On This Day — Cultural Events** (both scripts, separate data):
+  - National holidays for 9 countries: US, GB, DE, FR, CA, AU, JP, CN, IN
+  - 50+ international observances (UN/WHO days, Earth Day, World Water Day, etc.)
+  - Notable anniversaries (Moon landing, Darwin Day, Pi Day, Wikipedia launch, etc.)
+  - Religious observances (Easter, Ramadan, Eid, Rosh Hashanah, Christmas, etc.)
+  - `getCulturalEventsForDate()` and `getOnThisDayText()` with country-aware filtering
+  - Sections rendered only when data exists (null-safe, no empty lines)
+
+- **Wikipedia On This Day Fetcher** (both scripts, separate data):
+  - Fetches from `https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`
+  - 24h PropertiesService cache with UTC-date rotation
+  - `fetchWikipediaOnThisDayCached()` with in-memory deduplication via `_wikiCache`
+  - User-Agent header for API courtesy
+  - Max 5 events per date, filtered for valid years
+
+- **Breaking News Fetcher** (both scripts, current day only):
+  - Fetches from NewsAPI.org (`https://newsapi.org/v2/top-headlines?q=weather`)
+  - Only shown on current day (`dateStr === today` guard)
+  - Requires `NEWS_API_KEY` in ScriptProperties (silent skip without key)
+  - `data.status === "error"` check to catch NewsAPI errors with HTTP 200
+  - Article shape validation before mapping
+
+- **Enhanced Astronomical Events** (both scripts, separate data):
+  - Solar/lunar eclipses (2024-2026)
+  - Meteor showers with peak dates, rates, parent bodies (12 major showers)
+  - Planetary events: Mercury/Venus elongations, Mars/Jupiter/Saturn oppositions
+  - Aurora seasons (equinox effects)
+  - Full lunar phases calendar with names
+
+- **i18n Section Headers** (`icalweather.gs`):
+  - `T_ONTHISDAY`, `T_WIKI`, `T_BREAKING` translation tables (8 languages)
+  - `tSection()` updated to include `secOnThisDay`, `secWiki`, `secBreaking`
+  - Section headers: 📜 ON THIS DAY, 📖 WIKIPEDIA ON THIS DAY, 📰 BREAKING NEWS (TODAY)
+
+### Changed
+- Version bumped: `2.2.0` → `2.3.0` in both `ICAL_CONFIG` and `CONFIG`.
+- `sections.filter(Boolean).join()` pattern applied consistently in `buildDashboardPayload()` (past + future sections)
+- Breaking news added to **both** past (verified log) and future (forecast) sections in gcalweather.gs
+
+### Fixed
+- `fetchBreakingNews()`: returns `null` instead of error string when no API key (was causing visible error message in calendar)
+- `fetchWikipediaOnThisDayCached()`: uses `lastIndexOf("|")` instead of `split("|")` to handle Wikipedia text containing pipe characters
+- `getWikipediaOnThisDayText()`: validates `dateStr` format `YYYY-MM-DD` before parsing (prevents NaN month/day)
+- `getCulturalEventsForDate()`: validates input type and `MM-DD` key format
+- `getOnThisDayText()`: null-guards input, filters null events
+- `buildDashboardPayload()`: guards against null `loc`/`data`, validates `targetDateStr` format
+- `fetchBreakingNews()`: checks `data.status === "error"`, validates article shape
+
+### Tests
+- 264 tests (was 234): +30 new tests covering OnThisDay functionality, robustness hardening, i18n translations, Wikipedia deduplication
+- `python tests/run_tests.py` — all 264 pass
+- `python tests/lint_balance.py` — all balanced, 4 expected cross-file collisions, 0 constant drift
+
+---
+
 ## [2.2.0] — 2026-09-05
 
 ### Added
