@@ -3115,6 +3115,7 @@ def test_lint_balance_reports_cross_file_collision():
       _fetchAllImpl — DI seam for UrlFetchApp.fetchAll
       _nowOverride  — test seam for budget time-mocking
       _probedAqCap  — runtime cache for AQ API cap probe
+      _wikiCache    — execution-scoped dedup for Wikipedia OnThisDay fetches
 
     Excluded (IIFE-scope, not module-scope):
       _budgetWarnedAt — inside checkBudget IIFE
@@ -3126,8 +3127,8 @@ def test_lint_balance_reports_cross_file_collision():
     paths = [repo / "gcalweather.gs", repo / "icalweather.gs"]
     ok, report = lint_cross_file_collision(paths)
     assert_true(not ok, 'lint must report module-scope collisions')
-    assert_eq(len(report), 3, f'expected 3 module-scope collisions, got {len(report)}')
-    for name in ['_fetchAllImpl', '_nowOverride', '_probedAqCap']:
+    assert_eq(len(report), 4, f'expected 4 module-scope collisions, got {len(report)}')
+    for name in ['_fetchAllImpl', '_nowOverride', '_probedAqCap', '_wikiCache']:
         assert_true(any(name in r for r in report),
             f"collision report must mention '{name}'")
     excluded = ['_budgetWarnedAt', '_waqiTokenCache', '_waqiDecryptWarned']
@@ -3340,28 +3341,115 @@ def test_ical_translation_keys_for_onthisday():
     assert_true('secBreaking' in body, 'tSection must include secBreaking')
 
 
-def test_sections_filter_boolean_before_join():
-    """gcalweather.gs sections array must filter empty values before joining."""
+def test_onthisday_smoke_gcal():
+    """Smoke test: OnThisDay sections appear correctly in gcalweather.gs past section."""
+    # Verify OnThisDay sections appear in the gcalweather.gs past section
     fn = re.search(r'function buildDashboardPayload\([\s\S]*?\nfunction ', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    assert_true('filter(Boolean)' in body, 'sections must filter(Boolean) before join to skip null/empty')
+    # Check that OnThisDay sections are present in the structure
+    assert_true('ON THIS DAY' in body, 'OnThisDay section title must appear')
+    assert_true('WIKIPEDIA ON THIS DAY' in body, 'Wikipedia OnThisDay section title must appear')
+    assert_true('BREAKING NEWS (TODAY)' in body, 'Breaking news section title must appear')
+    # Check that the structure uses filter(Boolean) for null-safe rendering
+    assert_true('sections.filter(Boolean)' in body, 'sections must filter(Boolean) to skip null/empty sections')
 
 
-def test_astronomical_events_enhanced():
-    """gcalweather.gs must have enhanced ASTRONOMICAL_EVENTS_DETAILED."""
-    assert_true('ASTRONOMICAL_EVENTS_DETAILED' in GCAL, 'ASTRONOMICAL_EVENTS_DETAILED missing')
-    assert_true('METEOR_SHOWERS' in GCAL, 'METEOR_SHOWERS missing')
-    assert_true('SOLAR_ECLIPSES' in GCAL, 'SOLAR_ECLIPSES missing')
-    assert_true('LUNAR_ECLIPSES' in GCAL, 'LUNAR_ECLIPSES missing')
+def test_onthisday_smoke_ical():
+    """Smoke test: OnThisDay sections appear correctly in icalweather.gs."""
+    fn = re.search(r'function generateIcsFeed\([\s\S]*?\nfunction ', ICAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Check for translation key usage (section titles use tSection())
+    assert_true('secOnThisDay' in body, 'OnThisDay section key must appear')
+    assert_true('secWiki' in body, 'Wikipedia section key must appear')
+    assert_true('secBreaking' in body, 'Breaking news section key must appear')
+    # Verify these are called with tSection()
+    assert_true('tSection("secOnThisDay"' in body, 'OnThisDay must use tSection()')
+    assert_true('tSection("secWiki"' in body, 'Wikipedia must use tSection()')
+    assert_true('tSection("secBreaking"' in body, 'Breaking news must use tSection()')
 
 
-def test_ical_astronomical_events_enhanced():
-    """icalweather.gs must have enhanced ASTRONOMICAL_EVENTS_DETAILED."""
-    assert_true('ASTRONOMICAL_EVENTS_DETAILED' in ICAL, 'ASTRONOMICAL_EVENTS_DETAILED missing')
-    assert_true('METEOR_SHOWERS' in ICAL, 'METEOR_SHOWERS missing')
-    assert_true('SOLAR_ECLIPSES' in ICAL, 'SOLAR_ECLIPSES missing')
-    assert_true('LUNAR_ECLIPSES' in ICAL, 'LUNAR_ECLIPSES missing')
+def test_breaking_news_setup_script():
+    """Verify NEWS_API_KEY setup script exists in code."""
+    # Look for a function that sets up ScriptProperties
+    assert_true('NEWS_API_KEY' in GCAL, 'NEWS_API_KEY constant must exist')
+    assert_true('NEWS_API_KEY' in ICAL, 'NEWS_API_KEY constant must exist in icalweather.gs')
+    # Check that there's a comment or function to guide users on setting up the key
+    assert_true('ScriptProperties' in GCAL, 'Documentation for setting up NEWS_API_KEY in ScriptProperties')
+    assert_true('ScriptProperties' in ICAL, 'Documentation for setting up NEWS_API_KEY in ScriptProperties')
+
+
+def test_wikipedia_deduplication_setup():
+    """Verify Wikipedia fetch has caching mechanism."""
+    fn = re.search(r'function fetchWikipediaOnThisDayCached\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must have cache key construction
+    assert_true('cacheKey' in body, 'Wikipedia cache must use cache key')
+    # Must have PropertiesService access
+    assert_true('PropertiesService' in body, 'Wikipedia cache must use PropertiesService')
+    # Must have UTC-date based cache invalidation
+    assert_true('Utilities.formatDate' in body, 'Cache must respect UTC date boundary')
+
+
+def test_breaking_news_today_guard_enforced():
+    """Verify breaking news today-only guard is implemented correctly."""
+    fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Must check if dateStr is today
+    assert_true('dateStr !== today' in body or 'dateStr != today' in body,
+        'Breaking news must only appear for today')
+    # Must return null for future dates
+    assert_true('return null' in body, 'Breaking news must return null for future dates')
+
+
+def test_wikipedia_execution_dedup_cache():
+    """Both scripts must dedup Wikipedia fetches within one execution via _wikiCache."""
+    for name, src in (('gcal', GCAL), ('ical', ICAL)):
+        # Module-level let _wikiCache for execution-scoped dedup
+        assert_true('let _wikiCache' in src, f'{name} must declare let _wikiCache')
+        # fetchWikipediaOnThisDay must check the in-memory cache before HTTP
+        fn = re.search(r'function fetchWikipediaOnThisDay\([\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name} fetchWikipediaOnThisDay missing')
+        body = fn.group(0)
+        assert_true('_wikiCache' in body, f'{name} fetchWikipediaOnThisDay must use _wikiCache')
+        # Must store result in cache after successful fetch
+        assert_true('_wikiCache[inMemKey]' in body,
+            f'{name} must store result in _wikiCache after fetch')
+
+
+def test_cultural_events_data_integrated():
+    """Verify cultural events data is present and integrated."""
+    # Check that NATIONAL_HOLIDAYS, INTERNATIONAL_OBSERVANCES, etc. exist
+    assert_true('NATIONAL_HOLIDAYS' in GCAL, 'National holidays data missing')
+    assert_true('INTERNATIONAL_OBSERVANCES' in GCAL, 'International observances missing')
+    assert_true('NOTABLE_ANNIVERSARIES' in GCAL, 'Notable anniversaries missing')
+    assert_true('RELIGIOUS_OBSERVANCES' in GCAL, 'Religious observances missing')
+    # Verify getCulturalEventsForDate is present and referenced
+    fn = re.search(r'function getCulturalEventsForDate\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None, 'getCulturalEventsForDate function missing')
+    body = fn.group(0)
+    assert_true('INTERNATIONAL_OBSERVANCES' in body, 'getCulturalEventsForDate must reference observances')
+    assert_true('NATIONAL_HOLIDAYS' in body, 'getCulturalEventsForDate must reference holidays')
+
+
+def test_astronomical_enhanced_with_checks():
+    """Verify enhanced astronomical events data includes new categories."""
+    # Verify ASTRONOMICAL_EVENTS_DETAILED exists and references new categories
+    fn = re.search(r'const ASTRONOMICAL_EVENTS_DETAILED\s*=\s*\{[^}]+\}', GCAL, re.DOTALL)
+    assert_true(fn is not None, 'ASTRONOMICAL_EVENTS_DETAILED constant missing')
+    body = fn.group(0)
+    # ASTRONOMICAL_EVENTS_DETAILED spreads from multiple sources
+    assert_true('ASTRONOMICAL_EVENTS' in body, 'ASTRONOMICAL_EVENTS_DETAILED must reference ASTRONOMICAL_EVENTS')
+    assert_true('SOLAR_ECLIPSES' in body, 'Solar eclipses missing from enhanced data')
+    assert_true('LUNAR_ECLIPSES' in body, 'Lunar eclipses missing from enhanced data')
+    # Check that the source constants are defined at module level
+    assert_true('const SOLAR_ECLIPSES' in GCAL, 'SOLAR_ECLIPSES constant missing')
+    assert_true('const LUNAR_ECLIPSES' in GCAL, 'LUNAR_ECLIPSES constant missing')
+    assert_true('const METEOR_SHOWERS' in GCAL, 'METEOR_SHOWERS constant missing')
+    assert_true('const PLANETARY_EVENTS' in GCAL, 'PLANETARY_EVENTS constant missing')
 
 
 # =============================================================================

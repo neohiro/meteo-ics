@@ -146,6 +146,7 @@ const BUDGET_WARN_AT_MS = [240000, 300000];
 let _fetchAllImpl = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverride = null;
 const _now = () => _nowOverride !== null ? _nowOverride : Date.now();
+let _wikiCache = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
 
 const { budgetStart, budgetSetNow, checkBudget } = (() => {
   const APPS_SCRIPT_BUDGET_MS = 345000;
@@ -864,10 +865,15 @@ function getOnThisDayText(dateStr, countryCode) {
 const WIKIPEDIA_ONTHISDAY_URL = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/";
 
 function fetchWikipediaOnThisDay(month, day) {
+  // Check in-memory cache first for execution deduplication
+  const inMemKey = month + "_" + day;
+  if (_wikiCache[inMemKey] !== undefined) {
+    return _wikiCache[inMemKey];
+  }
   const url = WIKIPEDIA_ONTHISDAY_URL + month + "/" + day;
   try {
-    const res = UrlFetchApp.fetch(url, { 
-      muteHttpExceptions: true, 
+    const res = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
       timeout: 8000,
       headers: { 'User-Agent': 'meteo-ics/1.0 (https://github.com/neohiro/meteo-ics)' }
     });
@@ -878,12 +884,15 @@ function fetchWikipediaOnThisDay(month, day) {
           .filter(e => e.year && e.year !== "Year unknown")
           .slice(0, 5)
           .map(e => `${e.year}: ${e.text}`);
-        return filtered.join("; ");
+        const result = filtered.join("; ");
+        _wikiCache[inMemKey] = result;
+        return result;
       }
     }
   } catch (e) {
     Logger.log("Wikipedia OnThisDay fetch failed: " + e);
   }
+  _wikiCache[inMemKey] = null;
   return null;
 }
 
