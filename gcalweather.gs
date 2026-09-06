@@ -1486,18 +1486,81 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     const actualRain = (data.det.precipitation_sum ? data.det.precipitation_sum[pastIdx] : 0) || 0;
     const rawActualCode = (data.det.weather_code || data.det.weathercode || [])[pastIdx];
     const actualCode = rawActualCode !== undefined ? rawActualCode : 0;
-    
     const weatherGlyph = getWeatherGlyph(actualCode);
     const eventColor = getEventColorEnum(actualMax, false, isC);
     const title = `${weatherGlyph} ${actualMax}${sym} ${loc.name}`;
 
     const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym);
 
+    let sunrisePast = null, sunsetPast = null;
+    if (data.det.sunrise && data.det.sunset && data.det.sunrise[pastIdx] && data.det.sunset[pastIdx]) {
+      sunrisePast = data.det.sunrise[pastIdx].slice(11, 16);
+      sunsetPast = data.det.sunset[pastIdx].slice(11, 16);
+    }
+    const daylightPast = sunrisePast && sunsetPast
+      ? (() => {
+          const rDate = new Date(data.det.sunrise[pastIdx]);
+          const sDate = new Date(data.det.sunset[pastIdx]);
+          const dMins = Math.max(0, Math.round((sDate - rDate) / 60000));
+          return `${Math.floor(dMins / 60)}h ${dMins % 60}m`;
+        })()
+      : "--";
+
+    const historicalAggregate = (() => {
+      if (!data.det || !data.det.time) return null;
+      const times = data.det.time;
+      const idx = times.indexOf(targetDateStr);
+      if (idx === -1) return null;
+      let totalRain = 0, totalMax = 0, totalMin = 0, wDays = 0;
+      const base10 = isC ? 10 : 50;
+      for (let d = 0; d < 7; d++) {
+        const lookIdx = idx - d;
+        if (lookIdx < 0) break;
+        const dStr = times[lookIdx];
+        const dMax = data.det.temperature_2m_max[lookIdx];
+        const dMin = data.det.temperature_2m_min[lookIdx];
+        const dRain = (data.det.precipitation_sum ? data.det.precipitation_sum[lookIdx] : 0) || 0;
+        if (dMax != null && dMin != null) {
+          totalRain += dRain;
+          totalMax += dMax;
+          totalMin += dMin;
+          const meanT = (dMax + dMin) / 2;
+          if (meanT > base10) {}
+          wDays++;
+        }
+      }
+      return {
+        rain: totalRain.toFixed(1),
+        meanTemp: wDays > 0 ? ((totalMax + totalMin) / (wDays * 2)).toFixed(1) : "--"
+      };
+    })();
+
+    const sourcesLines = [`📡 SOURCES`];
+    if (aqSource) {
+      sourcesLines.push(`• Air Quality: ${aqSource}`);
+    }
+    sourcesLines.push(`• Weather & Astronomy: Open-Meteo API`);
+    sourcesLines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
+    sourcesLines.push(`• Wikipedia (main): https://en.wikipedia.org`);
+    const newsApiKey = PropertiesService.getScriptProperties().getProperty("NEWS_API_KEY");
+    if (newsApiKey) {
+      sourcesLines.push(`• Breaking News: https://newsapi.org`);
+    }
+
     const sections = [
-      // 1. ACTIONABLE ADVICE — bullets only (past day still gets advice from today's forecast context)
+      // 1. ACTIONABLE ADVICE — bullets only (from today's forecast context)
       prioritizedAdvice.map(adv => `${adv}`).filter(Boolean).join("\n"),
 
-      // 2. GROUND TRUTH (MEASURED)
+      // 2. ON THIS DAY — cultural + Wikipedia + breaking news combined
+      (() => {
+        const parts = [];
+        if (onThisDayText) parts.push(onThisDayText);
+        if (wikiOnThisDay) parts.push(wikiOnThisDay);
+        if (breakingNews) parts.push(breakingNews);
+        return parts.length > 0 ? `📜 ON THIS DAY\n${parts.join("\n")}` : null;
+      })(),
+
+      // 3. GROUND TRUTH (MEASURED)
       [
         `📊 GROUND TRUTH (MEASURED)`,
         `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
@@ -1507,7 +1570,16 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         astroEvent ? `• Event: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
 
-      // 3. PREDICTION ACCURACY AUDIT
+      // 4. SUN & CELESTIAL
+      [
+        `☀️ SUN & CELESTIAL`,
+        astroEvent ? `• ${astroEvent}` : ``,
+        sunrisePast ? `• Daylight: 🌅${sunrisePast}–🌇${sunsetPast} (${daylightPast})` : ``,
+        sunrisePast ? `• Golden Hr: ~${getGoldenHourWindow(sunsetPast)}` : ``,
+        `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`
+      ].filter(Boolean).join("\n"),
+
+      // 5. PREDICTION ACCURACY AUDIT
       [
         `🎯 PREDICTION ACCURACY AUDIT`,
         `• Temp Delta: ${audit.tempDelta}`,
@@ -1516,7 +1588,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         `• Snapshots Tracked: ${audit.snapshotsTaken}`
       ].join("\n"),
 
-      // 4. MODEL BENCHMARK
+      // 6. MODEL BENCHMARK
       [
         `🌐 MODEL BENCHMARK`,
         `• Lifetime Temp MAE: ${globalStats.tempMAE}`,
@@ -1525,16 +1597,17 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         `• Lead Curve: ${globalStats.leadCurve}`
       ].join("\n"),
 
-      // 5. ON THIS DAY — Wikipedia + Breaking News combined
-      (() => {
-        const parts = [];
-        if (onThisDayText) parts.push(onThisDayText);
-        if (wikiOnThisDay) parts.push(wikiOnThisDay);
-        if (breakingNews) parts.push(breakingNews);
-        return parts.length > 0 ? `📜 ON THIS DAY\n${parts.join("\n")}` : null;
-      })(),
+      // 7. 7-DAY AGGREGATE (historical, leading up to this day)
+      historicalAggregate ? [
+        `📅 7-DAY AGGREGATE (HISTORICAL)`,
+        `• Rain Sum: ${historicalAggregate.rain} mm`,
+        `• Mean Temp: ${historicalAggregate.meanTemp}${sym}`
+      ].join("\n") : null,
 
-      // 6. LOCATION & DATE — at the bottom
+      // 8. SOURCES
+      sourcesLines.join("\n"),
+
+      // 9. LOCATION & DATE
       [
         `📍 ${loc.name} · Verified Log`,
         `📅 ${targetDateStr} (${Math.abs(offset)}d ago)`
@@ -1728,11 +1801,18 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     ].join("\n"),
 
     // 8. SOURCES
-    [
-      `📡 SOURCES`,
-      aqSource ? `• Air Quality: ${aqSource}` : `• Air Quality: Open-Meteo`,
-      `• Weather & Astronomy: Open-Meteo API`
-    ].join("\n"),
+    (() => {
+      const lines = [`📡 SOURCES`];
+      lines.push(aqSource ? `• Air Quality: ${aqSource}` : `• Air Quality: Open-Meteo`);
+      lines.push(`• Weather & Astronomy: Open-Meteo API (https://open-meteo.com)`);
+      lines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
+      lines.push(`• Wikipedia (main): https://en.wikipedia.org`);
+      const newsApiKey = PropertiesService.getScriptProperties().getProperty("NEWS_API_KEY");
+      if (newsApiKey) {
+        lines.push(`• Breaking News: https://newsapi.org`);
+      }
+      return lines.join("\n");
+    })(),
 
     // 9. LOCATION & DATE — at the bottom
     [

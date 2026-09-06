@@ -329,6 +329,9 @@ const T_L = {
   engine:    { en:"Engine",                       zh:"引擎",                  hi:"इंजन",                         es:"Motor",                      fr:"Moteur",                      ar:"المحرك",                      de:"Engine",                       nl:"Engine" },
   wx:        { en:"Weather",                      zh:"天气",                  hi:"मौसम",                         es:"Clima",                      fr:"Météo",                       ar:"الطقس",                       de:"Wetter",                       nl:"Weer" },
   aq:        { en:"Air Quality",                  zh:"空气质量",              hi:"वायु गुणवत्ता",                  es:"Calidad del aire",            fr:"Qualité de l'air",            ar:"جودة الهواء",                  de:"Luftqualität",                nl:"Luchtkwaliteit" },
+  wiki:      { en:"Wikipedia",                   zh:"维基百科",               hi:"विकिपीडिया",                     es:"Wikipedia",                  fr:"Wikipédia",                   ar:"ويكيبيديا",                    de:"Wikipedia",                   nl:"Wikipedia" },
+  wikiApi:   { en:"Wikipedia On This Day API",   zh:"维基百科历史事件API",    hi:"विकिपीडिया इतिहास API",         es:"API Wikipedia En Este Día",   fr:"API Wikipédia Ce Jour-Là",    ar:"واجهة برمجة ويكيبيديا",        de:"Wikipedia An Diesem Tag API",  nl:"Wikipedia Op Deze Dag API" },
+  newsApi:   { en:"NewsAPI",                     zh:"NewsAPI",                hi:"NewsAPI",                        es:"NewsAPI",                    fr:"NewsAPI",                     ar:"NewsAPI",                       de:"NewsAPI",                     nl:"NewsAPI" },
   // --- Road statuses ---
   rdBI:     { en:"BLACK ICE DANGER",            zh:"黑冰危险",              hi:"काली बर्फ का खतरा",             es:"PELIGRO DE HIELO NEGRO",    fr:"DANGER DE VERGLAS",          ar:"خطر الجليد الأسود",          de:"SCHWARZES EIS",              nl:"ZWART IJS-GEVAAR" },
   rdFrost:  { en:"FROST / SLICK SPOTS",         zh:"霜冻/路面湿滑",         hi:"पाला/फिसलन",                   es:"HELADAS / RESBALADIZO",     fr:"GELÉES / GLISSANT",          ar:"صقيع/انزلاق",                de:"FROST / RUTSCHIG",           nl:"VORST / GLADDE" },
@@ -1590,8 +1593,15 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       sections.push([
         `📡 ${tSection("secSources", lang)}`,
         `• ${t("aq", lang)}: Open-Meteo CAMS / OpenAQ / WAQI`,
-        `• ${t("wx", lang)}: Open-Meteo API`
-      ].join("\n"));
+        `• ${t("wx", lang)}: Open-Meteo API (https://open-meteo.com)`,
+        `• ${t("wikiApi", lang)}: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`,
+        `• ${t("wiki", lang)} (main): https://en.wikipedia.org`,
+        (() => {
+          const props = PropertiesService.getScriptProperties();
+          const newsApiKey = props.getProperty("NEWS_API_KEY");
+          return newsApiKey ? `• ${t("newsApi", lang)}: https://newsapi.org` : ``;
+        })()
+      ].filter(Boolean).join("\n"));
 
       const fullDesc = sections.join("\n\n");
       const uid = `weather_${norm(loc.name)}_${dateKey}@weatherdashboard`;
