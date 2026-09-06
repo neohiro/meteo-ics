@@ -3288,7 +3288,7 @@ def test_wikipedia_fetcher_has_cache():
     fn = re.search(r'function fetchWikipediaOnThisDayCached\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    assert_true('PropertiesService' in body, 'Wikipedia cache must use PropertiesService')
+    assert_true('PropertiesService' in body or '_scriptProps' in body, 'Wikipedia cache must use PropertiesService')
     assert_true('setProperty' in body, 'Wikipedia cache must store data')
 
 
@@ -3391,14 +3391,14 @@ def test_breaking_news_setup_script():
 
 
 def test_wikipedia_deduplication_setup():
-    """Verify Wikipedia fetch has caching mechanism."""
+    """Wikipedia execution deduplication cache must be present."""
     fn = re.search(r'function fetchWikipediaOnThisDayCached\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
     # Must have cache key construction
     assert_true('cacheKey' in body, 'Wikipedia cache must use cache key')
     # Must have PropertiesService access
-    assert_true('PropertiesService' in body, 'Wikipedia cache must use PropertiesService')
+    assert_true('PropertiesService' in body or '_scriptProps' in body, 'Wikipedia cache must use PropertiesService')
     # Must have UTC-date based cache invalidation
     assert_true('Utilities.formatDate' in body, 'Cache must respect UTC date boundary')
 

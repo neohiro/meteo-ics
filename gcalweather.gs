@@ -96,7 +96,9 @@ const BUDGET_WARN_AT_MS = [240000, 300000];
 let _fetchAllImpl = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverride = null;
 const _now = () => _nowOverride !== null ? _nowOverride : Date.now();
+const _WIKI_CACHE_MAX = 50; // Cap in-memory Wikipedia cache per execution
 let _wikiCache = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
+const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
 const { budgetStart, checkBudget } = (() => {
   const APPS_SCRIPT_BUDGET_MS = 345000;
@@ -736,6 +738,11 @@ function fetchWikipediaOnThisDay(month, day) {
           .slice(0, 5)
           .map(e => `${e.year}: ${e.text}`);
         const result = filtered.join("; ");
+        // Enforce cache size limit (simple FIFO eviction)
+        if (Object.keys(_wikiCache).length >= _WIKI_CACHE_MAX) {
+          const firstKey = Object.keys(_wikiCache)[0];
+          delete _wikiCache[firstKey];
+        }
         _wikiCache[inMemKey] = result;
         return result;
       }
@@ -743,14 +750,13 @@ function fetchWikipediaOnThisDay(month, day) {
   } catch (e) {
     Logger.log("Wikipedia OnThisDay fetch failed: " + e);
   }
-  _wikiCache[inMemKey] = null;
+  // Don't cache failures to allow retry on next call
   return null;
 }
 
 function fetchWikipediaOnThisDayCached(month, day) {
   const cacheKey = "wiki_onthisday_" + month + "_" + day;
-  const props = PropertiesService.getScriptProperties();
-  const cached = props.getProperty(cacheKey);
+  const cached = _scriptProps.getProperty(cacheKey);
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   
   if (cached) {
@@ -767,7 +773,7 @@ function fetchWikipediaOnThisDayCached(month, day) {
   
   const fresh = fetchWikipediaOnThisDay(month, day);
   if (fresh) {
-    props.setProperty(cacheKey, fresh + "|" + today);
+    _scriptProps.setProperty(cacheKey, fresh + "|" + today);
     return fresh;
   }
   return null;
@@ -791,8 +797,7 @@ const NEWS_API_URL = "https://newsapi.org/v2/top-headlines";
 
 function fetchBreakingNews() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const apiKey = props.getProperty("NEWS_API_KEY");
+    const apiKey = _scriptProps.getProperty("NEWS_API_KEY");
     if (!apiKey) {
       return null;
     }
@@ -1436,6 +1441,9 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const record = getDayRecord(cityKey, targetDateStr);
   const snapshots = record.snapshots || [];
 
+  // Cache PropertiesService for this execution to avoid repeated calls
+  const scriptProps = PropertiesService.getScriptProperties();
+
   let aqiVal = null, aqiType = "AQI", aqiScale = null, pm25Val = null, pm10Val = null, pollenVal = null;
   const aqSource = data.aq && data.aq._source ? data.aq._source : null;
   if (data.aq && data.aq.time) {
@@ -1558,7 +1566,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     sourcesLines.push(`• Weather & Astronomy: Open-Meteo API`);
     sourcesLines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
     sourcesLines.push(`• Wikipedia (main): https://en.wikipedia.org`);
-    const newsApiKey = PropertiesService.getScriptProperties().getProperty("NEWS_API_KEY");
+    const newsApiKey = scriptProps.getProperty("NEWS_API_KEY");
     if (newsApiKey) {
       sourcesLines.push(`• Breaking News: https://newsapi.org`);
     }
@@ -1823,7 +1831,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       lines.push(`• Weather & Astronomy: Open-Meteo API (https://open-meteo.com)`);
       lines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
       lines.push(`• Wikipedia (main): https://en.wikipedia.org`);
-      const newsApiKey = PropertiesService.getScriptProperties().getProperty("NEWS_API_KEY");
+      const newsApiKey = scriptProps.getProperty("NEWS_API_KEY");
       if (newsApiKey) {
         lines.push(`• Breaking News: https://newsapi.org`);
       }
