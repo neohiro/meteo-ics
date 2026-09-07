@@ -255,6 +255,13 @@ const CB = (() => {
     if (!cb) return 'UNKNOWN';
     return ['CLOSED', 'OPEN', 'HALF_OPEN'][cb.state];
   };
+  // Read-only config accessor for tests / introspection. Returns the
+  // circuit's resolved cfg object (defaults merged with overrides) or
+  // undefined for unknown circuit names.
+  const cfg = (name) => {
+    const cb = circuits[name];
+    return cb ? cb.cfg : undefined;
+  };
 
   // Initialize standard circuits
   create('openmeteo');
@@ -263,7 +270,7 @@ const CB = (() => {
   create('openaq');
   create('waqi');
 
-  return { create, isCallAllowed, recordSuccess, recordFailure, getState, STATES };
+  return { create, isCallAllowed, recordSuccess, recordFailure, getState, cfg, STATES };
 })();
 
 const { budgetStart, budgetSetNow, checkBudget } = (() => {
@@ -273,6 +280,12 @@ const { budgetStart, budgetSetNow, checkBudget } = (() => {
   return {
     budgetStart() {
       _budgetWarnedAt = new Set();
+      // Match gcalweather.gs: clear _nowOverrideIcal so tests calling
+      // budgetStart() (e.g. via generateIcsFeed) don't inherit a stale
+      // mock clock from a prior test. Without this, the first checkBudget
+      // call would see a poisoned startMs and fire warnings/exhausts
+      // immediately under the wrong "elapsed" assumption.
+      _nowOverrideIcal = null;
       return _now();
     },
     budgetSetNow(fn) {
@@ -1610,6 +1623,11 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
             soilTempMin = currentMin;
             title = `${certaintyGlyph} ~${currentMax}${unitSymbol} ${loc.name} (±${spreadVal}${unitSymbol})`;
             modelLabel = `${t("mEns", lang)} (D-${offset})`;
+          } else {
+            // No valid ensemble values for this day — null out currentMax so
+            // the per-offset null guard at line 1630 skips this iteration
+            // without ever constructing a "~NaN° City" title string.
+            currentMax = null;
           }
         }
       }
@@ -3012,8 +3030,7 @@ function test_e2e_ical_circuit_breaker() {
     }
 
     const state = CB.getState("openmeteo");
-    const OPEN = 1;
-    if (state === OPEN) {
+    if (state === "OPEN") {
       results.passed++;
     } else {
       results.failed++;

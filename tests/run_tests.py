@@ -3879,6 +3879,24 @@ def test_e2e_gcal_circuit_getState_exposed():
     cb_code = cb_block.group(0)
     assert_true('getState' in cb_code, 'CB.getState must be exposed in gcalweather.gs')
 
+
+def test_e2e_gcal_circuit_cfg_exposed():
+    """CB.cfg(name) must be exposed for tests to read failureThreshold etc."""
+    cb_block = re.search(r'const CB = \(\(\) => [\s\S]*?return \{[\s\S]*?\};?\s*\}\)\(\);?', GCAL)
+    assert_true(cb_block is not None, 'CB must exist in gcalweather.gs')
+    cb_code = cb_block.group(0)
+    assert_true('cfg' in cb_code and 'CB.cfg' not in cb_code,
+        'CB.cfg accessor must be defined and exported in gcalweather.gs')
+
+
+def test_e2e_ical_circuit_cfg_exposed():
+    """CB.cfg(name) must be exposed for tests to read failureThreshold etc."""
+    cb_block = re.search(r'const CB = \(\(\) => [\s\S]*?return \{[\s\S]*?\};?\s*\}\)\(\);?', ICAL)
+    assert_true(cb_block is not None, 'CB must exist in icalweather.gs')
+    cb_code = cb_block.group(0)
+    assert_true('cfg' in cb_code and 'CB.cfg' not in cb_code,
+        'CB.cfg accessor must be defined and exported in icalweather.gs')
+
 def test_e2e_ical_circuit_getState_exposed():
     cb_block = re.search(r'const CB = \(\(\) => [\s\S]*?return \{[\s\S]*?\};?\s*\}\)\(\);?', ICAL)
     assert_true(cb_block is not None, 'CB must exist in icalweather.gs')

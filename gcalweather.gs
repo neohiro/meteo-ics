@@ -202,6 +202,13 @@ const CB = (() => {
     if (!cb) return 'UNKNOWN';
     return ['CLOSED', 'OPEN', 'HALF_OPEN'][cb.state];
   };
+  // Read-only config accessor for tests / introspection. Returns the
+  // circuit's resolved cfg object (defaults merged with overrides) or
+  // undefined for unknown circuit names.
+  const cfg = (name) => {
+    const cb = circuits[name];
+    return cb ? cb.cfg : undefined;
+  };
 
   // Initialize standard circuits
   create('openmeteo');
@@ -210,7 +217,7 @@ const CB = (() => {
   create('openaq');
   create('waqi');
 
-  return { create, isCallAllowed, recordSuccess, recordFailure, getState, STATES };
+  return { create, isCallAllowed, recordSuccess, recordFailure, getState, cfg, STATES };
 })();
 
 const { budgetStart, checkBudget } = (() => {
@@ -2840,8 +2847,7 @@ function test_e2e_gcal_circuit_breaker() {
     }
 
     const state = CB.getState("openmeteo");
-    const OPEN = 1;
-    if (state === OPEN) {
+    if (state === "OPEN") {
       results.passed++;
     } else {
       results.failed++;
@@ -2850,7 +2856,7 @@ function test_e2e_gcal_circuit_breaker() {
 
     CB.recordFailure("openmeteo");
     const stateAfter = CB.getState("openmeteo");
-    if (stateAfter === OPEN) {
+    if (stateAfter === "OPEN") {
       results.passed++;
     } else {
       results.failed++;
