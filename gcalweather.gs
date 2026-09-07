@@ -138,11 +138,12 @@ const CB = (() => {
     if (cb.state === STATES.HALF_OPEN) {
       cb.halfOpenCalls++;
       if (cb.halfOpenCalls >= cb.cfg.halfOpenMaxCalls) {
+        const successes = cb.halfOpenCalls;
         cb.state = STATES.CLOSED;
         cb.failures = 0;
         cb.halfOpenCalls = 0;
         cb.backoffMs = 0;
-        Logger.log(`Circuit [${name}] CLOSED (recovered after ${cb.halfOpenCalls} half-open successes)`);
+        Logger.log(`Circuit [${name}] CLOSED (recovered after ${successes} half-open successes)`);
       }
     } else if (cb.state === STATES.CLOSED) {
       cb.failures = 0;
