@@ -2867,3 +2867,340 @@ function getUvAdvice(uv, lang) {
   if (uv <= 7) return t("uvHigh", lang);
   return t("uvVhigh", lang);
 }
+
+// ============================================================
+// Integration tests (Apps Script runtime required)
+// Run individually from Apps Script editor or via test runner
+// ============================================================
+
+function test_e2e_ical_success() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_ical();
+
+    const mockOm = _buildMockOpenMeteoDaily_ical();
+    const mockWa = _buildMockWaqiAirQuality_ical();
+
+    let fetchLog = [];
+    _fetchAllImplIcal = (requests) => {
+      return requests.map(req => {
+        fetchLog.push(req.url.slice(0, 80));
+        if (req.url.includes("open-meteo.com")) return mockOm();
+        if (req.url.includes("waqi.info")) return mockWa();
+        if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
+          return { getResponseCode: () => 200, getContentText: () => '[{"lat":51.5,"lon":-0.1,"display_name":"London, UK"}]' };
+        }
+        return { getResponseCode: () => 200, getContentText: () => '{}' };
+      });
+    };
+
+    _nowOverrideIcal = new Date("2025-06-21T10:00:00Z").getTime();
+    _wikiCacheIcal = {};
+    _breakingNewsCacheIcal = {};
+    CB.create("openmeteo");
+    CB.create("waqi");
+    CB.create("geocoder");
+
+    const ics = generateIcsFeed(
+      [{ name: "London", lat: 51.5, lon: -0.1 }],
+      "celsius",
+      { lang: "en", days: 7, dryRun: true }
+    );
+
+    if (typeof ics === "string" && ics.includes("BEGIN:VCALENDAR") && ics.includes("END:VCALENDAR")) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push("ICS output missing VCALENDAR markers");
+    }
+
+    const meteoFetches = fetchLog.filter(u => u.includes("open-meteo"));
+    if (meteoFetches.length > 0) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push("No Open-Meteo fetches made");
+    }
+
+    _log_ical({ event: "e2e_test", test: "success", fetchCount: fetchLog.length, icsLen: ics?.length ?? 0, passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+    _log_ical({ event: "e2e_test", test: "success", status: "error", error: e.message || String(e) });
+  } finally {
+    _runTestsCleanup_ical();
+  }
+
+  const msg = `test_e2e_ical_success: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_ical_429_retry() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_ical();
+
+    let callCount = 0;
+    const mockOm429 = () => ({ getResponseCode: () => 429, getContentText: () => '{"error":"rate limited"}' });
+    const mockOm200 = _buildMockOpenMeteoDaily_ical();
+
+    _fetchAllImplIcal = (requests) => {
+      return requests.map(req => {
+        if (req.url.includes("open-meteo.com")) {
+          callCount++;
+          return callCount === 1 ? mockOm429() : mockOm200();
+        }
+        if (req.url.includes("waqi.info")) return _buildMockWaqiAirQuality_ical()();
+        if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
+          return { getResponseCode: () => 200, getContentText: () => '[{"lat":51.5,"lon":-0.1,"display_name":"London, UK"}]' };
+        }
+        return { getResponseCode: () => 200, getContentText: () => '{}' };
+      });
+    };
+
+    _nowOverrideIcal = new Date("2025-06-21T10:00:00Z").getTime();
+    _wikiCacheIcal = {};
+    _breakingNewsCacheIcal = {};
+    CB.create("openmeteo");
+
+    generateIcsFeed(
+      [{ name: "London", lat: 51.5, lon: -0.1 }],
+      "celsius",
+      { lang: "en", days: 7, dryRun: true }
+    );
+
+    if (callCount >= 2) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push(`Expected retry on 429, got ${callCount} Open-Meteo call(s)`);
+    }
+
+    _log_ical({ event: "e2e_test", test: "429_retry", calls: callCount, passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+    _log_ical({ event: "e2e_test", test: "429_retry", status: "error", error: e.message || String(e) });
+  } finally {
+    _runTestsCleanup_ical();
+  }
+
+  const msg = `test_e2e_ical_429_retry: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_ical_circuit_breaker() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_ical();
+    CB.create("openmeteo");
+
+    const failureThreshold = CB.cfg("openmeteo").failureThreshold;
+    for (let i = 0; i < failureThreshold; i++) {
+      CB.recordFailure("openmeteo");
+    }
+
+    const state = CB.getState("openmeteo");
+    const OPEN = 1;
+    if (state === OPEN) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push(`Expected circuit OPEN after ${failureThreshold} failures, got state ${state}`);
+    }
+
+    _log_ical({ event: "e2e_test", test: "circuit_breaker", passed: results.passed, failed: results.failed, state });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+  } finally {
+    _runTestsCleanup_ical();
+  }
+
+  const msg = `test_e2e_ical_circuit_breaker: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_ical_budget_exhaustion() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_ical();
+    _nowOverrideIcal = Date.now() - 350000;
+
+    const budget = budgetStart();
+
+    try {
+      checkBudget(budget, "test_label");
+      results.failed++;
+      results.errors.push("Expected checkBudget to throw Budget exhausted");
+    } catch (e) {
+      if (String(e).includes("Budget exhausted")) {
+        results.passed++;
+      } else {
+        results.failed++;
+        results.errors.push("Unexpected error: " + e.message);
+      }
+    }
+
+    _log_ical({ event: "e2e_test", test: "budget_exhaustion", passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+  } finally {
+    _runTestsCleanup_ical();
+  }
+
+  const msg = `test_e2e_ical_budget_exhaustion: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_ical_partial_failure() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_ical();
+
+    const mockOm = _buildMockOpenMeteoDaily_ical();
+    const mockWa = _buildMockWaqiAirQuality_ical();
+
+    _fetchAllImplIcal = (requests) => {
+      return requests.map(req => {
+        if (req.url.includes("open-meteo.com")) return mockOm();
+        if (req.url.includes("waqi.info")) return mockWa();
+        if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
+          return { getResponseCode: () => 500, getContentText: () => '{"error":"server error"}' };
+        }
+        return { getResponseCode: () => 200, getContentText: () => '{}' };
+      });
+    };
+
+    _nowOverrideIcal = new Date("2025-06-21T10:00:00Z").getTime();
+    _wikiCacheIcal = {};
+    _breakingNewsCacheIcal = {};
+    CB.create("openmeteo");
+    CB.create("waqi");
+    CB.create("geocoder");
+
+    let ics = null;
+    try {
+      ics = generateIcsFeed(
+        [{ name: "London", lat: 51.5, lon: -0.1 }],
+        "celsius",
+        { lang: "en", days: 7, dryRun: true }
+      );
+      results.passed++;
+    } catch (e) {
+      results.failed++;
+      results.errors.push(`generateIcsFeed threw unexpectedly: ${e.message}`);
+    }
+
+    if (ics && ics.includes("BEGIN:VCALENDAR")) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push("ICS missing VCALENDAR markers after partial failure");
+    }
+
+    _log_ical({ event: "e2e_test", test: "partial_failure", passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+    _log_ical({ event: "e2e_test", test: "partial_failure", status: "error", error: e.message || String(e) });
+  } finally {
+    _runTestsCleanup_ical();
+  }
+
+  const msg = `test_e2e_ical_partial_failure: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_ical_escape_newline() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    const escaped = escapeIcsText("line1\nline2");
+    if (escaped.includes("\\n")) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push("escapeIcsText did not replace \\n with \\\n");
+    }
+
+    _log_ical({ event: "e2e_test", test: "escape_newline", passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+  }
+
+  const msg = `test_e2e_ical_escape_newline: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function _buildMockOpenMeteoDaily_ical() {
+  const base = new Date("2025-06-21T00:00:00Z").getTime();
+  const times = Array.from({ length: 16 }, (_, i) => {
+    const d = new Date(base + i * 86400000);
+    return d.toISOString().slice(0, 10);
+  });
+  return () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({
+      daily: {
+        time: times,
+        temperature_2m_max: times.map(() => 22),
+        temperature_2m_min: times.map(() => 14),
+        precipitation_sum: times.map(() => 0.5),
+        weather_code: times.map(() => 3)
+      }
+    })
+  });
+}
+
+function _buildMockWaqiAirQuality_ical() {
+  return () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({ status: "ok", data: { aqi: 45, idx: 12345 } })
+  });
+}
+
+function _runTestsCleanup_ical() {
+  _fetchAllImplIcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
+  _nowOverrideIcal = null;
+  _wikiCacheIcal = {};
+  _breakingNewsCacheIcal = {};
+  CB.create("openmeteo");
+  CB.create("waqi");
+  CB.create("geocoder");
+  CB.create("wikipedia");
+  CB.create("newsapi");
+}
+
+function _log_ical(entry) {
+  try {
+    Logger.log(JSON.stringify({ ts: new Date().toISOString(), source: "icalweather", ...entry }));
+  } catch (e) {
+    Logger.log("LOG_ERROR: " + (e.message || String(e)));
+  }
+}

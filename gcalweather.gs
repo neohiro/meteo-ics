@@ -2687,3 +2687,349 @@ function validateConfig() {
   }
   return errors;
 }
+
+// ============================================================
+// Integration tests (Apps Script runtime required)
+// Run individually from Apps Script editor or via test runner
+// ============================================================
+
+function test_e2e_gcal_success() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_gcal();
+
+    const savedConfig = JSON.parse(JSON.stringify(CONFIG));
+    CONFIG.dryRun = true;
+    CONFIG.locations = [
+      { name: "London", lat: 51.5, lon: -0.1 },
+      { name: "Paris", lat: 48.85, lon: 2.35 }
+    ];
+
+    const mockOm = _buildMockOpenMeteoDaily();
+    const mockWa = _buildMockWaqiAirQuality();
+    const mockWiki = _buildMockWikipediaOnThisDay();
+    const mockNews = _buildMockBreakingNews();
+
+    let fetchLog = [];
+    _fetchAllImplGcal = (requests) => {
+      return requests.map(req => {
+        fetchLog.push(req.url.slice(0, 80));
+        if (req.url.includes("open-meteo.com/v1/forecast")) return mockOm();
+        if (req.url.includes("waqi.info") || req.url.includes("aqicn.org")) return mockWa();
+        if (req.url.includes("en.wikipedia.org")) return mockWiki();
+        if (req.url.includes("newsapi.org")) return mockNews();
+        if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
+          return { getResponseCode: () => 200, getContentText: () => '[{"lat":51.5,"lon":-0.1,"display_name":"London, UK"}]' };
+        }
+        return { getResponseCode: () => 404, getContentText: () => '{}' };
+      });
+    };
+
+    _nowOverrideGcal = new Date("2025-06-21T10:00:00Z").getTime();
+    _wikiCacheGcal = {};
+    _breakingNewsCacheGcal = {};
+    CB.create("openmeteo");
+    CB.create("waqi");
+    CB.create("geocoder");
+    CB.create("wikipedia");
+    CB.create("newsapi");
+
+    syncWeatherToCalendar();
+
+    const meteoFetches = fetchLog.filter(u => u.includes("open-meteo"));
+    if (meteoFetches.length > 0) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push("No Open-Meteo fetches made during sync");
+    }
+
+    _log_gcal({ event: "e2e_test", test: "success", fetchCount: fetchLog.length, passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+    _log_gcal({ event: "e2e_test", test: "success", status: "error", error: e.message || String(e) });
+  } finally {
+    CONFIG.dryRun = savedConfig.dryRun;
+    CONFIG.locations = savedConfig.locations;
+    _runTestsCleanup_gcal();
+  }
+
+  const msg = `test_e2e_gcal_success: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_gcal_429_retry() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_gcal();
+
+    CONFIG.dryRun = true;
+    CONFIG.locations = [{ name: "London", lat: 51.5, lon: -0.1 }];
+
+    let callCount = 0;
+    const mockOm429 = () => ({ getResponseCode: () => 429, getContentText: () => '{"error":"rate limited"}' });
+    const mockOm200 = _buildMockOpenMeteoDaily();
+
+    _fetchAllImplGcal = (requests) => {
+      return requests.map(req => {
+        if (req.url.includes("open-meteo.com")) {
+          callCount++;
+          return callCount === 1 ? mockOm429() : mockOm200();
+        }
+        if (req.url.includes("waqi.info")) return _buildMockWaqiAirQuality()();
+        return { getResponseCode: () => 200, getContentText: () => '{}' };
+      });
+    };
+
+    _nowOverrideGcal = new Date("2025-06-21T10:00:00Z").getTime();
+    _wikiCacheGcal = {};
+    _breakingNewsCacheGcal = {};
+    CB.create("openmeteo");
+
+    syncWeatherToCalendar();
+
+    if (callCount >= 2) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push(`Expected retry on 429, got ${callCount} Open-Meteo call(s)`);
+    }
+
+    _log_gcal({ event: "e2e_test", test: "429_retry", calls: callCount, passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+    _log_gcal({ event: "e2e_test", test: "429_retry", status: "error", error: e.message || String(e) });
+  } finally {
+    _runTestsCleanup_gcal();
+  }
+
+  const msg = `test_e2e_gcal_429_retry: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_gcal_circuit_breaker() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_gcal();
+    CB.create("openmeteo");
+
+    const failureThreshold = CB.cfg("openmeteo").failureThreshold;
+    for (let i = 0; i < failureThreshold; i++) {
+      CB.recordFailure("openmeteo");
+    }
+
+    const state = CB.getState("openmeteo");
+    const OPEN = 1;
+    if (state === OPEN) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push(`Expected circuit OPEN after ${failureThreshold} failures, got state ${state}`);
+    }
+
+    CB.recordFailure("openmeteo");
+    const stateAfter = CB.getState("openmeteo");
+    if (stateAfter === OPEN) {
+      results.passed++;
+    } else {
+      results.failed++;
+      results.errors.push(`Expected circuit OPEN (no state change on extra failure), got state ${stateAfter}`);
+    }
+
+    _log_gcal({ event: "e2e_test", test: "circuit_breaker", passed: results.passed, failed: results.failed, state });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+  } finally {
+    _runTestsCleanup_gcal();
+  }
+
+  const msg = `test_e2e_gcal_circuit_breaker: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_gcal_budget_exhaustion() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_gcal();
+
+    const startMs = Date.now();
+    const BUDGET_MS = 345000;
+    _nowOverrideGcal = startMs - BUDGET_MS - 1000;
+
+    const budget = budgetStart();
+
+    try {
+      checkBudget(budget, "test_label");
+      results.failed++;
+      results.errors.push("Expected checkBudget to throw Budget exhausted");
+    } catch (e) {
+      if (String(e).includes("Budget exhausted")) {
+        results.passed++;
+      } else {
+        results.failed++;
+        results.errors.push("Unexpected error: " + e.message);
+      }
+    }
+
+    _log_gcal({ event: "e2e_test", test: "budget_exhaustion", passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+  } finally {
+    _runTestsCleanup_gcal();
+  }
+
+  const msg = `test_e2e_gcal_budget_exhaustion: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function test_e2e_gcal_partial_failure() {
+  const results = { passed: 0, failed: 0, errors: [] };
+
+  try {
+    _runTestsCleanup_gcal();
+
+    CONFIG.dryRun = true;
+    CONFIG.locations = [
+      { name: "London", lat: 51.5, lon: -0.1 },
+      { name: "Paris", lat: 48.85, lon: 2.35 },
+      { name: "Berlin", lat: 52.52, lon: 13.41 }
+    ];
+
+    let geoCallCount = 0;
+    const mockOm = _buildMockOpenMeteoDaily();
+    const mockWa = _buildMockWaqiAirQuality();
+
+    _fetchAllImplGcal = (requests) => {
+      return requests.map(req => {
+        if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
+          geoCallCount++;
+          if (geoCallCount === 2) {
+            return { getResponseCode: () => 500, getContentText: () => '{"error":"server error"}' };
+          }
+          return { getResponseCode: () => 200, getContentText: () => '[{"lat":51.5,"lon":-0.1,"display_name":"London, UK"}]' };
+        }
+        if (req.url.includes("open-meteo.com")) return mockOm();
+        if (req.url.includes("waqi.info")) return mockWa();
+        return { getResponseCode: () => 200, getContentText: () => '{}' };
+      });
+    };
+
+    _nowOverrideGcal = new Date("2025-06-21T10:00:00Z").getTime();
+    _wikiCacheGcal = {};
+    _breakingNewsCacheGcal = {};
+    CB.create("openmeteo");
+    CB.create("waqi");
+    CB.create("geocoder");
+    CB.create("wikipedia");
+    CB.create("newsapi");
+
+    try {
+      syncWeatherToCalendar();
+      results.passed++;
+    } catch (e) {
+      results.failed++;
+      results.errors.push(`syncWeatherToCalendar threw unexpectedly: ${e.message}`);
+    }
+
+    _log_gcal({ event: "e2e_test", test: "partial_failure", geoCalls: geoCallCount, passed: results.passed, failed: results.failed });
+
+  } catch (e) {
+    results.failed++;
+    results.errors.push(e.message || String(e));
+    _log_gcal({ event: "e2e_test", test: "partial_failure", status: "error", error: e.message || String(e) });
+  } finally {
+    _runTestsCleanup_gcal();
+  }
+
+  const msg = `test_e2e_gcal_partial_failure: ${results.passed} passed, ${results.failed} failed`;
+  Logger.log(msg);
+  results.errors.forEach(e => Logger.log("  ERROR: " + e));
+  return results;
+}
+
+function _buildMockOpenMeteoDaily() {
+  const base = new Date("2025-06-21T00:00:00Z").getTime();
+  const times = Array.from({ length: 16 }, (_, i) => {
+    const d = new Date(base + i * 86400000);
+    return d.toISOString().slice(0, 10);
+  });
+  return () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({
+      daily: {
+        time: times,
+        temperature_2m_max: times.map(() => 22),
+        temperature_2m_min: times.map(() => 14),
+        precipitation_sum: times.map(() => 0.5),
+        weather_code: times.map(() => 3)
+      }
+    })
+  });
+}
+
+function _buildMockWaqiAirQuality() {
+  return () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({ status: "ok", data: { aqi: 45, idx: 12345 } })
+  });
+}
+
+function _buildMockWikipediaOnThisDay() {
+  return () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({
+      type: "onthisday",
+      events: [{ year: 2025, text: "Weather milestone — sunny with 100% accuracy" }]
+    })
+  });
+}
+
+function _buildMockBreakingNews() {
+  return () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({
+      status: "ok", totalResults: 1,
+      articles: [{ title: "Global Weather Summit 2025", description: "Experts gather.", url: "https://example.com/news" }]
+    })
+  });
+}
+
+function _runTestsCleanup_gcal() {
+  _fetchAllImplGcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
+  _nowOverrideGcal = null;
+  _wikiCacheGcal = {};
+  _breakingNewsCacheGcal = {};
+  CB.create("openmeteo");
+  CB.create("waqi");
+  CB.create("geocoder");
+  CB.create("wikipedia");
+  CB.create("newsapi");
+}
+
+function _log_gcal(entry) {
+  try {
+    Logger.log(JSON.stringify({ ts: new Date().toISOString(), source: "gcalweather", ...entry }));
+  } catch (e) {
+    Logger.log("LOG_ERROR: " + (e.message || String(e)));
+  }
+}

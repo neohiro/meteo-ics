@@ -1,0 +1,11 @@
+{"ts": "2025-06-21T10:00:00.000Z", "source": "gcalweather", "event": "fetch", "service": "openmeteo", "code": 200, "latencyMs": 320, "cached": false}
+{"ts": "2025-06-21T10:00:00.350Z", "source": "gcalweather", "event": "fetch", "service": "waqi", "code": 200, "latencyMs": 250, "cached": false}
+{"ts": "2025-06-21T10:00:00.650Z", "source": "gcalweather", "event": "fetch", "service": "wikipedia", "code": 200, "latencyMs": 410, "cached": false}
+{"ts": "2025-06-21T10:00:01.100Z", "source": "gcalweather", "event": "cache", "service": "wikipedia", "key": "wiki:06-21", "hit": true}
+{"ts": "2025-06-21T10:00:01.150Z", "source": "gcalweather", "event": "cache", "service": "wikipedia", "key": "wiki:06-21", "hit": true}
+{"ts": "2025-06-21T10:00:01.200Z", "source": "gcalweather", "event": "fetch", "service": "openmeteo", "code": 429, "latencyMs": 50, "cached": false}
+{"ts": "2025-06-21T10:00:01.700Z", "source": "gcalweather", "event": "fetch", "service": "openmeteo", "code": 200, "latencyMs": 450, "cached": false}
+{"ts": "2025-06-21T10:00:02.200Z", "source": "gcalweather", "event": "circuit", "name": "openmeteo", "transition": "closed_to_open", "failures": 3}
+{"ts": "2025-06-21T10:00:02.300Z", "source": "gcalweather", "event": "e2e_test", "test": "success", "durationMs": 2400, "passed": 2, "failed": 0}
+{"ts": "2025-06-21T10:00:02.350Z", "source": "gcalweather", "event": "e2e_test", "test": "429_retry", "calls": 2, "passed": 1, "failed": 0}
+{"ts": "2025-06-21T10:00:02.400Z", "source": "gcalweather", "event": "e2e_test", "test": "circuit_breaker", "passed": 2, "failed": 0, "state": 1}

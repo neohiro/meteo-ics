@@ -2042,6 +2042,146 @@ def test_ical_assessRoadConditions_uses_isfinite():
 
 
 # =============================================================================
+# Log aggregator validation
+# Verifies tests/log_aggregator.py correctly parses structured logs and computes SLOs.
+# =============================================================================
+group('Log aggregator (observability)')
+
+sys.path.insert(0, os.path.join(REPO, 'tests'))
+try:
+    import log_aggregator
+    _has_log_agg = True
+except ImportError as e:
+    _has_log_agg = False
+    _log_agg_import_err = str(e)
+
+
+def test_log_aggregator_imports():
+    assert_true(_has_log_agg, f'log_aggregator failed to import: {_log_agg_import_err if not _has_log_agg else ""}')
+
+
+def test_log_aggregator_module_has_api():
+    if not _has_log_agg:
+        return
+    for attr in ('parse_logs', 'compute_slos', 'format_report', 'evaluate_slos', 'main'):
+        assert_true(hasattr(log_aggregator, attr), f'log_aggregator missing {attr}')
+
+
+def test_log_aggregator_parses_sample_logs():
+    if not _has_log_agg:
+        return
+    sample = os.path.join(REPO, 'tests', 'fixtures', 'sample_logs.txt')
+    assert_true(os.path.exists(sample), f'sample logs missing: {sample}')
+    records = log_aggregator.parse_logs(sample)
+    assert_true(len(records) > 0, 'expected at least one record')
+    for rec in records:
+        assert_true('event' in rec, f'record missing event: {rec}')
+
+
+def test_log_aggregator_computes_slos():
+    if not _has_log_agg:
+        return
+    sample = os.path.join(REPO, 'tests', 'fixtures', 'sample_logs.txt')
+    records = log_aggregator.parse_logs(sample)
+    slos = log_aggregator.compute_slos(records)
+    assert_true(slos['total_events'] == len(records), 'total_events mismatch')
+    assert_true('fetch' in slos, 'fetch section missing')
+    assert_true('circuit' in slos, 'circuit section missing')
+    assert_true('cache' in slos, 'cache section missing')
+    assert_true('e2e_tests' in slos, 'e2e_tests section missing')
+
+
+def test_log_aggregator_evaluate_slos():
+    if not _has_log_agg:
+        return
+    sample = os.path.join(REPO, 'tests', 'fixtures', 'sample_logs.txt')
+    records = log_aggregator.parse_logs(sample)
+    slos = log_aggregator.compute_slos(records)
+    breaches = log_aggregator.evaluate_slos(slos, thresholds={
+        'fetch_success_rate': 0.95,
+        'e2e_pass_rate': 1.0,
+        'max_circuit_opens': 0,
+    })
+    assert_true(len(breaches) > 0, 'expected SLO breaches on sample with circuit open + 429')
+
+
+def test_log_aggregator_passes_clean_logs():
+    if not _has_log_agg:
+        return
+    clean = [
+        {'ts': '2025-06-21T10:00:00.000Z', 'source': 'gcalweather', 'event': 'fetch', 'service': 'om', 'code': 200},
+        {'ts': '2025-06-21T10:00:00.100Z', 'source': 'gcalweather', 'event': 'cache', 'service': 'wiki', 'hit': True},
+    ]
+    slos = log_aggregator.compute_slos(clean)
+    breaches = log_aggregator.evaluate_slos(slos)
+    assert_eq(len(breaches), 0, f'expected no breaches on clean logs, got: {breaches}')
+
+
+def test_log_aggregator_format_report_string():
+    if not _has_log_agg:
+        return
+    sample = os.path.join(REPO, 'tests', 'fixtures', 'sample_logs.txt')
+    records = log_aggregator.parse_logs(sample)
+    slos = log_aggregator.compute_slos(records)
+    report = log_aggregator.format_report(slos)
+    assert_true(isinstance(report, str), 'report must be string')
+    assert_true('SLO REPORT' in report, 'report must contain header')
+    assert_true('gcalweather' in report, 'report must list source')
+
+
+def test_log_aggregator_handles_empty_logs():
+    if not _has_log_agg:
+        return
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        empty_path = f.name
+    try:
+        records = log_aggregator.parse_logs(empty_path)
+        assert_eq(len(records), 0, 'empty file should produce zero records')
+    finally:
+        os.unlink(empty_path)
+
+
+def test_log_aggregator_skips_invalid_json():
+    if not _has_log_agg:
+        return
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write('not json\n')
+        f.write('{"event": "fetch", "code": 200}\n')
+        f.write('{"missing": "event"}\n')
+        path = f.name
+    try:
+        records = log_aggregator.parse_logs(path)
+        assert_eq(len(records), 1, 'only 1 valid record (with event field)')
+    finally:
+        os.unlink(path)
+
+
+def test_log_aggregator_exit_2_on_missing_file():
+    if not _has_log_agg:
+        return
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, os.path.join(REPO, 'tests', 'log_aggregator.py'), '/nonexistent/log.txt'],
+        capture_output=True, text=True, timeout=5
+    )
+    assert_eq(r.returncode, 2, f'expected exit 2 on missing file, got {r.returncode}')
+
+
+def test_log_aggregator_help():
+    if not _has_log_agg:
+        return
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, os.path.join(REPO, 'tests', 'log_aggregator.py'), '--help'],
+        capture_output=True, text=True, timeout=5
+    )
+    assert_eq(r.returncode, 0, '--help should exit 0')
+    assert_true('slos' in r.stdout.lower(), '--help should mention --slos')
+
+
+# =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================
 # (Moved to end of file to capture all test_ functions defined below.)
@@ -3593,6 +3733,168 @@ def test_buildDashboardPayload_guards_null_inputs():
     assert_true('/^\\d{4}-\\d{2}-\\d{2}$/' in body,
         'buildDashboardPayload must validate targetDateStr format')
 
+
+# =============================================================================
+# Integration test harness validation
+# Verifies integration test functions exist in .gs files and have correct structure.
+# Actual test execution requires Apps Script runtime.
+# =============================================================================
+group('Integration test harness')
+
+E2E_GCAL_TESTS = [
+    'test_e2e_gcal_success',
+    'test_e2e_gcal_429_retry',
+    'test_e2e_gcal_circuit_breaker',
+    'test_e2e_gcal_budget_exhaustion',
+    'test_e2e_gcal_partial_failure',
+]
+
+E2E_ICAL_TESTS = [
+    'test_e2e_ical_success',
+    'test_e2e_ical_429_retry',
+    'test_e2e_ical_circuit_breaker',
+    'test_e2e_ical_budget_exhaustion',
+    'test_e2e_ical_partial_failure',
+    'test_e2e_ical_escape_newline',
+]
+
+E2E_MOCK_HELPERS_GCAL = [
+    '_buildMockOpenMeteoDaily',
+    '_buildMockWaqiAirQuality',
+    '_buildMockWikipediaOnThisDay',
+    '_buildMockBreakingNews',
+    '_runTestsCleanup_gcal',
+    '_log_gcal',
+]
+
+E2E_MOCK_HELPERS_ICAL = [
+    '_buildMockOpenMeteoDaily_ical',
+    '_buildMockWaqiAirQuality_ical',
+    '_runTestsCleanup_ical',
+    '_log_ical',
+]
+
+GMCL = GCAL  # alias for the lookups below
+
+for fn in E2E_GCAL_TESTS:
+    def make_gcal_test(name):
+        def inner():
+            assert_true(
+                re.search(rf'^function {re.escape(name)}\(', GCAL, re.M) is not None,
+                f'{name} not found in gcalweather.gs')
+        return inner
+    globals()[f'test_gcal_integration_{fn[5:]}'] = make_gcal_test(fn)
+
+for fn in E2E_ICAL_TESTS:
+    def make_ical_test(name):
+        def inner():
+            assert_true(
+                re.search(rf'^function {re.escape(name)}\(', ICAL, re.M) is not None,
+                f'{name} not found in icalweather.gs')
+        return inner
+    globals()[f'test_ical_integration_{fn[5:]}'] = make_ical_test(fn)
+
+for fn in E2E_MOCK_HELPERS_GCAL:
+    def make_gcal_helper_test(name):
+        def inner():
+            assert_true(
+                re.search(rf'^function {re.escape(name)}\(', GCAL, re.M) is not None,
+                f'{name} not found in gcalweather.gs')
+        return inner
+    globals()[f'test_gcal_integration_helper_{fn[1:]}'] = make_gcal_helper_test(fn)
+
+for fn in E2E_MOCK_HELPERS_ICAL:
+    def make_ical_helper_test(name):
+        def inner():
+            assert_true(
+                re.search(rf'^function {re.escape(name)}\(', ICAL, re.M) is not None,
+                f'{name} not found in icalweather.gs')
+        return inner
+    globals()[f'test_ical_integration_helper_{fn[1:]}'] = make_ical_helper_test(fn)
+
+def test_e2e_gcal_results_returned():
+    for fn in E2E_GCAL_TESTS:
+        body = re.search(rf'function {fn}\([^) ]*\)\s*\{{[\s\S]*?\n\}}', GCAL)
+        assert_true(body is not None, f'{fn} body not found')
+        code = body.group(0)
+        assert_true('results = {' in code and 'passed:' in code, f'{fn} must return results object with passed/failed')
+        assert_true('return results' in code, f'{fn} must return results')
+
+def test_e2e_ical_results_returned():
+    for fn in E2E_ICAL_TESTS:
+        body = re.search(rf'function {fn}\([^) ]*\)\s*\{{[\s\S]*?\n\}}', ICAL)
+        assert_true(body is not None, f'{fn} body not found')
+        code = body.group(0)
+        assert_true('results = {' in code and 'passed:' in code, f'{fn} must return results object with passed/failed')
+        assert_true('return results' in code, f'{fn} must return results')
+
+def test_e2e_gcal_uses_fetch_mock():
+    for fn in E2E_GCAL_TESTS:
+        if fn in ('test_e2e_gcal_circuit_breaker', 'test_e2e_gcal_budget_exhaustion'):
+            continue  # CB/utility tests — no HTTP needed
+        body = re.search(rf'function {fn}\([^) ]*\)\s*\{{[\s\S]*?\n\}}', GCAL)
+        assert_true(body is not None, f'{fn} body not found')
+        code = body.group(0)
+        assert_true('_fetchAllImplGcal' in code, f'{fn} must use _fetchAllImplGcal mock')
+
+def test_e2e_ical_uses_fetch_mock():
+    for fn in E2E_ICAL_TESTS:
+        if fn in ('test_e2e_ical_circuit_breaker', 'test_e2e_ical_escape_newline', 'test_e2e_ical_budget_exhaustion'):
+            continue  # CB/utility tests — no HTTP needed
+        body = re.search(rf'function {fn}\([^) ]*\)\s*\{{[\s\S]*?\n\}}', ICAL)
+        assert_true(body is not None, f'{fn} body not found')
+        code = body.group(0)
+        assert_true('_fetchAllImplIcal' in code, f'{fn} must use _fetchAllImplIcal mock')
+
+def test_e2e_gcal_log_emitter():
+    for fn in E2E_GCAL_TESTS:
+        body = re.search(rf'function {fn}\([^) ]*\)\s*\{{[\s\S]*?\n\}}', GCAL)
+        assert_true(body is not None, f'{fn} body not found')
+        code = body.group(0)
+        assert_true('_log_gcal' in code and 'event' in code and '"e2e_test"' in code,
+            f'{fn} must call _log_gcal with event payload')
+
+def test_e2e_ical_log_emitter():
+    for fn in E2E_ICAL_TESTS:
+        body = re.search(rf'function {fn}\([^) ]*\)\s*\{{[\s\S]*?\n\}}', ICAL)
+        assert_true(body is not None, f'{fn} body not found')
+        code = body.group(0)
+        assert_true('_log_ical' in code and 'event' in code and '"e2e_test"' in code,
+            f'{fn} must call _log_ical with event payload')
+
+def test_e2e_gcal_cleanup_restores():
+    assert_true(
+        re.search(r'function _runTestsCleanup_gcal\(\)', GCAL, re.M) is not None,
+        '_runTestsCleanup_gcal must exist')
+    assert_true(
+        'bind(UrlFetchApp)' in GCAL and '_fetchAllImplGcal = UrlFetchApp.fetchAll' in GCAL,
+        '_runTestsCleanup_gcal must restore _fetchAllImplGcal to UrlFetchApp.fetchAll.bind')
+    assert_true(
+        '_nowOverrideGcal = null' in GCAL,
+        '_runTestsCleanup_gcal must reset _nowOverrideGcal to null')
+
+def test_e2e_ical_cleanup_restores():
+    assert_true(
+        re.search(r'function _runTestsCleanup_ical\(\)', ICAL, re.M) is not None,
+        '_runTestsCleanup_ical must exist')
+    assert_true(
+        'bind(UrlFetchApp)' in ICAL and '_fetchAllImplIcal = UrlFetchApp.fetchAll' in ICAL,
+        '_runTestsCleanup_ical must restore _fetchAllImplIcal to UrlFetchApp.fetchAll.bind')
+    assert_true(
+        '_nowOverrideIcal = null' in ICAL,
+        '_runTestsCleanup_ical must reset _nowOverrideIcal to null')
+
+def test_e2e_gcal_circuit_getState_exposed():
+    cb_block = re.search(r'const CB = \(\(\) => [\s\S]*?return \{[\s\S]*?\};?\s*\}\)\(\);?', GCAL)
+    assert_true(cb_block is not None, 'CB must exist in gcalweather.gs')
+    cb_code = cb_block.group(0)
+    assert_true('getState' in cb_code, 'CB.getState must be exposed in gcalweather.gs')
+
+def test_e2e_ical_circuit_getState_exposed():
+    cb_block = re.search(r'const CB = \(\(\) => [\s\S]*?return \{[\s\S]*?\};?\s*\}\)\(\);?', ICAL)
+    assert_true(cb_block is not None, 'CB must exist in icalweather.gs')
+    cb_code = cb_block.group(0)
+    assert_true('getState' in cb_code, 'CB.getState must be exposed in icalweather.gs')
 
 # =============================================================================
 # Register all test_ functions and run via t()
