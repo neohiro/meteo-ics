@@ -356,12 +356,14 @@ const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
           if (!_waqiDecryptWarned) { _waqiDecryptWarned = true; Logger.log("waqiTokenResolve: Drive decrypt failed — " + e); }
         }
       }
-      const legacy = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN") || "";
-      if (legacy) {
+      const legacy = PropertiesService.getScriptProperties().getProperty("WAQI_TOKEN");
+      if (legacy && legacy.length > 0) {
         Logger.log("waqiTokenResolve: WAQI_TOKEN in ScriptProperties is deprecated — call waqiTokenSave() to migrate");
+        _waqiTokenCache = legacy;
+        return legacy;
       }
-      _waqiTokenCache = legacy;
-      return legacy;
+      _waqiTokenCache = "";
+      return "";
     }
   };
 })();
@@ -618,8 +620,7 @@ const ASTRONOMICAL_EVENTS = {
   "05-07": "Eta Aquariids Active Window",
   "05-23": "🌕 Full Moon — Flower Moon",
   "06-06": "🌑 New Moon",
-  "06-21": "☀️ Summer Solstice (Longest Day)",
-  "06-21": "🌕 Full Moon — Strawberry Moon",
+  "06-21": "☀️ Summer Solstice (Longest Day); 🌕 Full Moon — Strawberry Moon",
   "07-04": "Earth at Aphelion (Furthest from Sun)",
   "07-06": "🌑 New Moon",
   "07-21": "🌕 Full Moon — Buck Moon",
@@ -666,15 +667,13 @@ const LUNAR_ECLIPSES = {
 };
 
 const PLANETARY_EVENTS = {
-  "01-12": "Mercury at Greatest Western Elongation (Morning)",
-  "03-24": "Mercury at Greatest Eastern Elongation (Evening)",
+  "01-12": "Mercury at Greatest Western Elongation (Morning); Mars at Opposition",
+  "03-24": "Mercury at Greatest Eastern Elongation (Evening); Venus at Greatest Eastern Elongation (Evening Star)",
   "05-09": "Mercury at Greatest Western Elongation (Morning)",
   "07-22": "Mercury at Greatest Eastern Elongation (Evening)",
   "09-05": "Mercury at Greatest Western Elongation (Morning)",
   "11-16": "Mercury at Greatest Eastern Elongation (Evening)",
-  "03-24": "Venus at Greatest Eastern Elongation (Evening Star)",
   "06-04": "Venus at Greatest Western Elongation (Morning Star)",
-  "01-12": "Mars at Opposition",
   "09-21": "Neptune at Opposition",
   "11-03": "Uranus at Opposition",
   "12-07": "Jupiter at Opposition",
@@ -1192,12 +1191,9 @@ function doGet(e) {
   const dryRun = parseBoolParam(params.dryRun || params.dryrun, false);
   const aqProvider = parseAqProvider(params.aqProvider);
   const aqRadius = parseAqRadius(params.aqRadius);
-  const waqiTokenParam = params.waqiToken ? String(params.waqiToken).trim() : null;
-  if (waqiTokenParam && /^[A-Za-z0-9]{8,128}$/.test(waqiTokenParam)) {
-    PropertiesService.getScriptProperties().setProperty("WAQI_TOKEN", waqiTokenParam);
-  } else if (params.waqiToken) {
-    Logger.log("doGet: rejected waqiToken (must be 8-128 alphanumeric chars)");
-  }
+  // WAQI token must be set via admin function (setupWaqiToken), not URL param.
+  // Accepting token via URL would persist attacker-controlled tokens and cause
+  // ScriptProperties quota churn on every request.
 
   // 5. Generate ICS Feed
   let icsContent;
@@ -1526,7 +1522,9 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
     const ensMaxKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_max")) : [];
     const ensMinKeys = data.ens ? Object.keys(data.ens).filter(k => k.startsWith("temperature_2m_min")) : [];
 
-    const offsetLimit = Math.min(maxDays, data.det.time.length);
+    const detLen = data.det.time ? data.det.time.length : 0;
+    const ensLen = data.ens && data.ens.time ? data.ens.time.length : 0;
+    const offsetLimit = Math.min(maxDays, Math.max(detLen, ensLen));
     for (let offset = 0; offset < offsetLimit; offset++) {
       checkBudget(budget, "city=" + loc.name + " offset=" + offset);
       const targetDate = new Date(todayRef.getTime() + offset * 24 * 60 * 60 * 1000);
@@ -1816,6 +1814,7 @@ function escapeIcsText(str) {
     .replace(/\\/g, "\\\\")
     .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n")
     .replace(/\r/g, "");
 }
 
@@ -2005,6 +2004,8 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
     // Circuit breaker: skip if open
     if (!CB.isCallAllowed('openaq')) {
       Logger.log("Circuit [openaq] OPEN — skipping OpenAQ fetch");
+    } else if (!isValidLatLon(loc.lat, loc.lon)) {
+      Logger.log("fetchGlobalAQI/OpenAQ: invalid lat/lon for " + loc.name);
     } else {
       try {
         const res = UrlFetchApp.fetch(
@@ -2067,6 +2068,8 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
     // Circuit breaker: skip if open
     if (!CB.isCallAllowed('waqi')) {
       Logger.log("Circuit [waqi] OPEN — skipping WAQI fetch");
+    } else if (!isValidLatLon(loc.lat, loc.lon)) {
+      Logger.log("fetchGlobalAQI/WAQI: invalid lat/lon for " + loc.name);
     } else {
       try {
         const token = waqiTokenResolve();
@@ -2125,7 +2128,10 @@ function geocodeCity(name) {
     if (data && data.length) {
       return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
     }
-  } catch (e) {}
+  } catch (e) {
+    Logger.log("geocodeCity failed for " + name + ": " + e);
+    CB.recordFailure('geocoder');
+  }
   return null;
 }
 
@@ -2713,26 +2719,34 @@ function getLunarPhase(dateStr) {
 
 function getMoonPhaseDetails(date) {
   if (date == null) return { glyph: "🌑", name: "New Moon", fraction: 0, illumination: "0%" };
-  const lp = 2551443; // synodic month in seconds
-  // UTC reference epoch for new moon near 1970-01-07.
+  const SYNODIC_MONTH_SEC = 2551443; // synodic month in seconds (29.53059 days)
   const newMoonRef = Date.UTC(1970, 0, 7, 20, 35, 0);
   const ms = (date instanceof Date) ? date.getTime() : Number(date);
   if (!Number.isFinite(ms)) return { glyph: "🌑", name: "New Moon", fraction: 0, illumination: "0%" };
-  let phase = ((ms - newMoonRef) / 1000) % lp;
-  if (phase < 0) phase += lp; // defensive for pre-1970
-  const dayOfCycle = phase / 86400; // days into current cycle
-  // Illumination: 0 = new moon, 1 = full moon.
-  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / (lp / 86400))) / 2;
+  let phase = ((ms - newMoonRef) / 1000) % SYNODIC_MONTH_SEC;
+  if (phase < 0) phase += SYNODIC_MONTH_SEC;
+  const dayOfCycle = phase / 86400;
+  const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / (SYNODIC_MONTH_SEC / 86400))) / 2;
   let glyph, name;
-  if (dayOfCycle < 1.85)       { glyph = "🌑"; name = "New Moon"; }
-  else if (dayOfCycle < 5.55)  { glyph = "🌒"; name = "Waxing Crescent"; }
-  else if (dayOfCycle < 9.25)  { glyph = "🌓"; name = "1st Quarter"; }
-  else if (dayOfCycle < 12.95) { glyph = "🌔"; name = "Waxing Gibbous"; }
-  else if (dayOfCycle < 16.60) { glyph = "🌕"; name = "Full Moon"; }
-  else if (dayOfCycle < 20.30) { glyph = "🌖"; name = "Waning Gibbous"; }
-  else if (dayOfCycle < 24.00) { glyph = "🌗"; name = "Last Quarter"; }
-  else if (dayOfCycle < 27.70) { glyph = "🌘"; name = "Waning Crescent"; }
-  else                         { glyph = "🌑"; name = "New Moon"; }
+  // Boundaries derived from 8 equal 45° segments (synodic month = 29.53059 days)
+  // 0.00000–1.84566  New Moon
+  // 1.84566–5.53698  Waxing Crescent
+  // 5.53698–9.22830  First Quarter
+  // 9.22830–12.91962 Waxing Gibbous
+  // 12.91962–16.61094 Full Moon
+  // 16.61094–20.30226 Waning Gibbous
+  // 20.30226–23.99358 Last Quarter
+  // 23.99358–27.68490 Waning Crescent
+  // 27.68490–29.53059 New Moon
+  if (dayOfCycle < 1.84566)       { glyph = "🌑"; name = "New Moon"; }
+  else if (dayOfCycle < 5.53698)  { glyph = "🌒"; name = "Waxing Crescent"; }
+  else if (dayOfCycle < 9.22830)  { glyph = "🌓"; name = "1st Quarter"; }
+  else if (dayOfCycle < 12.91962) { glyph = "🌔"; name = "Waxing Gibbous"; }
+  else if (dayOfCycle < 16.61094) { glyph = "🌕"; name = "Full Moon"; }
+  else if (dayOfCycle < 20.30226) { glyph = "🌖"; name = "Waning Gibbous"; }
+  else if (dayOfCycle < 23.99358) { glyph = "🌗"; name = "Last Quarter"; }
+  else if (dayOfCycle < 27.68490) { glyph = "🌘"; name = "Waning Crescent"; }
+  else                            { glyph = "🌑"; name = "New Moon"; }
   return { glyph, name, fraction: illumination, illumination: Math.round(illumination * 100) + "%" };
 }
 

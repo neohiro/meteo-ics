@@ -477,7 +477,7 @@ def test_gcal_moon_uses_utc():
 
 def test_gcal_moon_boundaries():
     assert_true(_moon_gcal is not None)
-    for b in ('1.85', '5.55', '9.25', '12.95', '16.60', '20.30', '24.00', '27.70'):
+    for b in ('1.84566', '5.53698', '9.22830', '12.91962', '16.61094', '20.30226', '23.99358', '27.68490'):
         assert_true(b in _moon_gcal.group(0), f'boundary {b} missing')
 
 
@@ -557,9 +557,11 @@ def test_ical_helpers():
     assert_true('function clamp(' in ICAL)
 
 
-def test_ical_escape_no_newline_replace():
+def test_ical_escape_newline_replaced():
+    """escapeIcsText must escape newlines per RFC 5545 (literal \n)"""
     assert_true(_escape_ical is not None)
-    assert_true(not re.search(r'\.replace\([^)]*\\\\n[^)]*\)', _escape_ical.group(0)))
+    assert_true(re.search(r'\.replace\([^)]*\\\\n[^)]*\)', _escape_ical.group(0)),
+        'escapeIcsText must escape newlines per RFC 5545')
 
 
 def test_ical_fold_octet_count():
@@ -2153,14 +2155,14 @@ def test_waqi_url_conditionally_includes_token():
 
 
 def test_ical_aqProvider_url_param():
-    """doGet must read aqProvider and waqiToken params."""
+    """doGet must read aqProvider param (NOT waqiToken)."""
     fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)
     assert_true(fn is not None)
     body = fn.group(0)
     assert_true('aqProvider' in body,
         'doGet must read aqProvider URL param')
-    assert_true('waqiToken' in body,
-        'doGet must read waqiToken URL param')
+    assert_true('waqiToken' not in body,
+        'doGet must NOT read waqiToken URL param (security fix)')
 
 
 def test_ical_generateIcsFeed_passes_aqProvider():
@@ -2390,27 +2392,20 @@ def test_gcal_config_aqProvider():
         'CONFIG must have aqProvider: "auto" default')
 
 
-def test_ical_waqi_token_stored_in_script_props():
-    """doGet must persist waqiToken to ScriptProperties and validate it.
-
-    Token must be 8-128 alphanumeric characters (defence against script-property
-    abuse via arbitrarily large strings and injection of special characters into
-    the WAQI URL).
+def test_ical_waqi_token_not_from_url():
+    """doGet must NOT accept waqiToken from URL param (security fix).
+    WAQI token must be set via admin function (waqiTokenSave) to prevent
+    attacker-controlled token persistence and ScriptProperties quota abuse.
     """
     fn = re.search(r'function doGet\([\s\S]*?\n\}', ICAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    assert_true('setProperty' in body and 'WAQI_TOKEN' in body,
-        'waqiToken must be stored to ScriptProperties under WAQI_TOKEN key')
-    # Guard: token must be validated before storage (check via regex, not just truthy).
-    # The fix uses: waqiTokenParam && /^[A-Za-z0-9]{8,128}$/.test(waqiTokenParam)
-    # Simple string search covers the intent without fragile regex.
-    assert_true(
-        'waqiTokenParam && /' in body and '.test(waqiTokenParam)' in body,
-        'waqiTokenParam must be validated via regex .test() before ScriptProperties storage')
-    # When validation fails, the code should log/reject (not silently accept)
-    assert_true(re.search(r'reject|invalid|rejected', body, re.I),
-        'doGet must log/reject invalid waqiToken rather than silently ignore')
+    # Must NOT write WAQI_TOKEN from URL param
+    assert_true('setProperty' not in body or 'WAQI_TOKEN' not in body,
+        'doGet must NOT write WAQI_TOKEN to ScriptProperties from URL param')
+    # Must NOT read waqiToken from params
+    assert_true('params.waqiToken' not in body,
+        'doGet must NOT read waqiToken from URL params')
 
 
 def test_ical_aqi_display_includes_source_context():
