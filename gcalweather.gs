@@ -217,6 +217,7 @@ const { budgetStart, checkBudget } = (() => {
   return {
     budgetStart() {
       _budgetWarnedAt = new Set();
+      _nowOverrideGcal = null;
       return _now();
     },
     budgetSetNow(fn) {
@@ -381,9 +382,13 @@ function getOpenMeteoAqCap() {
     }
   }
   const detected = _probeOpenMeteoAqCap();
-  _probedAqCapGcal = detected;
-  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
-  props.setProperty(_AQ_CAP_PROP, String(detected) + "," + today);
+  if (detected.probeSucceeded) {
+    _probedAqCapGcal = detected.cap;
+    const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+    props.setProperty(_AQ_CAP_PROP, String(detected.cap) + "," + today);
+  } else {
+    _probedAqCapGcal = detected.cap;
+  }
   return _probedAqCapGcal;
 }
 
@@ -392,6 +397,7 @@ function _probeOpenMeteoAqCap() {
   const PROBE_LAT = 50.95, PROBE_LON = 5.97;
   const lo = 5, hi = 16;
   let cap = OPEN_METEO_AQ_FORECAST_DAYS_CAP;
+  let probeSucceeded = false;
   const tryFetch = (days) => {
     try {
       const url = PROBE_URL + "?latitude=" + PROBE_LAT + "&longitude=" + PROBE_LON +
@@ -407,6 +413,7 @@ function _probeOpenMeteoAqCap() {
     const mid = Math.floor((l + r) / 2);
     const code = tryFetch(mid);
     if (code === 200) {
+      probeSucceeded = true;
       cap = mid;
       l = mid + 1;
     } else if (code >= 400) {
@@ -421,7 +428,7 @@ function _probeOpenMeteoAqCap() {
       " (hardcoded default). Detected cap: " + cap + ". " +
       "Update OPEN_METEO_AQ_FORECAST_DAYS_CAP to " + cap + " in both files.");
   }
-  return cap;
+  return { cap, probeSucceeded };
 }
 
 const ASTRONOMICAL_EVENTS = {
@@ -872,12 +879,13 @@ function fetchWikipediaOnThisDay(month, day) {
           .slice(0, 5)
           .map(e => `${e.year}: ${e.text}`);
         const result = filtered.join("; ");
-        // Enforce cache size limit (simple FIFO eviction)
-        if (Object.keys(_wikiCacheGcal).length >= _WIKI_CACHE_MAX) {
+        // Store result first, then enforce cache size limit (FIFO eviction)
+        // This ensures eviction only happens when we actually have a result to cache
+        _wikiCacheGcal[inMemKey] = result;
+        if (Object.keys(_wikiCacheGcal).length > _WIKI_CACHE_MAX) {
           const firstKey = Object.keys(_wikiCacheGcal)[0];
           delete _wikiCacheGcal[firstKey];
         }
-        _wikiCacheGcal[inMemKey] = result;
         return result;
       }
     } else {
@@ -893,7 +901,7 @@ function fetchWikipediaOnThisDay(month, day) {
 }
 
 function fetchWikipediaOnThisDayCached(month, day) {
-  const cacheKey = "wiki_onthisday_" + month + "_" + day;
+  const cacheKey = "wiki_onthisday_gcal_" + month + "_" + day;
   const cached = _scriptProps.getProperty(cacheKey);
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   
@@ -1232,7 +1240,13 @@ function fetchAllAtmosphericDataParallel(locationPool) {
         continue;
       }
 
-      const json = JSON.parse(res.getContentText());
+      let json;
+      try {
+        json = JSON.parse(res.getContentText());
+      } catch (e) {
+        Logger.log(`fetchAllAtmosphericDataParallel: ${meta.key}/${meta.type} JSON parse failed: ${e}`);
+        continue;
+      }
       const cacheObj = weatherCache.get(meta.key);
 
       if (meta.type === "det") {
@@ -1314,9 +1328,10 @@ function fetchAllAtmosphericDataParallel(locationPool) {
     const globalAqi = gcalFetchGlobalAQI(loc, aqProvider, CONFIG.aqRadius);
     if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
       if (cacheObj.aq && cacheObj.aq.time) {
+        const seen = new Set(cacheObj.aq.time);
         globalAqi.time.forEach((d, i) => {
-          const exIdx = cacheObj.aq.time.indexOf(d);
-          if (exIdx === -1) {
+          if (!seen.has(d)) {
+            seen.add(d);
             const safe = (v) => (v === undefined || v === null || Number.isNaN(v)) ? null : v;
             cacheObj.aq.time.push(d);
             cacheObj.aq.european_aqi.push(safe(globalAqi.european_aqi[i]));
@@ -1374,7 +1389,14 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
         const code = res.getResponseCode();
         if (code === 200) {
           CB.recordSuccess('openaq');
-          const json = JSON.parse(res.getContentText());
+          let json;
+          try {
+            json = JSON.parse(res.getContentText());
+          } catch (e) {
+            CB.recordFailure('openaq');
+            Logger.log(`gcalFetchGlobalAQI/OpenAQ JSON parse failed for ${loc.name}: ${e}`);
+            return null;
+          }
           if (json.results && json.results.length > 0) {
             const measurements = json.results[0].measurements || [];
             const openaqVals = {};
@@ -1431,7 +1453,14 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
         const code = res.getResponseCode();
         if (code === 200) {
           CB.recordSuccess('waqi');
-          const json = JSON.parse(res.getContentText());
+          let json;
+          try {
+            json = JSON.parse(res.getContentText());
+          } catch (e) {
+            CB.recordFailure('waqi');
+            Logger.log(`gcalFetchGlobalAQI/WAQI JSON parse failed for ${loc.name}: ${e}`);
+            return null;
+          }
           if (json.data && json.data.aqi != null && json.data.aqi !== undefined) {
             const aqiRaw = Number(json.data.aqi);
             const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
@@ -2506,7 +2535,7 @@ function detectEventCity(text, locationPool) {
   if (!text) return null;
   const normalizedText = norm(text);
 
-  const sortedKeys = Array.from(locationPool.keys()).sort((a, b) => b.length - a.length);
+  const sortedKeys = Array.from(locationPool.keys()).sort((a, b) => b.length - a.length || a.localeCompare(b));
   for (let key of sortedKeys) {
     if (normalizedText.includes(key)) return key;
   }

@@ -80,9 +80,13 @@ function getOpenMeteoAqCap() {
     }
   }
   const detected = _probeOpenMeteoAqCap();
-  _probedAqCapIcal = detected;
-  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
-  props.setProperty(_AQ_CAP_PROP, String(detected) + "," + today);
+  if (detected.probeSucceeded) {
+    _probedAqCapIcal = detected.cap;
+    const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
+    props.setProperty(_AQ_CAP_PROP, String(detected.cap) + "," + today);
+  } else {
+    _probedAqCapIcal = detected.cap;
+  }
   return _probedAqCapIcal;
 }
 
@@ -91,6 +95,7 @@ function _probeOpenMeteoAqCap() {
   const PROBE_LAT = 50.95, PROBE_LON = 5.97;
   const lo = 5, hi = 16;
   let cap = OPEN_METEO_AQ_FORECAST_DAYS_CAP;
+  let probeSucceeded = false;
   const tryFetch = (days) => {
     try {
       const url = PROBE_URL + "?latitude=" + PROBE_LAT + "&longitude=" + PROBE_LON +
@@ -106,6 +111,7 @@ function _probeOpenMeteoAqCap() {
     const mid = Math.floor((l + r) / 2);
     const code = tryFetch(mid);
     if (code === 200) {
+      probeSucceeded = true;
       cap = mid;
       l = mid + 1;
     } else if (code >= 400) {
@@ -120,7 +126,7 @@ function _probeOpenMeteoAqCap() {
       " (hardcoded default). Detected cap: " + cap + ". " +
       "Update OPEN_METEO_AQ_FORECAST_DAYS_CAP to " + cap + " in both files.");
   }
-  return cap;
+  return { cap, probeSucceeded };
 }
 
 const ICAL_CONFIG = {
@@ -1033,12 +1039,13 @@ function fetchWikipediaOnThisDay(month, day) {
           .slice(0, 5)
           .map(e => `${e.year}: ${e.text}`);
         const result = filtered.join("; ");
-        // Enforce cache size limit (simple FIFO eviction)
-        if (Object.keys(_wikiCacheIcal).length >= _WIKI_CACHE_MAX) {
+        // Store result first, then enforce cache size limit (FIFO eviction)
+        // This ensures eviction only happens when we actually have a result to cache
+        _wikiCacheIcal[inMemKey] = result;
+        if (Object.keys(_wikiCacheIcal).length > _WIKI_CACHE_MAX) {
           const firstKey = Object.keys(_wikiCacheIcal)[0];
           delete _wikiCacheIcal[firstKey];
         }
-        _wikiCacheIcal[inMemKey] = result;
         return result;
       }
     } else {
@@ -1054,7 +1061,7 @@ function fetchWikipediaOnThisDay(month, day) {
 }
 
 function fetchWikipediaOnThisDayCached(month, day) {
-  const cacheKey = "wiki_onthisday_" + month + "_" + day;
+  const cacheKey = "wiki_onthisday_ical_" + month + "_" + day;
   const cached = _scriptProps.getProperty(cacheKey);
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   
@@ -1851,12 +1858,22 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
       { url: aqUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
     ]);
 
-    if (responses[0].getResponseCode() === 200) result.det = JSON.parse(responses[0].getContentText()).daily;
-    else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} deterministic returned HTTP ${responses[0].getResponseCode()}`);
-    if (responses[2].getResponseCode() === 200) result.ens = JSON.parse(responses[2].getContentText()).daily;
-    else Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} ensemble returned HTTP ${responses[2].getResponseCode()}`);
+    if (responses[0].getResponseCode() === 200) {
+      try { result.det = JSON.parse(responses[0].getContentText()).daily; }
+      catch (e) { Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} deterministic JSON parse failed: ${e}`); }
+    } else {
+      Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} deterministic returned HTTP ${responses[0].getResponseCode()}`);
+    }
+    if (responses[2].getResponseCode() === 200) {
+      try { result.ens = JSON.parse(responses[2].getContentText()).daily; }
+      catch (e) { Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} ensemble JSON parse failed: ${e}`); }
+    } else {
+      Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} ensemble returned HTTP ${responses[2].getResponseCode()}`);
+    }
     if (responses[3].getResponseCode() === 200) {
-      const h = JSON.parse(responses[3].getContentText()).hourly;
+      let h;
+      try { h = JSON.parse(responses[3].getContentText()).hourly; }
+      catch (e) { Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} air-quality JSON parse failed: ${e}`); }
       if (h && h.time) {
         const aqAgg = {};
         for (let k = 0; k < h.time.length; k++) {
@@ -1894,7 +1911,9 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
     }
 
     if (responses[1].getResponseCode() === 200) {
-      const hData = JSON.parse(responses[1].getContentText()).hourly;
+      let hData;
+      try { hData = JSON.parse(responses[1].getContentText()).hourly; }
+      catch (e) { Logger.log(`fetchIcsAtmosphericDataParallel: ${loc.name} hourly JSON parse failed: ${e}`); }
       if (hData && hData.time) {
         const aggs = {};
         for (let i = 0; i < hData.time.length; i++) {
@@ -1936,9 +1955,10 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
     const globalAqi = fetchGlobalAQI(loc, aqProvider, radius);
     if (globalAqi && globalAqi.time && globalAqi.time.length > 0) {
       if (result.aq && result.aq.time) {
+        const seen = new Set(result.aq.time);
         globalAqi.time.forEach((d, i) => {
-          const exIdx = result.aq.time.indexOf(d);
-          if (exIdx === -1) {
+          if (!seen.has(d)) {
+            seen.add(d);
             const safe = (v) => (v === undefined || v === null || Number.isNaN(v)) ? null : v;
             result.aq.time.push(d);
             result.aq.european_aqi.push(safe(globalAqi.european_aqi[i]));
@@ -1994,7 +2014,9 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
         const code = res.getResponseCode();
         if (code === 200) {
           CB.recordSuccess('openaq');
-          const json = JSON.parse(res.getContentText());
+          let json;
+          try { json = JSON.parse(res.getContentText()); }
+          catch (e) { CB.recordFailure('openaq'); Logger.log(`fetchGlobalAQI/OpenAQ JSON parse failed for ${loc.name}: ${e}`); return null; }
           if (json.results && json.results.length > 0) {
             const measurements = json.results[0].measurements || [];
             const now = new Date();
@@ -2057,7 +2079,9 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
         const code = res.getResponseCode();
         if (code === 200) {
           CB.recordSuccess('waqi');
-          const json = JSON.parse(res.getContentText());
+          let json;
+          try { json = JSON.parse(res.getContentText()); }
+          catch (e) { CB.recordFailure('waqi'); Logger.log(`fetchGlobalAQI/WAQI JSON parse failed for ${loc.name}: ${e}`); return null; }
           if (json.data && json.data.aqi != null && json.data.aqi !== undefined) {
             const aqiRaw = Number(json.data.aqi);
             const aqi = isNaN(aqiRaw) ? null : Math.round(aqiRaw);
@@ -2488,6 +2512,16 @@ const ADVICE_TEXTS = {
     "de": "Schlechte Luft — Sport verschieben",
     "nl": "Slechte lucht — sport uitstellen",
   },
+  "aqiMonitoring": {
+    "en": "AQI monitoring — data unavailable",
+    "zh": "空气质量监测中 — 数据不可用",
+    "hi": "वायु गुणवत्ता निगरानी — डेटा अनुपलब्ध",
+    "es": "Monitoreo AQI — datos no disponibles",
+    "fr": "Surveillance AQI — données indisponibles",
+    "ar": "مراقبة AQI — البيانات غير متاحة",
+    "de": "AQI-Überwachung — Daten nicht verfügbar",
+    "nl": "AQI monitoring — gegevens onbeschikbaar",
+  },
   "pollenHigh": {
     "en": "Tree pollen high — allergy meds advised",
     "zh": "树花粉高 — 建议服用过敏药",
@@ -2589,6 +2623,8 @@ function generatePrioritizedAdvices(ctx) {
   }
   if (ctx.aqi !== null && ctx.aqiType !== "USAQI" && ctx.aqi > 40) {
     pool.push({ p: 70, text: adv("airQualPoor", lang) });
+  } else if (ctx.aqi === null) {
+    pool.push({ p: 5, text: adv("aqiMonitoring", lang) });
   }
   if (Number.isFinite(ctx.pollen) && ctx.pollen >= 5) {
     pool.push({ p: 50, text: adv("pollenHigh", lang) });
