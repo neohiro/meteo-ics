@@ -3885,6 +3885,61 @@ def test_e2e_ical_circuit_getState_exposed():
     cb_code = cb_block.group(0)
     assert_true('getState' in cb_code, 'CB.getState must be exposed in icalweather.gs')
 
+
+# E2E tests that mutate CONFIG.locations must save+restore it in a finally block
+# to avoid leaking test state into subsequent real runs.
+E2E_CONFIG_MUTATORS_GCAL = [
+    'test_e2e_gcal_success',
+    'test_e2e_gcal_429_retry',
+    'test_e2e_gcal_partial_failure',
+]
+
+
+def test_e2e_gcal_config_save_restore():
+    """Each test that sets CONFIG.dryRun or CONFIG.locations must restore them in finally."""
+    for fn in E2E_CONFIG_MUTATORS_GCAL:
+        # Find the function's line range by looking for 'function fn(...) {'
+        start_match = re.search(rf'^function {re.escape(fn)}\(', GCAL, re.M)
+        assert_true(start_match is not None, f'{fn} must be a function')
+        start_line = GCAL[:start_match.start()].count('\n')
+        # Scan forward from start, track brace depth; stop when depth returns to 0
+        depth = 0
+        pos = start_match.start()
+        func_start = GCAL.index('{', pos)
+        depth = 1
+        i = func_start + 1
+        while i < len(GCAL) and depth > 0:
+            c = GCAL[i]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+            i += 1
+        func_body = GCAL[func_start:i]
+        assert_true('savedConfig' in func_body and 'JSON.parse' in func_body,
+            f'{fn} must save CONFIG before mutation')
+        assert_true('finally' in func_body,
+            f'{fn} must have a finally block')
+        # Check finally block restores both dryRun and locations
+        finally_match = re.search(r'finally\s*\{', func_body)
+        assert_true(finally_match is not None, f'{fn} finally block not found')
+        finally_body = func_body[finally_match.start():]
+        depth = 0
+        j = 0
+        while j < len(finally_body):
+            c = finally_body[j]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    finally_body = finally_body[:j + 1]
+                    break
+            j += 1
+        assert_true('CONFIG.dryRun' in finally_body and 'CONFIG.locations' in finally_body,
+            f'{fn} finally block must restore CONFIG.dryRun and CONFIG.locations')
+
+
 # =============================================================================
 # Register all test_ functions and run via t()
 # =============================================================================

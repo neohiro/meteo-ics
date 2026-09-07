@@ -2771,6 +2771,7 @@ function test_e2e_gcal_429_retry() {
   try {
     _runTestsCleanup_gcal();
 
+    const savedConfig = JSON.parse(JSON.stringify(CONFIG));
     CONFIG.dryRun = true;
     CONFIG.locations = [{ name: "London", lat: 51.5, lon: -0.1 }];
 
@@ -2810,6 +2811,10 @@ function test_e2e_gcal_429_retry() {
     results.errors.push(e.message || String(e));
     _log_gcal({ event: "e2e_test", test: "429_retry", status: "error", error: e.message || String(e) });
   } finally {
+    if (typeof savedConfig !== "undefined") {
+      CONFIG.dryRun = savedConfig.dryRun;
+      CONFIG.locations = savedConfig.locations;
+    }
     _runTestsCleanup_gcal();
   }
 
@@ -2910,6 +2915,7 @@ function test_e2e_gcal_partial_failure() {
   try {
     _runTestsCleanup_gcal();
 
+    const savedConfig = JSON.parse(JSON.stringify(CONFIG));
     CONFIG.dryRun = true;
     CONFIG.locations = [
       { name: "London", lat: 51.5, lon: -0.1 },
@@ -2960,6 +2966,10 @@ function test_e2e_gcal_partial_failure() {
     results.errors.push(e.message || String(e));
     _log_gcal({ event: "e2e_test", test: "partial_failure", status: "error", error: e.message || String(e) });
   } finally {
+    if (typeof savedConfig !== "undefined") {
+      CONFIG.dryRun = savedConfig.dryRun;
+      CONFIG.locations = savedConfig.locations;
+    }
     _runTestsCleanup_gcal();
   }
 
