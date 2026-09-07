@@ -1586,7 +1586,9 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
 
         if (data.hourlyAgg && data.hourlyAgg[dateKey]) {
           pressure = data.hourlyAgg[dateKey].pressure || 1013.25;
-          soilTempMin = data.hourlyAgg[dateKey].soilMin !== null ? data.hourlyAgg[dateKey].soilMin : currentMin;
+          soilTempMin = Number.isFinite(data.hourlyAgg[dateKey].soilMin)
+            ? data.hourlyAgg[dateKey].soilMin
+            : currentMin;
           humidity = data.hourlyAgg[dateKey].humidity;
           dewPoint = data.hourlyAgg[dateKey].dewPoint;
           cloudCover = data.hourlyAgg[dateKey].cloudCover;

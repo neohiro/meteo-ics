@@ -1895,7 +1895,9 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       if (data.hourlyAgg && data.hourlyAgg[targetDateStr]) {
         pressure = data.hourlyAgg[targetDateStr].pressure || 1013.25;
-        soilTempMin = data.hourlyAgg[targetDateStr].soilMin !== null ? data.hourlyAgg[targetDateStr].soilMin : currentMin;
+        soilTempMin = Number.isFinite(data.hourlyAgg[targetDateStr].soilMin)
+          ? data.hourlyAgg[targetDateStr].soilMin
+          : currentMin;
       } else {
         soilTempMin = currentMin;
       }
