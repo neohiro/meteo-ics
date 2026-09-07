@@ -3116,11 +3116,11 @@ def test_lint_balance_reports_cross_file_collision():
     inside IIFEs or function bodies (e.g. _budgetWarnedAt inside checkBudget's closure)
     are function-scoped and cannot collide across files, so they are excluded.
 
-    Expected collisions (column-0 in both files):
-      _fetchAllImpl — DI seam for UrlFetchApp.fetchAll
-      _nowOverride  — test seam for budget time-mocking
-      _probedAqCap  — runtime cache for AQ API cap probe
-      _wikiCache    — execution-scoped dedup for Wikipedia OnThisDay fetches
+    Expected collisions (column-0 in both files): NONE — all renamed to file-specific
+      _fetchAllImplGcal / _fetchAllImplIcal
+      _nowOverrideGcal  / _nowOverrideIcal
+      _probedAqCapGcal   / _probedAqCapIcal
+      _wikiCacheGcal     / _wikiCacheIcal
 
     Excluded (IIFE-scope, not module-scope):
       _budgetWarnedAt — inside checkBudget IIFE
@@ -3130,12 +3130,11 @@ def test_lint_balance_reports_cross_file_collision():
     from pathlib import Path
     repo = Path(__file__).resolve().parent.parent
     paths = [repo / "gcalweather.gs", repo / "icalweather.gs"]
-    ok, report = lint_cross_file_collision(paths)
-    assert_true(not ok, 'lint must report module-scope collisions')
-    assert_eq(len(report), 4, f'expected 4 module-scope collisions, got {len(report)}')
-    for name in ['_fetchAllImpl', '_nowOverride', '_probedAqCap', '_wikiCache']:
-        assert_true(any(name in r for r in report),
-            f"collision report must mention '{name}'")
+    ok, report, underscore_names = lint_cross_file_collision(paths)
+    assert_true(ok, 'lint must not report module-scope collisions after renaming')
+    assert_eq(len(report), 0, f'expected 0 module-scope collisions, got {len(report)}')
+    safe = {n: files for n, files in underscore_names.items() if len(files) == 1}
+    assert_true(len(safe) > 0, f'expected some safe single-file underscore lets, got {len(safe)}')
     excluded = ['_budgetWarnedAt', '_waqiTokenCache', '_waqiDecryptWarned']
     for name in excluded:
         assert_true(not any(name in r for r in report),
@@ -3416,18 +3415,26 @@ def test_breaking_news_today_guard_enforced():
 
 
 def test_wikipedia_execution_dedup_cache():
-    """Both scripts must dedup Wikipedia fetches within one execution via _wikiCache."""
+    """Both scripts must dedup Wikipedia fetches within one execution via a
+    file-specific module-level cache. After the cross-file collision fix
+    (see test_lint_balance_reports_cross_file_collision), the cache must
+    be namespaced per file to avoid shadowing when both files are deployed
+    into a single Apps Script project."""
+    cache_name_by_file = {'gcal': '_wikiCacheGcal', 'ical': '_wikiCacheIcal'}
     for name, src in (('gcal', GCAL), ('ical', ICAL)):
-        # Module-level let _wikiCache for execution-scoped dedup
-        assert_true('let _wikiCache' in src, f'{name} must declare let _wikiCache')
+        cache_name = cache_name_by_file[name]
+        # Module-level let _wikiCache{Gcal,Ical} for execution-scoped dedup
+        assert_true(f'let {cache_name}' in src,
+            f'{name} must declare let {cache_name}')
         # fetchWikipediaOnThisDay must check the in-memory cache before HTTP
         fn = re.search(r'function fetchWikipediaOnThisDay\([\s\S]*?\n\}', src)
         assert_true(fn is not None, f'{name} fetchWikipediaOnThisDay missing')
         body = fn.group(0)
-        assert_true('_wikiCache' in body, f'{name} fetchWikipediaOnThisDay must use _wikiCache')
+        assert_true(cache_name in body,
+            f'{name} fetchWikipediaOnThisDay must use {cache_name}')
         # Must store result in cache after successful fetch
-        assert_true('_wikiCache[inMemKey]' in body,
-            f'{name} must store result in _wikiCache after fetch')
+        assert_true(f'{cache_name}[inMemKey]' in body,
+            f'{name} must store result in {cache_name} after fetch')
 
 
 def test_cultural_events_data_integrated():

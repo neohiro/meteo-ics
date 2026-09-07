@@ -93,11 +93,11 @@ const DRIVE_WAQI_FILE = "waqi_token.enc";
 const APPS_SCRIPT_BUDGET_MS = 345000;
 const BUDGET_WARN_AT_MS = [240000, 300000];
 
-let _fetchAllImpl = UrlFetchApp.fetchAll.bind(UrlFetchApp);
-let _nowOverride = null;
-const _now = () => _nowOverride !== null ? _nowOverride : Date.now();
+let _fetchAllImplGcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
+let _nowOverrideGcal = null;
+const _now = () => _nowOverrideGcal !== null ? _nowOverrideGcal : Date.now();
 const _WIKI_CACHE_MAX = 50; // Cap in-memory Wikipedia cache per execution
-let _wikiCache = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
+let _wikiCacheGcal = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
 const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
 // ============================================================
@@ -220,7 +220,7 @@ const { budgetStart, checkBudget } = (() => {
       // Use Number.isFinite to reject NaN/Infinity — typeof NaN === "number"
       // is true, so a test passing budgetSetNow(NaN) would silently poison
       // every elapsed comparison and the budget check would never fire.
-      _nowOverride = Number.isFinite(fn) ? fn : null;
+      _nowOverrideGcal = Number.isFinite(fn) ? fn : null;
     },
     checkBudget(startMs, label) {
       const elapsed = _now() - startMs;
@@ -323,7 +323,7 @@ function fetchAllWithRetry(requests) {
   while (attempt < FETCH_MAX_RETRIES && pending.length > 0) {
     attempt++;
     const batch = pending.map(i => requests[i]);
-    const batchResponses = _fetchAllImpl(batch);
+    const batchResponses = _fetchAllImplGcal(batch);
     const nextPending = [];
     batchResponses.forEach((res, j) => {
       const globalIdx = pending[j];
@@ -359,10 +359,10 @@ const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
 const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
 
-let _probedAqCap = null;
+let _probedAqCapGcal = null;
 
 function getOpenMeteoAqCap() {
-  if (_probedAqCap !== null) return _probedAqCap;
+  if (_probedAqCapGcal !== null) return _probedAqCapGcal;
   const props = PropertiesService.getScriptProperties();
   const cached = props.getProperty(_AQ_CAP_PROP);
   if (cached !== null) {
@@ -372,16 +372,16 @@ function getOpenMeteoAqCap() {
       const cachedDay = parts[1];
       const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
       if (cachedDay === today && cachedCap >= 5 && cachedCap <= 16) {
-        _probedAqCap = cachedCap;
-        return _probedAqCap;
+        _probedAqCapGcal = cachedCap;
+        return _probedAqCapGcal;
       }
     }
   }
   const detected = _probeOpenMeteoAqCap();
-  _probedAqCap = detected;
+  _probedAqCapGcal = detected;
   const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   props.setProperty(_AQ_CAP_PROP, String(detected) + "," + today);
-  return _probedAqCap;
+  return _probedAqCapGcal;
 }
 
 function _probeOpenMeteoAqCap() {
@@ -844,8 +844,8 @@ function fetchWikipediaOnThisDay(month, day) {
   }
   // Check in-memory cache first for execution deduplication
   const inMemKey = month + "_" + day;
-  if (_wikiCache[inMemKey] !== undefined) {
-    return _wikiCache[inMemKey];
+  if (_wikiCacheGcal[inMemKey] !== undefined) {
+    return _wikiCacheGcal[inMemKey];
   }
   // Circuit breaker: fail fast if circuit is open
   if (!CB.isCallAllowed('wikipedia')) {
@@ -870,11 +870,11 @@ function fetchWikipediaOnThisDay(month, day) {
           .map(e => `${e.year}: ${e.text}`);
         const result = filtered.join("; ");
         // Enforce cache size limit (simple FIFO eviction)
-        if (Object.keys(_wikiCache).length >= _WIKI_CACHE_MAX) {
-          const firstKey = Object.keys(_wikiCache)[0];
-          delete _wikiCache[firstKey];
+        if (Object.keys(_wikiCacheGcal).length >= _WIKI_CACHE_MAX) {
+          const firstKey = Object.keys(_wikiCacheGcal)[0];
+          delete _wikiCacheGcal[firstKey];
         }
-        _wikiCache[inMemKey] = result;
+        _wikiCacheGcal[inMemKey] = result;
         return result;
       }
     } else {
@@ -1299,15 +1299,16 @@ function fetchAllAtmosphericDataParallel(locationPool) {
         globalAqi.time.forEach((d, i) => {
           const exIdx = cacheObj.aq.time.indexOf(d);
           if (exIdx === -1) {
+            const safe = (v) => (v === undefined || v === null || Number.isNaN(v)) ? null : v;
             cacheObj.aq.time.push(d);
-            cacheObj.aq.european_aqi.push(globalAqi.european_aqi[i]);
-            cacheObj.aq.us_aqi.push(globalAqi.us_aqi[i]);
-            cacheObj.aq.pm2_5.push(globalAqi.pm2_5[i]);
-            cacheObj.aq.pm10.push(globalAqi.pm10[i]);
+            cacheObj.aq.european_aqi.push(safe(globalAqi.european_aqi[i]));
+            cacheObj.aq.us_aqi.push(safe(globalAqi.us_aqi[i]));
+            cacheObj.aq.pm2_5.push(safe(globalAqi.pm2_5[i]));
+            cacheObj.aq.pm10.push(safe(globalAqi.pm10[i]));
             cacheObj.aq.ozone = cacheObj.aq.ozone || [];
             cacheObj.aq.nitrogen_dioxide = cacheObj.aq.nitrogen_dioxide || [];
-            cacheObj.aq.ozone.push(globalAqi.ozone ? globalAqi.ozone[i] : null);
-            cacheObj.aq.nitrogen_dioxide.push(globalAqi.nitrogen_dioxide ? globalAqi.nitrogen_dioxide[i] : null);
+            cacheObj.aq.ozone.push(safe(globalAqi.ozone ? globalAqi.ozone[i] : null));
+            cacheObj.aq.nitrogen_dioxide.push(safe(globalAqi.nitrogen_dioxide ? globalAqi.nitrogen_dioxide[i] : null));
             cacheObj.aq._source = globalAqi._source;
           }
         });
@@ -2376,16 +2377,10 @@ function cleanupOldStorageKeys() {
   const all = props.getProperties();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 45);
-  // resolveCalendar now auto-creates the calendar if missing, so it will not throw.
-  // Still wrap defensively in case script lacks Calendar permission entirely.
-  let calTz = "UTC";
-  try {
-    const cal = resolveCalendar();
-    calTz = cal ? cal.getTimeZone() : "UTC";
-  } catch (e) {
-    Logger.log("cleanupOldStorageKeys: Calendar API unavailable — using UTC as cutoff timezone");
-  }
-  const cutoffStr = Utilities.formatDate(cutoff, calTz, "yyyy-MM-dd");
+  const cutoffStr = Utilities.formatDate(cutoff, "UTC", "yyyy-MM-dd");
+  // Storage keys (WTR_v10_*) embed UTC dates from Open-Meteo (yyyy-MM-dd in UTC).
+  // Format the cutoff in UTC so the lexicographic string comparison is correct
+  // regardless of the calendar's configured timezone.
 
   Object.keys(all).forEach(k => {
     if (k.startsWith("WTR_v10_")) {

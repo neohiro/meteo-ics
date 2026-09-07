@@ -139,7 +139,7 @@ def collect_module_lets(path: Path) -> set[str]:
     return {n for _, n in _MODULE_LIT_RE.findall(src) if n.startswith("_")}
 
 
-def lint_cross_file_collision(paths: list[Path]) -> tuple[bool, list[str]]:
+def lint_cross_file_collision(paths: list[Path]) -> tuple[bool, list[str], dict[str, list[str]]]:
     name_sets = {p.name: collect_module_lets(p) for p in paths}
     collisions: list[tuple[str, str, str]] = []
     # Special-case: identical leading-underscore names that map to test seams
@@ -155,7 +155,7 @@ def lint_cross_file_collision(paths: list[Path]) -> tuple[bool, list[str]]:
     report = []
     for n, files in sorted(risky.items()):
         report.append(f"COLLISION: '{n}' is `let`-declared at module scope in: {', '.join(files)}")
-    return ok, report
+    return ok, report, underscore_names
 
 
 # Constants that are intentionally mirrored across gcalweather.gs and icalweather.gs.
@@ -223,18 +223,12 @@ def main() -> int:
     # Cross-file collision check when multiple .gs files are provided
     gs_paths = [p for p in file_paths if p.suffix == ".gs"]
     if len(gs_paths) > 1:
-        ok2, report2 = lint_cross_file_collision(gs_paths)
+        ok2, report2, underscore_names = lint_cross_file_collision(gs_paths)
         if not ok2:
             for line in report2:
                 print(line)
             failed += 1
         else:
-            underscore_names = {
-                n: files
-                for p in gs_paths
-                for n in collect_module_lets(p)
-                if n.startswith("_")
-            }
             safe = {n: files for n, files in underscore_names.items()
                     if len(files) == 1}
             print(f"cross-file: {len(underscore_names)} underscore lets found, "
