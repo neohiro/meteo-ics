@@ -442,9 +442,8 @@ const ASTRONOMICAL_EVENTS = {
   "01-10": "🌕 Full Moon — Wolf Moon",
   "01-25": "🌑 New Moon",
   "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
-  "03-24": "Mercury at Greatest Eastern Elongation",
-  "03-25": "🌕 Full Moon — Worm Moon",
-  "04-08": "🌑 New Moon — Solar Eclipse Season Begins",
+  "03-25": "🌕 Full Moon — Worm Moon; 🌑 Penumbral Lunar Eclipse",
+  "04-08": "🌑 New Moon — Solar Eclipse Season Begins; 🌞 Total Solar Eclipse (North America)",
   "04-22": "Lyrid Meteor Peak (~18/hr)",
   "04-23": "Lyrid Active Window",
   "04-24": "🌕 Full Moon — Pink Moon",
@@ -464,10 +463,10 @@ const ASTRONOMICAL_EVENTS = {
   "08-19": "🌕 Full Moon — Sturgeon Moon",
   "08-27": "Saturn at Opposition (Brightest)",
   "09-03": "🌑 New Moon",
-  "09-17": "🌕 Full Moon — Harvest Moon",
+  "09-17": "🌕 Full Moon — Harvest Moon; 🌑 Partial Lunar Eclipse",
   "09-19": "Neptune at Opposition",
   "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
-  "10-02": "🌑 New Moon — Annular Solar Eclipse Season",
+  "10-02": "🌑 New Moon — Annular Solar Eclipse Season; 🌞 Annular Solar Eclipse (Pacific/South America)",
   "10-07": "Draconid Meteor Peak (~10/hr)",
   "10-17": "🌕 Full Moon — Hunter's Moon",
   "10-21": "Orionid Meteor Peak (~20/hr)",
@@ -508,7 +507,6 @@ const PLANETARY_EVENTS = {
   "06-04": "Venus at Greatest Western Elongation (Morning Star)",
   "09-21": "Neptune at Opposition",
   "11-03": "Uranus at Opposition",
-  "12-07": "Jupiter at Opposition",
   "09-08": "Saturn at Opposition"
 };
 
@@ -586,11 +584,11 @@ const LUNAR_PHASES = {
 };
 
 const ASTRONOMICAL_EVENTS_DETAILED = {
-  ...ASTRONOMICAL_EVENTS,
   ...SOLAR_ECLIPSES,
   ...LUNAR_ECLIPSES,
   ...PLANETARY_EVENTS,
-  ...AURORA_SEASONS
+  ...AURORA_SEASONS,
+  ...ASTRONOMICAL_EVENTS
 };
 
 // ============================================================
@@ -2350,16 +2348,21 @@ function getMoonPhaseDetails(date) {
   const dayOfCycle = phase / 86400;
   const illumination = (1 - Math.cos(2 * Math.PI * dayOfCycle / (SYNODIC_MONTH_SEC / 86400))) / 2;
   let glyph, name;
-  // Boundaries derived from 8 equal 45° segments (synodic month = 29.53059 days)
-  // 0.000–1.84566  New Moon
-  // 1.84566–5.53698  Waxing Crescent
-  // 5.53698–9.22830  First Quarter
-  // 9.22830–12.91962 Waxing Gibbous
-  // 12.91962–16.61094 Full Moon
-  // 16.61094–20.30226 Waning Gibbous
-  // 20.30226–23.99358 Last Quarter
-  // 23.99358–27.68490 Waning Crescent
-  // 27.68490–29.53059 New Moon
+  // Boundaries derived from 16 equal 22.5° segments (synodic month = 29.53059 days).
+  // Each named phase spans 2 consecutive segments (45° total) centered on the
+  // principal phase angle (0, 45, 90, ...). The principal phases (New, 1st
+  // Quarter, Full, Last Quarter) occupy the segment containing their exact
+  // phase angle; the intermediate phases (Crescent, Gibbous) span the ±22.5°
+  // segments on either side. Boundary = (n * 29.53059) / 16 days.
+  // 0.00000–1.84566  New Moon          (0°–22.5°)
+  // 1.84566–5.53698  Waxing Crescent  (22.5°–67.5°)
+  // 5.53698–9.22830  1st Quarter      (67.5°–112.5°)
+  // 9.22830–12.91962 Waxing Gibbous   (112.5°–157.5°)
+  // 12.91962–16.61094 Full Moon       (157.5°–202.5°)
+  // 16.61094–20.30226 Waning Gibbous  (202.5°–247.5°)
+  // 20.30226–23.99358 Last Quarter    (247.5°–292.5°)
+  // 23.99358–27.68490 Waning Crescent (292.5°–337.5°)
+  // 27.68490–29.53059 New Moon        (337.5°–360°)
   if (dayOfCycle < 1.84566)       { glyph = "🌑"; name = "New Moon"; }
   else if (dayOfCycle < 5.53698)  { glyph = "🌒"; name = "Waxing Crescent"; }
   else if (dayOfCycle < 9.22830)  { glyph = "🌓"; name = "1st Quarter"; }
@@ -2923,21 +2926,26 @@ function test_e2e_gcal_partial_failure() {
       { name: "Berlin", lat: 52.52, lon: 13.41 }
     ];
 
-    let geoCallCount = 0;
     const mockOm = _buildMockOpenMeteoDaily();
     const mockWa = _buildMockWaqiAirQuality();
 
+    // Track which city each request is for via lat/lon in URL.
+    // Force a 500 on the second city's deterministic-forecast request
+    // (London=51.5, Paris=48.85, Berlin=52.52).  All other requests succeed.
+    // This exercises the partial-failure path: one city's det fetch fails,
+    // the others succeed, and the loop must continue (buildDashboardPayload
+    // is wrapped in try/catch and skips the failed city).
     _fetchAllImplGcal = (requests) => {
       return requests.map(req => {
-        if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
-          geoCallCount++;
-          if (geoCallCount === 2) {
+        const u = req.url;
+        if (u.includes("latitude=48.85")) {
+          // Paris's deterministic forecast request
+          if (u.includes("daily=temperature_2m_max")) {
             return { getResponseCode: () => 500, getContentText: () => '{"error":"server error"}' };
           }
-          return { getResponseCode: () => 200, getContentText: () => '[{"lat":51.5,"lon":-0.1,"display_name":"London, UK"}]' };
         }
-        if (req.url.includes("open-meteo.com")) return mockOm();
-        if (req.url.includes("waqi.info")) return mockWa();
+        if (u.includes("open-meteo.com")) return mockOm();
+        if (u.includes("waqi.info")) return mockWa();
         return { getResponseCode: () => 200, getContentText: () => '{}' };
       });
     };
@@ -2953,13 +2961,16 @@ function test_e2e_gcal_partial_failure() {
 
     try {
       syncWeatherToCalendar();
+      // The critical assertion: syncWeatherToCalendar must NOT throw even
+      // when one city's det request 500s. The per-city try/catch in
+      // buildDashboardPayload swallows the failure and continues.
       results.passed++;
     } catch (e) {
       results.failed++;
       results.errors.push(`syncWeatherToCalendar threw unexpectedly: ${e.message}`);
     }
 
-    _log_gcal({ event: "e2e_test", test: "partial_failure", geoCalls: geoCallCount, passed: results.passed, failed: results.failed });
+    _log_gcal({ event: "e2e_test", test: "partial_failure", passed: results.passed, failed: results.failed });
 
   } catch (e) {
     results.failed++;
