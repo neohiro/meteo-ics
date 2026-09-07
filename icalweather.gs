@@ -148,6 +148,8 @@ let _nowOverrideIcal = null;
 const _now = () => _nowOverrideIcal !== null ? _nowOverrideIcal : Date.now();
 const _WIKI_CACHE_MAX = 50; // Cap in-memory Wikipedia cache per execution
 let _wikiCacheIcal = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
+const _BREAKING_NEWS_CACHE_MAX = 50; // Cap in-memory breaking news cache per execution
+let _breakingNewsCacheIcal = {}; // Deduplicate breaking news fetches per date per execution
 const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
 // ============================================================
@@ -172,7 +174,8 @@ const CB = (() => {
       failures: 0,
       lastFailureTime: 0,
       halfOpenCalls: 0,
-      backoffMs: 0
+      backoffMs: 0,
+      cfg
     };
   };
 
@@ -181,7 +184,7 @@ const CB = (() => {
     if (!cb) return;
     if (cb.state === STATES.HALF_OPEN) {
       cb.halfOpenCalls++;
-      if (cb.halfOpenCalls >= defaults.halfOpenMaxCalls) {
+      if (cb.halfOpenCalls >= cb.cfg.halfOpenMaxCalls) {
         cb.state = STATES.CLOSED;
         cb.failures = 0;
         cb.halfOpenCalls = 0;
@@ -201,11 +204,11 @@ const CB = (() => {
     if (cb.state === STATES.HALF_OPEN) {
       cb.state = STATES.OPEN;
       cb.halfOpenCalls = 0;
-      cb.backoffMs = Math.min(cb.backoffMs * defaults.backoffMultiplier || 1000, defaults.maxBackoffMs);
+      cb.backoffMs = Math.min(cb.backoffMs * cb.cfg.backoffMultiplier || 1000, cb.cfg.maxBackoffMs);
       Logger.log(`Circuit [${name}] OPEN (half-open failure, backoff ${cb.backoffMs}ms)`);
     } else {
       cb.failures++;
-      if (cb.failures >= defaults.failureThreshold) {
+      if (cb.failures >= cb.cfg.failureThreshold) {
         cb.state = STATES.OPEN;
         cb.backoffMs = 1000;
         Logger.log(`Circuit [${name}] OPEN (${cb.failures} failures)`);
@@ -216,12 +219,13 @@ const CB = (() => {
   const isCallAllowed = (name) => {
     const cb = circuits[name];
     if (!cb) return true;
+    const cfg = cb.cfg;
 
     if (cb.state === STATES.CLOSED) return true;
 
     if (cb.state === STATES.OPEN) {
       const elapsed = Date.now() - cb.lastFailureTime;
-      if (elapsed >= Math.max(cb.backoffMs, defaults.recoveryTimeoutMs)) {
+      if (elapsed >= Math.max(cb.backoffMs, cfg.recoveryTimeoutMs)) {
         cb.state = STATES.HALF_OPEN;
         cb.halfOpenCalls = 0;
         Logger.log(`Circuit [${name}] HALF_OPEN (recovery timeout elapsed)`);
@@ -231,7 +235,7 @@ const CB = (() => {
     }
 
     if (cb.state === STATES.HALF_OPEN) {
-      return cb.halfOpenCalls < defaults.halfOpenMaxCalls;
+      return cb.halfOpenCalls < cb.cfg.halfOpenMaxCalls;
     }
 
     return true;
@@ -1086,39 +1090,54 @@ function getWikipediaOnThisDayText(dateStr) {
 }
 
 // ============================================================
-// BREAKING NEWS FETCHER (Current Day Only)
+// BREAKING NEWS FETCHER (Historical "On This Day" Headlines)
 // ============================================================
-const NEWS_API_URL = "https://newsapi.org/v2/top-headlines";
+const NEWS_API_URL = "https://newsapi.org/v2/everything";
 
-function fetchBreakingNews() {
+function fetchBreakingNews(dateStr) {
   // Circuit breaker: fail fast if circuit is open
   if (!CB.isCallAllowed('newsapi')) {
     Logger.log("Circuit [newsapi] OPEN — skipping fetch");
     return null;
+  }
+  if (!dateStr || typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return null;
+  }
+  // Check in-memory cache first
+  if (_breakingNewsCacheIcal[dateStr] !== undefined) {
+    return _breakingNewsCacheIcal[dateStr];
   }
   try {
     const apiKey = _scriptProps.getProperty("NEWS_API_KEY");
     if (!apiKey) {
       return null;
     }
-    const url = `${NEWS_API_URL}?q=weather&language=en&pageSize=3&apiKey=${apiKey}`;
+    // Use /v2/everything with from/to for historical dates; free tier only has 30 days history
+    const url = `${NEWS_API_URL}?from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${apiKey}`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
     const code = res.getResponseCode();
     if (code === 200) {
       CB.recordSuccess('newsapi');
       const data = JSON.parse(res.getContentText());
-      // NewsAPI returns status:"error" for API errors even with HTTP 200
       if (data.status === "error") {
         Logger.log("Breaking news API error: " + (data.message || "unknown"));
         return null;
       }
+      let result = null;
       if (data.articles && Array.isArray(data.articles) && data.articles.length > 0) {
-        return data.articles
+        result = data.articles
           .slice(0, 3)
           .filter(a => a && a.title && a.source && a.source.name)
           .map(a => `${a.source.name}: ${a.title}`)
           .join("; ");
       }
+      // Cache the result (including null for no articles)
+      if (Object.keys(_breakingNewsCacheIcal).length >= _BREAKING_NEWS_CACHE_MAX) {
+        const firstKey = Object.keys(_breakingNewsCacheIcal)[0];
+        delete _breakingNewsCacheIcal[firstKey];
+      }
+      _breakingNewsCacheIcal[dateStr] = result;
+      return result;
     } else {
       CB.recordFailure('newsapi');
       Logger.log(`Breaking news fetch HTTP ${code} — circuit failure recorded`);
@@ -1131,9 +1150,10 @@ function fetchBreakingNews() {
 }
 
 function getBreakingNewsText(dateStr) {
-  const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
-  if (!dateStr || dateStr !== today) return null; // Only for current day
-  return fetchBreakingNews();
+  if (!dateStr || typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return null;
+  }
+  return fetchBreakingNews(dateStr);
 }
 
 function doGet(e) {

@@ -3273,13 +3273,26 @@ def test_breaking_news_returns_null_without_api_key():
     assert_true('return "No breaking news' not in body, 'fetchBreakingNews must not return error string')
 
 
-def test_breaking_news_today_only_guard():
-    """Breaking news must only appear for today, not future dates."""
+def test_breaking_news_historical_dates():
+    """Breaking news fetches historical headlines for any date (On This Day), not just today.
+    Uses /v2/everything endpoint with from/to date params and in-memory cache per date."""
     fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    assert_true('dateStr !== today' in body or 'dateStr != today' in body,
-        'getBreakingNewsText must have today-only guard')
+    assert_true('dateStr !== today' not in body and 'dateStr != today' not in body,
+        'getBreakingNewsText must NOT have today-only guard')
+    assert_true('fetchBreakingNews(dateStr)' in body,
+        'getBreakingNewsText must pass dateStr to fetchBreakingNews')
+    # Verify fetchBreakingNews uses the date in the API URL
+    fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
+    assert_true(fn2 is not None)
+    body2 = fn2.group(0)
+    assert_true('from=${dateStr}&to=${dateStr}' in body2 or 'from=' in body2,
+        'fetchBreakingNews must use date in from/to params')
+    assert_true('v2/everything' in body2,
+        'fetchBreakingNews must use /v2/everything endpoint for historical dates')
+    assert_true('_breakingNewsCacheGcal' in body2,
+        'fetchBreakingNews must use in-memory cache')
 
 
 def test_wikipedia_fetcher_has_cache():
@@ -3402,16 +3415,29 @@ def test_wikipedia_deduplication_setup():
     assert_true('Utilities.formatDate' in body, 'Cache must respect UTC date boundary')
 
 
-def test_breaking_news_today_guard_enforced():
-    """Verify breaking news today-only guard is implemented correctly."""
+def test_breaking_news_historical_dates_enforced():
+    """Verify breaking news fetches historical headlines for any date (On This Day)."""
     fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    # Must check if dateStr is today
-    assert_true('dateStr !== today' in body or 'dateStr != today' in body,
-        'Breaking news must only appear for today')
-    # Must return null for future dates
-    assert_true('return null' in body, 'Breaking news must return null for future dates')
+    # Must NOT have today-only guard
+    assert_true('dateStr !== today' not in body and 'dateStr != today' not in body,
+        'Breaking news must NOT only appear for today')
+    # Must pass dateStr to fetchBreakingNews
+    assert_true('fetchBreakingNews(dateStr)' in body,
+        'getBreakingNewsText must pass dateStr to fetchBreakingNews')
+    # fetchBreakingNews must use the date in the API URL
+    fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
+    assert_true(fn2 is not None)
+    body2 = fn2.group(0)
+    assert_true('from=' in body2 and 'to=' in body2,
+        'fetchBreakingNews must use date in from/to params')
+    assert_true('v2/everything' in body2,
+        'fetchBreakingNews must use /v2/everything endpoint for historical dates')
+    assert_true('_breakingNewsCacheGcal' in body2,
+        'fetchBreakingNews must use in-memory cache')
+    # Must return null for invalid dateStr
+    assert_true('return null' in body, 'Breaking news must return null for invalid dateStr')
 
 
 def test_wikipedia_execution_dedup_cache():
