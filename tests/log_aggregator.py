@@ -80,19 +80,18 @@ def compute_slos(records):
 
         if event == 'fetch':
             slos['fetch']['total'] += 1
-            code = rec.get('code', 0)
-            if rec.get('status') == 'error':
+            status = rec.get('status', '')
+            code = rec.get('code')
+            if status == 'error' or (isinstance(code, int) and not (200 <= code < 400)):
                 slos['fetch']['error'] += 1
                 slos['fetch']['errors'].append({
                     'ts': rec.get('ts'),
-                    'service': rec.get('service'),
+                    'service': rec.get('service', 'unknown'),
                     'code': code,
                     'error': rec.get('error', 'unknown')
                 })
-            elif code and 200 <= code < 400:
-                slos['fetch']['success'] += 1
             else:
-                slos['fetch']['error'] += 1
+                slos['fetch']['success'] += 1
             if rec.get('cached'):
                 slos['fetch']['cached'] += 1
 
@@ -104,7 +103,7 @@ def compute_slos(records):
 
         elif event == 'circuit':
             transition = rec.get('transition', '')
-            if transition in ('closed_to_open', 'OPEN'):
+            if transition == 'OPEN':
                 slos['circuit']['opened'] += 1
                 slos['circuit']['transitions'].append({
                     'ts': rec.get('ts'),
@@ -112,9 +111,9 @@ def compute_slos(records):
                     'from': 'closed',
                     'to': 'open'
                 })
-            elif transition in ('open_to_half_open', 'HALF_OPEN'):
+            elif transition == 'HALF_OPEN':
                 slos['circuit']['half_open'] += 1
-            elif transition in ('half_open_to_closed', 'closed'):
+            elif transition == 'CLOSED':
                 slos['circuit']['closed'] += 1
 
         elif event == 'e2e_test':

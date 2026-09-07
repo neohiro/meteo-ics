@@ -200,7 +200,10 @@ const CB = (() => {
   const getState = (name) => {
     const cb = circuits[name];
     if (!cb) return 'UNKNOWN';
-    return ['CLOSED', 'OPEN', 'HALF_OPEN'][cb.state];
+    if (cb.state === STATES.CLOSED) return 'CLOSED';
+    if (cb.state === STATES.OPEN) return 'OPEN';
+    if (cb.state === STATES.HALF_OPEN) return 'HALF_OPEN';
+    return 'UNKNOWN';
   };
   // Read-only config accessor for tests / introspection. Returns the
   // circuit's resolved cfg object (defaults merged with overrides) or

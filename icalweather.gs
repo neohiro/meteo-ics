@@ -253,7 +253,10 @@ const CB = (() => {
   const getState = (name) => {
     const cb = circuits[name];
     if (!cb) return 'UNKNOWN';
-    return ['CLOSED', 'OPEN', 'HALF_OPEN'][cb.state];
+    if (cb.state === STATES.CLOSED) return 'CLOSED';
+    if (cb.state === STATES.OPEN) return 'OPEN';
+    if (cb.state === STATES.HALF_OPEN) return 'HALF_OPEN';
+    return 'UNKNOWN';
   };
   // Read-only config accessor for tests / introspection. Returns the
   // circuit's resolved cfg object (defaults merged with overrides) or
@@ -623,8 +626,8 @@ const ASTRONOMICAL_EVENTS = {
   "01-10": "🌕 Full Moon — Wolf Moon",
   "01-25": "🌑 New Moon",
   "03-20": "🌱 Vernal Equinox (Equal Day/Night)",
-  "03-25": "Full Moon — Worm Moon; Penumbral Lunar Eclipse",
-  "04-08": "New Moon — Solar Eclipse Season Begins; Total Solar Eclipse (North America)",
+  "03-25": "🌕 Full Moon — Worm Moon; 🌑 Penumbral Lunar Eclipse",
+  "04-08": "🌑 New Moon — Solar Eclipse Season Begins; 🌞 Total Solar Eclipse (North America)",
   "04-22": "Lyrid Meteor Peak (~18/hr)",
   "04-23": "Lyrid Active Window",
   "04-24": "🌕 Full Moon — Pink Moon",
@@ -644,9 +647,9 @@ const ASTRONOMICAL_EVENTS = {
   "08-19": "🌕 Full Moon — Sturgeon Moon",
   "08-27": "Saturn at Opposition (Brightest)",
   "09-03": "🌑 New Moon",
-  "09-17": "Full Moon — Harvest Moon; Partial Lunar Eclipse",
+  "09-17": "🌕 Full Moon — Harvest Moon; 🌑 Partial Lunar Eclipse",
   "09-22": "🍂 Autumnal Equinox (Equal Day/Night)",
-  "10-02": "New Moon — Annular Solar Eclipse Season; Annular Solar Eclipse (Pacific/South America)",
+  "10-02": "🌑 New Moon — Annular Solar Eclipse Season; 🌞 Annular Solar Eclipse (Pacific/South America)",
   "10-07": "Draconid Meteor Peak (~10/hr)",
   "10-17": "🌕 Full Moon — Hunter's Moon",
   "10-21": "Orionid Meteor Peak (~20/hr)",
