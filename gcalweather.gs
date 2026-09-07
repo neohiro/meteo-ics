@@ -2690,7 +2690,13 @@ function validateConfig() {
 
 // ============================================================
 // Integration tests (Apps Script runtime required)
-// Run individually from Apps Script editor or via test runner
+// Run individually from Apps Script editor or via test runner.
+//
+// LIMITATION: These tests mock _fetchAllImplGcal (batch fetch seam).
+// Functions that use UrlFetchApp.fetch singular directly —
+// fetchWikipediaOnThisDay, fetchBreakingNews, geocodeCity — are NOT
+// intercepted and will hit live APIs in test runs. To fully isolate
+// those, those functions would need a parallel _fetchImplGcal seam.
 // ============================================================
 
 function test_e2e_gcal_success() {
@@ -2708,8 +2714,6 @@ function test_e2e_gcal_success() {
 
     const mockOm = _buildMockOpenMeteoDaily();
     const mockWa = _buildMockWaqiAirQuality();
-    const mockWiki = _buildMockWikipediaOnThisDay();
-    const mockNews = _buildMockBreakingNews();
 
     let fetchLog = [];
     _fetchAllImplGcal = (requests) => {
@@ -2717,8 +2721,6 @@ function test_e2e_gcal_success() {
         fetchLog.push(req.url.slice(0, 80));
         if (req.url.includes("open-meteo.com/v1/forecast")) return mockOm();
         if (req.url.includes("waqi.info") || req.url.includes("aqicn.org")) return mockWa();
-        if (req.url.includes("en.wikipedia.org")) return mockWiki();
-        if (req.url.includes("newsapi.org")) return mockNews();
         if (req.url.includes("nominatim") || req.url.includes("geocoding")) {
           return { getResponseCode: () => 200, getContentText: () => '[{"lat":51.5,"lon":-0.1,"display_name":"London, UK"}]' };
         }
@@ -2991,26 +2993,6 @@ function _buildMockWaqiAirQuality() {
   return () => ({
     getResponseCode: () => 200,
     getContentText: () => JSON.stringify({ status: "ok", data: { aqi: 45, idx: 12345 } })
-  });
-}
-
-function _buildMockWikipediaOnThisDay() {
-  return () => ({
-    getResponseCode: () => 200,
-    getContentText: () => JSON.stringify({
-      type: "onthisday",
-      events: [{ year: 2025, text: "Weather milestone — sunny with 100% accuracy" }]
-    })
-  });
-}
-
-function _buildMockBreakingNews() {
-  return () => ({
-    getResponseCode: () => 200,
-    getContentText: () => JSON.stringify({
-      status: "ok", totalResults: 1,
-      articles: [{ title: "Global Weather Summit 2025", description: "Experts gather.", url: "https://example.com/news" }]
-    })
   });
 }
 

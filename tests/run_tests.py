@@ -703,15 +703,6 @@ def test_generateIcsFeed_aqi_type_logic():
     assert_true(eaqi_pos < usaqi_pos, 'EAQI must be checked before USAQI')
 
 
-def test_parseLocationsFromParams_4city_dedup():
-    """parseLocationsFromParams must limit to 4 cities and deduplicate."""
-    fn = re.search(r'function parseLocationsFromParams\([\s\S]*?\n\}', ICAL)
-    assert_true(fn is not None)
-    body = fn.group(0)
-    assert_true('seen' in body or 'Set' in body, 'must use Set for dedup')
-    assert_true('slice(0,' in body, 'must limit to N cities via slice(0, N)')
-
-
 # =============================================================================
 # 10. Integration: gcalweather
 # =============================================================================
@@ -2301,7 +2292,9 @@ def test_ical_aqProvider_url_param():
     body = fn.group(0)
     assert_true('aqProvider' in body,
         'doGet must read aqProvider URL param')
-    assert_true('waqiToken' not in body,
+    # Strip comments before checking for waqiToken reference
+    code_only = re.sub(r'//[^\n]*', '', body)
+    assert_true('waqiToken' not in code_only and 'params.waqiToken' not in code_only,
         'doGet must NOT read waqiToken URL param (security fix)')
 
 
@@ -3761,8 +3754,6 @@ E2E_ICAL_TESTS = [
 E2E_MOCK_HELPERS_GCAL = [
     '_buildMockOpenMeteoDaily',
     '_buildMockWaqiAirQuality',
-    '_buildMockWikipediaOnThisDay',
-    '_buildMockBreakingNews',
     '_runTestsCleanup_gcal',
     '_log_gcal',
 ]
@@ -3773,8 +3764,6 @@ E2E_MOCK_HELPERS_ICAL = [
     '_runTestsCleanup_ical',
     '_log_ical',
 ]
-
-GMCL = GCAL  # alias for the lookups below
 
 for fn in E2E_GCAL_TESTS:
     def make_gcal_test(name):

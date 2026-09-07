@@ -1191,7 +1191,7 @@ function doGet(e) {
   const dryRun = parseBoolParam(params.dryRun || params.dryrun, false);
   const aqProvider = parseAqProvider(params.aqProvider);
   const aqRadius = parseAqRadius(params.aqRadius);
-  // WAQI token must be set via admin function (setupWaqiToken), not URL param.
+  // WAQI token must be set via admin function (waqiTokenSave), not URL param.
   // Accepting token via URL would persist attacker-controlled tokens and cause
   // ScriptProperties quota churn on every request.
 
