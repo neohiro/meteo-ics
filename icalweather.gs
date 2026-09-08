@@ -49,13 +49,12 @@
  *   hazards=true|false  — enable road safety section (default true)
  *   dryRun=true         — preview feed as plain text (default false)
  *   action=status|metrics — return JSON diagnostics instead of ICS
-  *   aqProvider=auto|openaq|waqi — AQI source (default auto).
+*   aqProvider=auto|openaq|waqi — AQI source (default auto).
   *                                            auto: Open-Meteo first, then OpenAQ, then WAQI.
   *                                            openaq: force OpenAQ v3 latest endpoint.
-  *                                            waqi: force WAQI geo feed (requires waqiToken for high quota).
+  *                                            waqi: force WAQI geo feed (requires waqiTokenSave() for high quota).
   *   aqRadius=1-100   — OpenAQ station search radius in km (default 25).
-  *   waqiToken=XXX   — optional WAQI API token (https://aqicn.org/data-platform/token/).
- */
+  */
 const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
@@ -104,7 +103,7 @@ function _probeOpenMeteoAqCap() {
     try {
       const url = PROBE_URL + "?latitude=" + AQ_CAP_PROBE_LAT + "&longitude=" + AQ_CAP_PROBE_LON +
         "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 10000 });
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       return res.getResponseCode();
     } catch (e) {
       return 0;
@@ -630,8 +629,9 @@ function clamp(v, min, max) {
 const _tzCache = {};
 
 function resolveLocationTimezone(loc) {
-  if (loc && loc.tz) return loc.tz;
-  if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+  if (!loc) return "UTC";
+  if (loc.tz) return loc.tz;
+  if (Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
     const cacheKey = loc.lat.toFixed(4) + "," + loc.lon.toFixed(4);
     if (_tzCache[cacheKey] !== undefined) return _tzCache[cacheKey];
 
@@ -660,8 +660,9 @@ function resolveLocationTimezone(loc) {
       CB.recordFailure('timezone');
       Logger.log("resolveLocationTimezone: lookup failed for " + (loc.name || cacheKey) + ": " + e);
     }
+    _tzCache[cacheKey] = "UTC";
+    return "UTC";
   }
-  _tzCache[cacheKey] = "UTC";
   return "UTC";
 }
 

@@ -421,7 +421,7 @@ function _probeOpenMeteoAqCap() {
     try {
       const url = PROBE_URL + "?latitude=" + AQ_CAP_PROBE_LAT + "&longitude=" + AQ_CAP_PROBE_LON +
         "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 10000 });
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
       return res.getResponseCode();
     } catch (e) {
       return 0;
