@@ -621,6 +621,25 @@ function clamp(v, min, max) {
   return isNaN(v) ? min : Math.max(min, Math.min(max, v));
 }
 
+function resolveLocationTimezone(loc) {
+  if (loc && loc.tz) return loc.tz;
+  if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+    try {
+      const res = UrlFetchApp.fetch(
+        `https://api.open-meteo.com/v1/timezone?latitude=${loc.lat}&longitude=${loc.lon}`,
+        { muteHttpExceptions: true, timeout: 5000 }
+      );
+      if (res.getResponseCode() === 200) {
+        const tz = JSON.parse(res.getContentText()).timezone;
+        if (tz) return tz;
+      }
+    } catch (e) {
+      Logger.log("resolveLocationTimezone: lookup failed for " + loc.name + ": " + e);
+    }
+  }
+  return "UTC";
+}
+
 const ASTRONOMICAL_EVENTS = {
   "01-03": "Quadrantid Meteor Peak (~110/hr)",
   "01-04": "Earth at Perihelion (Closest to Sun)",
@@ -1415,7 +1434,7 @@ function parseLocationsFromParams(e) {
         const lat = parseFloat(parts[1]);
         const lon = parseFloat(parts[2]);
         if (isValidLatLon(lat, lon) && name) {
-          list.push({ name, lat, lon });
+          list.push({ name, lat, lon, tz: resolveLocationTimezone({ lat, lon }) });
         }
       }
     });
@@ -1426,7 +1445,7 @@ function parseLocationsFromParams(e) {
     const lon = parseFloat(p.lon);
     if (isValidLatLon(lat, lon)) {
       const name = (p.name && asString(p.name).trim()) || "Custom Location";
-      list.push({ name, lat, lon });
+      list.push({ name, lat, lon, tz: resolveLocationTimezone({ lat, lon }) });
     }
   }
 
@@ -1498,6 +1517,13 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   const todayRef = Utilities.parseDate(todayStr + " 12:00:00", "UTC", "yyyy-MM-dd HH:mm:ss");
   const fetchedAt = Utilities.formatDate(today, "UTC", "yyyy-MM-dd'T'HH:mm:ss'Z'");
 
+  // Resolve the first location's timezone for the ICS feed header.
+  // Falls back to "UTC" if lookup fails or no location has a known TZ.
+  const firstLocTz = (locations && locations.length && locations[0].tz)
+    ? locations[0].tz
+    : resolveLocationTimezone(locations && locations[0])
+    || "UTC";
+
   const calName = t("calName", lang) || ICAL_CONFIG.calendarName;
   const lines = [
     "BEGIN:VCALENDAR",
@@ -1506,7 +1532,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${escapeIcsText(calName)}`,
-    "X-WR-TIMEZONE:UTC",
+    `X-WR-TIMEZONE:${firstLocTz}`,
     `X-WR-CALDESC:Weather + astronomical · v${ICAL_CONFIG.version} · Open-Meteo AQI (hourly)`,
     `X-WR-LANG:${lang}`,
     `X-META-SCRIPTVERSION:${ICAL_CONFIG.version}`,
@@ -2147,7 +2173,7 @@ function geocodeCity(name) {
     );
     const data = JSON.parse(res.getContentText()).results;
     if (data && data.length) {
-      return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
+      return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude, tz: data[0].timezone };
     }
   } catch (e) {
     Logger.log("geocodeCity failed for " + name + ": " + e);
