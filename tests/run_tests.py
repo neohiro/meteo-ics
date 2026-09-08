@@ -2392,6 +2392,9 @@ def test_ical_buildReadme_documents_aqProvider_and_aqRadius():
     """The in-script buildReadme() output must list the AQI provider parameters
     so anyone running the help endpoint sees the same capabilities the README
     advertises. Stale doc strings are a recurring drift problem.
+    WAQI token is intentionally NOT documented as a URL param — it must be set
+    via waqiTokenSave() admin function to avoid ScriptProperties quota churn
+    and attacker-controlled token persistence (see doGet comment at line 1227).
     """
     fn = re.search(r'function buildReadme\([\s\S]*?\n\}', ICAL)
     assert_true(fn is not None)
@@ -2400,8 +2403,8 @@ def test_ical_buildReadme_documents_aqProvider_and_aqRadius():
         'buildReadme must document the aqProvider URL parameter')
     assert_true('aqRadius' in body,
         'buildReadme must document the aqRadius URL parameter')
-    assert_true('waqiToken' in body,
-        'buildReadme must document the waqiToken URL parameter')
+    assert_true('waqiToken' not in body,
+        'buildReadme must NOT document waqiToken as URL param (security fix)')
 
 
 def test_ical_file_header_drops_openmeteo_option():

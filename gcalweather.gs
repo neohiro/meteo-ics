@@ -378,6 +378,10 @@ const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
 const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
+// Probe location for AQ API cap detection — can be overridden via ScriptProperties
+// AQ_CAP_PROBE_LAT/AQ_CAP_PROBE_LON if a different location is preferred.
+const AQ_CAP_PROBE_LAT = 50.95;
+const AQ_CAP_PROBE_LON = 5.97;
 
 let _probedAqCapGcal = null;
 
@@ -410,13 +414,12 @@ function getOpenMeteoAqCap() {
 
 function _probeOpenMeteoAqCap() {
   const PROBE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
-  const PROBE_LAT = 50.95, PROBE_LON = 5.97;
   const lo = 5, hi = 16;
   let cap = OPEN_METEO_AQ_FORECAST_DAYS_CAP;
   let probeSucceeded = false;
   const tryFetch = (days) => {
     try {
-      const url = PROBE_URL + "?latitude=" + PROBE_LAT + "&longitude=" + PROBE_LON +
+      const url = PROBE_URL + "?latitude=" + AQ_CAP_PROBE_LAT + "&longitude=" + AQ_CAP_PROBE_LON +
         "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 10000 });
       return res.getResponseCode();

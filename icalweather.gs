@@ -60,6 +60,11 @@ const OPEN_METEO_AQ_FORECAST_DAYS_CAP = 7;
 const OPENAQ_LATEST_ENDPOINT = "https://api.openaq.org/v3/latest";
 const WAQI_BASE_ENDPOINT = "https://api.waqi.info/feed/geo:";
 const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
+// Probe location for AQ API cap detection — can be overridden via ScriptProperties
+// AQ_CAP_PROBE_LAT/AQ_CAP_PROBE_LON if a different location is preferred.
+const AQ_CAP_PROBE_LAT = 50.95;
+const AQ_CAP_PROBE_LON = 5.97;
+const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
 
 let _probedAqCapIcal = null;
 
@@ -92,13 +97,12 @@ function getOpenMeteoAqCap() {
 
 function _probeOpenMeteoAqCap() {
   const PROBE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
-  const PROBE_LAT = 50.95, PROBE_LON = 5.97;
   const lo = 5, hi = 16;
   let cap = OPEN_METEO_AQ_FORECAST_DAYS_CAP;
   let probeSucceeded = false;
   const tryFetch = (days) => {
     try {
-      const url = PROBE_URL + "?latitude=" + PROBE_LAT + "&longitude=" + PROBE_LON +
+      const url = PROBE_URL + "?latitude=" + AQ_CAP_PROBE_LAT + "&longitude=" + AQ_CAP_PROBE_LON +
         "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 10000 });
       return res.getResponseCode();
@@ -273,6 +277,7 @@ const CB = (() => {
   create('newsapi');
   create('openaq');
   create('waqi');
+  create('timezone');
 
   return { create, isCallAllowed, recordSuccess, recordFailure, getState, cfg, STATES };
 })();
@@ -621,22 +626,42 @@ function clamp(v, min, max) {
   return isNaN(v) ? min : Math.max(min, Math.min(max, v));
 }
 
+// In-memory cache for timezone lookups (per execution)
+const _tzCache = {};
+
 function resolveLocationTimezone(loc) {
   if (loc && loc.tz) return loc.tz;
   if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+    const cacheKey = loc.lat.toFixed(4) + "," + loc.lon.toFixed(4);
+    if (_tzCache[cacheKey] !== undefined) return _tzCache[cacheKey];
+
+    // Circuit breaker: fail fast if circuit is open
+    if (!CB.isCallAllowed('timezone')) {
+      Logger.log("Circuit [timezone] OPEN — using UTC fallback for " + (loc.name || cacheKey));
+      _tzCache[cacheKey] = "UTC";
+      return "UTC";
+    }
+
     try {
       const res = UrlFetchApp.fetch(
         `https://api.open-meteo.com/v1/timezone?latitude=${loc.lat}&longitude=${loc.lon}`,
-        { muteHttpExceptions: true, timeout: 5000 }
+        { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
       );
       if (res.getResponseCode() === 200) {
         const tz = JSON.parse(res.getContentText()).timezone;
-        if (tz) return tz;
+        if (tz) {
+          CB.recordSuccess('timezone');
+          _tzCache[cacheKey] = tz;
+          return tz;
+        }
       }
+      CB.recordFailure('timezone');
     } catch (e) {
-      Logger.log("resolveLocationTimezone: lookup failed for " + loc.name + ": " + e);
+      CB.recordFailure('timezone');
+      Logger.log("resolveLocationTimezone: lookup failed for " + (loc.name || cacheKey) + ": " + e);
     }
   }
+  _tzCache[cacheKey] = "UTC";
   return "UTC";
 }
 
@@ -1319,9 +1344,6 @@ function buildReadme(params) {
     "",
     "• aqRadius : " + tr("OpenAQ station search radius in km (1-100, default 25).", null),
     "             " + tr("Example", null) + ": ?cities=Lagos&aqRadius=50",
-    "",
-    "• waqiToken : " + tr("Optional WAQI API token for higher rate limit.", null),
-    "              " + tr("Example", null) + ": ?cities=Tokyo&waqiToken=YOUR_TOKEN",
     "",
     "2. " + tr("READY-TO-USE SUBSCRIPTION EXAMPLES", null),
     "------------------------------------------------------------------",
