@@ -120,6 +120,11 @@ function _probeOpenMeteoAqCap() {
       probeSucceeded = true;
       cap = mid;
       l = mid + 1;
+    } else if (code === 429) {
+      // Rate limited - retry same mid after delay, don't shrink search range
+      Logger.log("_probeOpenMeteoAqCap: rate limited at days=" + mid + ", retrying after delay");
+      Utilities.sleep(1000);
+      continue;
     } else if (code >= 400) {
       r = mid - 1;
     } else {
@@ -639,6 +644,7 @@ function clamp(v, min, max) {
 
 // In-memory cache for timezone lookups (per execution)
 const _tzCache = {};
+const TZ_CACHE_MAX = 100; // Cap in-memory timezone cache per execution
 // Persistent timezone cache in ScriptProperties with 24h TTL to avoid
 // repeated Open-Meteo /v1/timezone lookups for the same coordinates
 // across executions. Key format: "TZ:<lat.toFixed(4)>:<lon.toFixed(4)>"
@@ -671,6 +677,11 @@ function _tzCacheRead(cacheKey) {
 }
 
 function _tzCacheWrite(cacheKey, tz) {
+  // FIFO eviction if cache exceeds limit
+  if (Object.keys(_tzCache).length >= TZ_CACHE_MAX) {
+    const firstKey = Object.keys(_tzCache)[0];
+    delete _tzCache[firstKey];
+  }
   _tzCache[cacheKey] = tz;
   try {
     _scriptProps.setProperty(
@@ -1140,7 +1151,7 @@ function fetchWikipediaOnThisDay(month, day) {
   try {
     const res = UrlFetchApp.fetch(url, {
       muteHttpExceptions: true,
-      timeout: 8000,
+      timeout: FETCH_TIMEOUT_MS,
       headers: { 'User-Agent': 'meteo-ics/1.0 (https://github.com/neohiro/meteo-ics)' }
     });
     const code = res.getResponseCode();
@@ -1230,12 +1241,13 @@ function fetchBreakingNews(dateStr) {
   }
   try {
     const apiKey = _scriptProps.getProperty("NEWS_API_KEY");
-    if (!apiKey) {
+    if (!apiKey || typeof apiKey !== "string" || apiKey.length < 10) {
+      Logger.log("Breaking news: invalid or missing NEWS_API_KEY");
       return null;
     }
     // Use /v2/everything with from/to for historical dates; free tier only has 30 days history
-    const url = `${NEWS_API_URL}?from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${apiKey}`;
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
+    const url = `${NEWS_API_URL}?from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     const code = res.getResponseCode();
     if (code === 200) {
       CB.recordSuccess('newsapi');
@@ -2200,12 +2212,15 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
     } else {
       try {
         const token = waqiTokenResolve();
-        // encodeURIComponent defends against future token-format changes; current validator
-        // (8-128 alphanumeric) makes this a no-op but preserves URL integrity.
-        const url = token
-          ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${encodeURIComponent(token)}`
-          : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
-        const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
+        // Prefer header for token to avoid URL logging; fallback to query param if needed.
+        const url = `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
+        const opts = { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS };
+        if (token) {
+          // WAQI API supports token in Authorization header (Bearer) or query param.
+          // Header is preferred to avoid token exposure in URL logs.
+          opts.headers = { Authorization: "Bearer " + token };
+        }
+        const res = UrlFetchApp.fetch(url, opts);
         const code = res.getResponseCode();
         if (code === 200) {
           CB.recordSuccess('waqi');

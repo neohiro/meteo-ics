@@ -446,6 +446,11 @@ function _probeOpenMeteoAqCap() {
       probeSucceeded = true;
       cap = mid;
       l = mid + 1;
+    } else if (code === 429) {
+      // Rate limited - retry same mid after delay, don't shrink search range
+      Logger.log("_probeOpenMeteoAqCap: rate limited at days=" + mid + ", retrying after delay");
+      Utilities.sleep(1000);
+      continue;
     } else if (code >= 400) {
       r = mid - 1;
     } else {
@@ -893,7 +898,7 @@ function fetchWikipediaOnThisDay(month, day) {
   try {
     const res = UrlFetchApp.fetch(url, {
       muteHttpExceptions: true,
-      timeout: 8000,
+      timeout: FETCH_TIMEOUT_MS,
       headers: { 'User-Agent': 'meteo-ics/1.0 (https://github.com/neohiro/meteo-ics)' }
     });
     const code = res.getResponseCode();
@@ -983,12 +988,13 @@ function fetchBreakingNews(dateStr) {
   }
   try {
     const apiKey = _scriptProps.getProperty("NEWS_API_KEY");
-    if (!apiKey) {
+    if (!apiKey || typeof apiKey !== "string" || apiKey.length < 10) {
+      Logger.log("Breaking news: invalid or missing NEWS_API_KEY");
       return null;
     }
     // Use /v2/everything with from/to for historical dates; free tier only has 30 days history
-    const url = `${NEWS_API_URL}?from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${apiKey}`;
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: 8000 });
+    const url = `${NEWS_API_URL}?from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     const code = res.getResponseCode();
     if (code === 200) {
       CB.recordSuccess('newsapi');
@@ -1477,10 +1483,12 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
     } else {
       try {
         const token = waqiTokenResolve();
-        const url = token
-          ? `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/?token=${encodeURIComponent(token)}`
-          : `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
-        const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
+        const url = `${WAQI_BASE_ENDPOINT}${loc.lat.toFixed(4)};${loc.lon.toFixed(4)}/`;
+        const opts = { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS };
+        if (token) {
+          opts.headers = { Authorization: "Bearer " + token };
+        }
+        const res = UrlFetchApp.fetch(url, opts);
         const code = res.getResponseCode();
         if (code === 200) {
           CB.recordSuccess('waqi');
