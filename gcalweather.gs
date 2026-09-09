@@ -864,9 +864,9 @@ function getOnThisDayText(dateStr, countryCode) {
     .filter(e => e && e.text)
     .map(e => {
       const icon = e.type === "holiday" ? "🎉" : e.type === "anniversary" ? "📜" : e.type === "religious" ? "⛪" : "🌍";
-      return `${icon} ${e.text}`;
+      return `• ${icon} ${e.text}`;
     });
-  return texts.length > 0 ? texts.join("; ") : null;
+  return texts.length > 0 ? texts.join("\n") : null;
 }
 
 // ============================================================
@@ -904,8 +904,8 @@ function fetchWikipediaOnThisDay(month, day) {
         const filtered = data.events
           .filter(e => e.year && e.year !== "Year unknown")
           .slice(0, 5)
-          .map(e => `${e.year}: ${e.text}`);
-        const result = filtered.join("; ");
+          .map(e => `• ${e.year}: ${e.text}`);
+        const result = filtered.join("\n");
         // Store result first, then enforce cache size limit (FIFO eviction)
         // This ensures eviction only happens when we actually have a result to cache
         _wikiCacheGcal[inMemKey] = result;
@@ -1002,8 +1002,8 @@ function fetchBreakingNews(dateStr) {
         result = data.articles
           .slice(0, 3)
           .filter(a => a && a.title && a.source && a.source.name)
-          .map(a => `${a.source.name}: ${a.title}`)
-          .join("; ");
+          .map(a => `• ${a.source.name}: ${a.title}`)
+          .join("\n");
       }
       // Cache the result (including null for no articles)
       if (Object.keys(_breakingNewsCacheGcal).length >= _BREAKING_NEWS_CACHE_MAX) {
@@ -1820,7 +1820,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         if (onThisDayText) parts.push(onThisDayText);
         if (wikiOnThisDay) parts.push(wikiOnThisDay);
         if (breakingNews) parts.push(breakingNews);
-        return parts.length > 0 ? `📜 ON THIS DAY\n${parts.join("\n")}` : null;
+        return parts.length > 0 ? `ON THIS DAY\n${parts.join("\n")}` : null;
       })(),
 
       // 3. GROUND TRUTH (MEASURED)
@@ -2052,7 +2052,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       if (onThisDayText) parts.push(onThisDayText);
       if (wikiOnThisDay) parts.push(wikiOnThisDay);
       if (breakingNews) parts.push(breakingNews);
-      return parts.length > 0 ? `📜 ON THIS DAY\n${parts.join("\n")}` : null;
+      return parts.length > 0 ? `ON THIS DAY\n${parts.join("\n")}` : null;
     })(),
 
     // 7. MODEL AUDIT
