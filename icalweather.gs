@@ -88,6 +88,8 @@ function getOpenMeteoAqCap() {
     const today = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
     props.setProperty(_AQ_CAP_PROP, String(detected.cap) + "," + today);
   } else {
+    // Probe failed (network/API error) — fail-safe to default without persisting.
+    // This prevents repeated probing on transient failures within the same execution.
     _probedAqCapIcal = detected.cap;
   }
   return _probedAqCapIcal;
@@ -121,6 +123,8 @@ function _probeOpenMeteoAqCap() {
     } else {
       break;
     }
+    // Small delay between probes to avoid triggering rate limits
+    if (l <= r) Utilities.sleep(100);
   }
   if (cap < OPEN_METEO_AQ_FORECAST_DAYS_CAP) {
     Logger.log("Open-Meteo AQ API cap probe: API returned HTTP " +
@@ -276,6 +280,7 @@ const CB = (() => {
   create('openaq');
   create('waqi');
   create('timezone');
+  create('geocoder');
 
   return { create, isCallAllowed, recordSuccess, recordFailure, getState, cfg, STATES };
 })();
@@ -669,7 +674,8 @@ function _tzCacheWrite(cacheKey, tz) {
 
 function resolveLocationTimezone(loc) {
   if (!loc) return "UTC";
-  if (loc.tz) return loc.tz;
+  // Validate loc.tz: must be non-empty string (basic IANA tz check)
+  if (loc.tz && typeof loc.tz === "string" && loc.tz.length > 0) return loc.tz;
   if (Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
     const cacheKey = loc.lat.toFixed(4) + "," + loc.lon.toFixed(4);
     const cached = _tzCacheRead(cacheKey);
@@ -1095,9 +1101,9 @@ function getOnThisDayText(dateStr, countryCode) {
     .filter(e => e && e.text)
     .map(e => {
       const icon = e.type === "holiday" ? "🎉" : e.type === "anniversary" ? "📜" : e.type === "religious" ? "⛪" : "🌍";
-      return `${icon} ${e.text}`;
+      return `• ${icon} ${e.text}`;
     });
-  return texts.length > 0 ? texts.join("; ") : null;
+  return texts.length > 0 ? texts.join("\n") : null;
 }
 
 // ============================================================
@@ -1135,8 +1141,8 @@ function fetchWikipediaOnThisDay(month, day) {
         const filtered = data.events
           .filter(e => e.year && e.year !== "Year unknown")
           .slice(0, 5)
-          .map(e => `${e.year}: ${e.text}`);
-        const result = filtered.join("; ");
+          .map(e => `• ${e.year}: ${e.text}`);
+        const result = filtered.join("\n");
         // Store result first, then enforce cache size limit (FIFO eviction)
         // This ensures eviction only happens when we actually have a result to cache
         _wikiCacheIcal[inMemKey] = result;
@@ -1233,8 +1239,8 @@ function fetchBreakingNews(dateStr) {
         result = data.articles
           .slice(0, 3)
           .filter(a => a && a.title && a.source && a.source.name)
-          .map(a => `${a.source.name}: ${a.title}`)
-          .join("; ");
+          .map(a => `• ${a.source.name}: ${a.title}`)
+          .join("\n");
       }
       // Cache the result (including null for no articles)
       if (Object.keys(_breakingNewsCacheIcal).length >= _BREAKING_NEWS_CACHE_MAX) {
@@ -1415,6 +1421,7 @@ function handleStatusEndpoint(params) {
   const unitParam = (String(rawUnit || "").split(",")[0] || ICAL_CONFIG.temperatureUnit || "").toLowerCase();
   const isC = !unitParam.startsWith("f");
   const sym = isC ? "°C" : "°F";
+  const aqCap = getOpenMeteoAqCap(); // Cache to avoid double call
   let stats;
   try {
     stats = computeGlobalModelAccuracy(sym);
@@ -1456,8 +1463,8 @@ function handleStatusEndpoint(params) {
         openaq: "OpenAQ v3 latest measurements (200+ countries, no key required)",
         waqi: "WAQI /feed/geo: endpoint (1000+ stations, optional token for higher rate limit)"
       },
-      openMeteoAqForecastDaysCap: getOpenMeteoAqCap(),
-      openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + getOpenMeteoAqCap() + " (probed at runtime; cached for 24h via PropertiesService). For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
+      openMeteoAqForecastDaysCap: aqCap,
+      openMeteoAqNote: "Open-Meteo CAMS air-quality API caps forecast_days at " + aqCap + " (probed at runtime; cached for 24h via PropertiesService). For regions outside EU/US coverage, the engine falls back to OpenAQ or WAQI.",
       activeAqRadius: parseAqRadius(params ? params.aqRadius : undefined),
       globalFallbackEndpoints: {
         openaq: OPENAQ_LATEST_ENDPOINT,
@@ -1838,7 +1845,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       
       if (onThisDayText) {
         sections.push([
-          `📜 ${tSection("secOnThisDay", lang)}`,
+          tSection("secOnThisDay", lang),
           onThisDayText
         ].join("\n"));
       }
@@ -1846,14 +1853,14 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       if (wikiOnThisDay) {
         sections.push([
           `📖 ${tSection("secWiki", lang)}`,
-          wikiOnThisDay
+          wikiOnThisDay.replace(/; /g, "\n• ")
         ].join("\n"));
       }
       
       if (breakingNews) {
         sections.push([
           `📰 ${tSection("secBreaking", lang)}`,
-          breakingNews
+          breakingNews.replace(/; /g, "\n• ")
         ].join("\n"));
       }
       
