@@ -63,7 +63,6 @@ const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
 // AQ_CAP_PROBE_LAT/AQ_CAP_PROBE_LON if a different location is preferred.
 const AQ_CAP_PROBE_LAT = 50.95;
 const AQ_CAP_PROBE_LON = 5.97;
-const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
 
 let _probedAqCapIcal = null;
 
@@ -627,13 +626,54 @@ function clamp(v, min, max) {
 
 // In-memory cache for timezone lookups (per execution)
 const _tzCache = {};
+// Persistent timezone cache in ScriptProperties with 24h TTL to avoid
+// repeated Open-Meteo /v1/timezone lookups for the same coordinates
+// across executions. Key format: "TZ:<lat.toFixed(4)>:<lon.toFixed(4)>"
+// Value format: JSON.stringify({ tz: "Europe/Berlin", ts: 1234567890 })
+const TZ_CACHE_PROP_PREFIX = "TZ:";
+const TZ_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function _tzCacheRead(cacheKey) {
+  // Fast path: in-memory cache
+  if (_tzCache[cacheKey] !== undefined) return _tzCache[cacheKey];
+  // Slow path: ScriptProperties persistence
+  try {
+    const raw = _scriptProps.getProperty(TZ_CACHE_PROP_PREFIX + cacheKey);
+    if (raw) {
+      const entry = JSON.parse(raw);
+      if (entry && entry.tz && Number.isFinite(entry.ts) &&
+          Date.now() - entry.ts < TZ_CACHE_TTL_MS) {
+        _tzCache[cacheKey] = entry.tz;
+        return entry.tz;
+      }
+      // Stale entry — evict
+      _scriptProps.deleteProperty(TZ_CACHE_PROP_PREFIX + cacheKey);
+    }
+  } catch (e) {
+    Logger.log("_tzCacheRead: ScriptProperties read failed for " + cacheKey + ": " + e);
+  }
+  return undefined;
+}
+
+function _tzCacheWrite(cacheKey, tz) {
+  _tzCache[cacheKey] = tz;
+  try {
+    _scriptProps.setProperty(
+      TZ_CACHE_PROP_PREFIX + cacheKey,
+      JSON.stringify({ tz: tz, ts: Date.now() })
+    );
+  } catch (e) {
+    Logger.log("_tzCacheWrite: ScriptProperties write failed for " + cacheKey + ": " + e);
+  }
+}
 
 function resolveLocationTimezone(loc) {
   if (!loc) return "UTC";
   if (loc.tz) return loc.tz;
   if (Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
     const cacheKey = loc.lat.toFixed(4) + "," + loc.lon.toFixed(4);
-    if (_tzCache[cacheKey] !== undefined) return _tzCache[cacheKey];
+    const cached = _tzCacheRead(cacheKey);
+    if (cached !== undefined) return cached;
 
     // Circuit breaker: fail fast if circuit is open
     if (!CB.isCallAllowed('timezone')) {
@@ -651,7 +691,7 @@ function resolveLocationTimezone(loc) {
         const tz = JSON.parse(res.getContentText()).timezone;
         if (tz) {
           CB.recordSuccess('timezone');
-          _tzCache[cacheKey] = tz;
+          _tzCacheWrite(cacheKey, tz);
           return tz;
         }
       }

@@ -7,6 +7,7 @@ Run:  python tests/run_tests.py
 Exit: 0 = all pass, 1 = failures present.
 """
 import datetime
+import json
 import math
 import os
 import re
@@ -3959,6 +3960,204 @@ def test_e2e_gcal_config_save_restore():
             j += 1
         assert_true('CONFIG.dryRun' in finally_body and 'CONFIG.locations' in finally_body,
             f'{fn} finally block must restore CONFIG.dryRun and CONFIG.locations')
+
+
+# =============================================================================
+# resolveLocationTimezone static checks & Python mirrors
+# =============================================================================
+
+def test_ical_resolveLocationTimezone_exists():
+    """resolveLocationTimezone function must exist in icalweather.gs."""
+    assert_true(re.search(r'function resolveLocationTimezone\(loc\)', ICAL, re.M),
+        'resolveLocationTimezone must be defined')
+
+
+def test_ical_resolveLocationTimezone_uses_cb():
+    """resolveLocationTimezone must check circuit breaker before API call."""
+    fn_body = re.search(r'function resolveLocationTimezone\(loc\)[\s\S]*?\n\}', ICAL, re.M)
+    assert_true(fn_body is not None, 'resolveLocationTimezone function not found')
+    body = fn_body.group(0)
+    assert_true('CB.isCallAllowed' in body, 'Must check CB.isCallAllowed for timezone circuit')
+    assert_true('CB.recordSuccess' in body, 'Must call CB.recordSuccess on success')
+    assert_true('CB.recordFailure' in body, 'Must call CB.recordFailure on failure')
+
+
+def test_ical_resolveLocationTimezone_persistent_cache():
+    """resolveLocationTimezone must use ScriptProperties for persistent cache with TTL."""
+    assert_true('_tzCacheRead' in ICAL, '_tzCacheRead helper must exist')
+    assert_true('_tzCacheWrite' in ICAL, '_tzCacheWrite helper must exist')
+    assert_true('TZ_CACHE_PROP_PREFIX' in ICAL, 'TZ_CACHE_PROP_PREFIX constant must exist')
+    assert_true('TZ_CACHE_TTL_MS' in ICAL, 'TZ_CACHE_TTL_MS constant must exist')
+    assert_true('24 * 60 * 60 * 1000' in ICAL, 'TTL must be 24 hours')
+
+
+def test_ical_resolveLocationTimezone_ttl_logic():
+    """TTL logic must compare timestamp with Date.now()."""
+    fn_read = re.search(r'function _tzCacheRead\([\s\S]*?\n\}', ICAL, re.M)
+    assert_true(fn_read is not None, '_tzCacheRead function not found')
+    body = fn_read.group(0)
+    assert_true('Date.now()' in body, '_tzCacheRead must use Date.now() for TTL check')
+    assert_true('deleteProperty' in body, '_tzCacheRead must evict expired entries')
+    assert_true('ts' in body, '_tzCacheRead must check entry.ts')
+
+
+def test_ical_resolveLocationTimezone_fallbacks():
+    """resolveLocationTimezone must handle edge cases: null loc, loc.tz, invalid coords."""
+    fn_body = re.search(r'function resolveLocationTimezone\(loc\)[\s\S]*?\n\}', ICAL, re.M)
+    assert_true(fn_body is not None, 'resolveLocationTimezone function not found')
+    body = fn_body.group(0)
+    # Early return for null/undefined loc
+    assert_true('if (!loc)' in body, 'Must handle null/undefined loc')
+    # Early return for loc.tz
+    assert_true('loc.tz' in body, 'Must return loc.tz if present')
+    # Validate lat/lon with Number.isFinite
+    assert_true('Number.isFinite(loc.lat)' in body, 'Must validate lat with Number.isFinite')
+    assert_true('Number.isFinite(loc.lon)' in body, 'Must validate lon with Number.isFinite')
+
+
+def test_ical_resolveLocationTimezone_api_format():
+    """resolveLocationTimezone must call Open-Meteo /v1/timezone endpoint correctly."""
+    fn_body = re.search(r'function resolveLocationTimezone\(loc\)[\s\S]*?\n\}', ICAL, re.M)
+    assert_true(fn_body is not None, 'resolveLocationTimezone function not found')
+    body = fn_body.group(0)
+    assert_true('api.open-meteo.com/v1/timezone' in body, 'Must use Open-Meteo timezone endpoint')
+    assert_true('latitude=' in body and 'longitude=' in body, 'Must pass lat/lon as query params')
+    assert_true('FETCH_TIMEOUT_MS' in body, 'Must use FETCH_TIMEOUT_MS constant')
+
+
+# Python mirror of the TTL cache logic for behavioral testing
+def _tz_cache_read_mirror(cache, script_props, prefix, cache_key, now, ttl_ms):
+    """Python mirror of _tzCacheRead logic."""
+    # Fast path: in-memory cache
+    if cache_key in cache:
+        return cache[cache_key]
+    # Slow path: ScriptProperties persistence
+    try:
+        raw = script_props.get(prefix + cache_key)
+        if raw:
+            entry = json.loads(raw)
+            if (entry and entry.get('tz') and
+                isinstance(entry.get('ts'), (int, float)) and
+                now - entry['ts'] < ttl_ms):
+                cache[cache_key] = entry['tz']
+                return entry['tz']
+            # Stale entry — evict
+            script_props.delete(prefix + cache_key)
+    except Exception:
+        pass
+    return None
+
+
+def _tz_cache_write_mirror(cache, script_props, prefix, cache_key, tz, now):
+    """Python mirror of _tzCacheWrite logic."""
+    cache[cache_key] = tz
+    try:
+        script_props.set(prefix + cache_key, json.dumps({'tz': tz, 'ts': now}))
+    except Exception:
+        pass
+
+
+def test_tz_cache_read_write_mirror():
+    """Test Python mirrors of _tzCacheRead/_tzCacheWrite logic."""
+    import json
+    import time
+    
+    # Test 1: in-memory cache hit
+    cache = {'52.5200,13.4050': 'Europe/Berlin'}
+    script_props = type('Mock', (), {
+        'data': {},
+        'get': lambda self, k: self.data.get(k),
+        'set': lambda self, k, v: self.data.__setitem__(k, v),
+        'delete': lambda self, k: self.data.pop(k, None),
+    })()
+    now = int(time.time() * 1000)
+    ttl = 24 * 60 * 60 * 1000
+    
+    result = _tz_cache_read_mirror(cache, script_props, 'TZ:', '52.5200,13.4050', now, ttl)
+    assert_eq(result, 'Europe/Berlin', 'In-memory cache hit')
+    
+    # Test 2: ScriptProperties cache hit (valid TTL)
+    cache2 = {}
+    script_props2 = type('Mock', (), {
+        'data': {'TZ:48.8566,2.3522': json.dumps({'tz': 'Europe/Paris', 'ts': now - 3600000})},
+        'get': lambda self, k: self.data.get(k),
+        'set': lambda self, k, v: self.data.__setitem__(k, v),
+        'delete': lambda self, k: self.data.pop(k, None),
+    })()
+    result2 = _tz_cache_read_mirror(cache2, script_props2, 'TZ:', '48.8566,2.3522', now, ttl)
+    assert_eq(result2, 'Europe/Paris', 'ScriptProperties cache hit')
+    assert_eq(cache2['48.8566,2.3522'], 'Europe/Paris', 'In-memory cache populated from ScriptProperties')
+    
+    # Test 3: ScriptProperties cache miss (expired TTL)
+    cache3 = {}
+    script_props3 = type('Mock', (), {
+        'data': {'TZ:48.8566,2.3522': json.dumps({'tz': 'Europe/Paris', 'ts': now - 25 * 3600000})},
+        'get': lambda self, k: self.data.get(k),
+        'set': lambda self, k, v: self.data.__setitem__(k, v),
+        'delete': lambda self, k: self.data.pop(k, None),
+    })()
+    result3 = _tz_cache_read_mirror(cache3, script_props3, 'TZ:', '48.8566,2.3522', now, ttl)
+    assert_eq(result3, None, 'Expired TTL returns None')
+    assert_true('TZ:48.8566,2.3522' not in script_props3.data, 'Expired entry evicted')
+    
+    # Test 4: _tzCacheWrite populates both caches
+    cache4 = {}
+    script_props4 = type('Mock', (), {
+        'data': {},
+        'get': lambda self, k: self.data.get(k),
+        'set': lambda self, k, v: self.data.__setitem__(k, v),
+        'delete': lambda self, k: self.data.pop(k, None),
+    })()
+    _tz_cache_write_mirror(cache4, script_props4, 'TZ:', '48.8566,2.3522', 'Europe/Paris', now)
+    assert_eq(cache4['48.8566,2.3522'], 'Europe/Paris')
+    assert_true('TZ:48.8566,2.3522' in script_props4.data)
+    entry = json.loads(script_props4.data['TZ:48.8566,2.3522'])
+    assert_eq(entry['tz'], 'Europe/Paris')
+    assert_true(isinstance(entry['ts'], (int, float)))
+
+
+def test_ical_resolveLocationTimezone_circuit_open_behavior():
+    """Python mirror: circuit OPEN must return UTC without API call."""
+    def resolve_mirror(loc, cb_allowed, fetch_func):
+        if not loc:
+            return 'UTC'
+        if loc.get('tz'):
+            return loc['tz']
+        lat, lon = loc.get('lat'), loc.get('lon')
+        if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and
+                abs(lat) <= 90 and abs(lon) <= 180):
+            return 'UTC'
+        if not cb_allowed:
+            return 'UTC'
+        # Would call fetch_func here
+        return fetch_func()
+    
+    # Circuit open
+    result = resolve_mirror({'lat': 52.52, 'lon': 13.405}, False, lambda: 'Europe/Berlin')
+    assert_eq(result, 'UTC', 'Circuit open returns UTC')
+    
+    # Circuit closed
+    result = resolve_mirror({'lat': 52.52, 'lon': 13.405}, True, lambda: 'Europe/Berlin')
+    assert_eq(result, 'Europe/Berlin', 'Circuit closed returns timezone')
+
+
+def test_ical_resolveLocationTimezone_null_loc_mirror():
+    """Python mirror: null/undefined loc returns UTC."""
+    def resolve_mirror(loc, cb_allowed, fetch_func):
+        if not loc:
+            return 'UTC'
+        if loc.get('tz'):
+            return loc['tz']
+        lat, lon = loc.get('lat'), loc.get('lon')
+        if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and
+                abs(lat) <= 90 and abs(lon) <= 180):
+            return 'UTC'
+        return 'UTC'
+    
+    assert_eq(resolve_mirror(None, True, lambda: 'TZ'), 'UTC')
+    assert_eq(resolve_mirror({}, True, lambda: 'TZ'), 'UTC')
+    assert_eq(resolve_mirror({'lat': 'foo', 'lon': 'bar'}, True, lambda: 'TZ'), 'UTC')
+    assert_eq(resolve_mirror({'lat': 52.52, 'lon': 13.405, 'tz': 'America/NY'}, True, lambda: 'TZ'), 'America/NY')
 
 
 # =============================================================================
