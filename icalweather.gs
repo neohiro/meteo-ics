@@ -105,7 +105,9 @@ function _probeOpenMeteoAqCap() {
       const url = PROBE_URL + "?latitude=" + AQ_CAP_PROBE_LAT + "&longitude=" + AQ_CAP_PROBE_LON +
         "&hourly=european_aqi&forecast_days=" + days + "&timezone=auto";
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
-      return res.getResponseCode();
+      const code = res.getResponseCode();
+      if (code === 429) return 429; // Rate limited - treat as retryable
+      return code;
     } catch (e) {
       return 0;
     }
@@ -124,7 +126,7 @@ function _probeOpenMeteoAqCap() {
       break;
     }
     // Small delay between probes to avoid triggering rate limits
-    if (l <= r) Utilities.sleep(100);
+    if (l <= r) Utilities.sleep(250);
   }
   if (cap < OPEN_METEO_AQ_FORECAST_DAYS_CAP) {
     Logger.log("Open-Meteo AQ API cap probe: API returned HTTP " +
@@ -239,9 +241,12 @@ const CB = (() => {
     if (cb.state === STATES.OPEN) {
       const elapsed = Date.now() - cb.lastFailureTime;
       if (elapsed >= Math.max(cb.backoffMs, cfg.recoveryTimeoutMs)) {
-        cb.state = STATES.HALF_OPEN;
-        cb.halfOpenCalls = 0;
-        Logger.log(`Circuit [${name}] HALF_OPEN (recovery timeout elapsed)`);
+        // Atomic transition: only the first caller after timeout gets HALF_OPEN
+        if (cb.state === STATES.OPEN) {
+          cb.state = STATES.HALF_OPEN;
+          cb.halfOpenCalls = 0;
+          Logger.log(`Circuit [${name}] HALF_OPEN (recovery timeout elapsed)`);
+        }
         return true;
       }
       return false;
@@ -428,7 +433,10 @@ function fetchAllWithRetry(requests) {
     });
     pending = nextPending;
     if (pending.length > 0 && attempt < FETCH_MAX_RETRIES) {
-      Utilities.sleep(Math.pow(2, attempt) * 500);
+      // Exponential backoff with jitter: 500ms * 2^attempt ± 25%
+      const baseDelay = Math.pow(2, attempt) * 500;
+      const jitter = baseDelay * 0.25 * (Math.random() * 2 - 1);
+      Utilities.sleep(Math.max(100, Math.round(baseDelay + jitter)));
     }
   }
   // Record circuit state based on outcome
@@ -656,6 +664,8 @@ function _tzCacheRead(cacheKey) {
     }
   } catch (e) {
     Logger.log("_tzCacheRead: ScriptProperties read failed for " + cacheKey + ": " + e);
+    // Corrupted entry — evict
+    try { _scriptProps.deleteProperty(TZ_CACHE_PROP_PREFIX + cacheKey); } catch (_) {}
   }
   return undefined;
 }
