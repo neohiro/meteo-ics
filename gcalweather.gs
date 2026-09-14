@@ -1210,15 +1210,18 @@ function syncWeatherToCalendar() {
     });
   });
 
-  // 6. Sweep orphaned weather events from older or removed locations
+  // 6. Sweep orphaned weather events from older or removed locations.
+  //    Preserve past events (verified ground truth). Only delete future
+  //    orphan events or events from removed locations.
   allManagedEvents.forEach(ev => {
     const id = ev.getId();
-    if (!touchedEventIds.has(id) && !deletedEventIds.has(id)) {
-      try {
-        ev.deleteEvent();
-      } catch (e) {
-        Logger.log(`WARNING: Failed to delete orphaned event ${id}: ${e}`);
-      }
+    if (touchedEventIds.has(id) || deletedEventIds.has(id)) return;
+    const evDateStr = Utilities.formatDate(ev.getStartTime(), calTz, "yyyy-MM-dd");
+    if (evDateStr < todayStr) return; // preserve past events
+    try {
+      ev.deleteEvent();
+    } catch (e) {
+      Logger.log(`WARNING: Failed to delete orphaned event ${id}: ${e}`);
     }
   });
 

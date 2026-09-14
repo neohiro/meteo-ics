@@ -759,6 +759,19 @@ def test_gcal_calendar_write_try_catch():
     assert_true(re.search(r'try\s*\{[\s\S]*?deleteEvent', body))
 
 
+def test_gcal_sweep_preserves_past_events():
+    """Orphan sweep must preserve past managed events (verified ground truth).
+    The schedule only covers -historyDays to +forecastDays, so older past events
+    are not touched and must not be deleted as orphans."""
+    fn = re.search(r'function syncWeatherToCalendar\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('evDateStr < todayStr' in body or 'evDateStr <= todayStr' in body,
+        'sweep must skip deletion when the event date is before today')
+    assert_true('getStartTime()' in body and 'yyyy-MM-dd' in body,
+        'sweep must compare the event date against today')
+
+
 # =============================================================================
 # 11. Code quality: no duplicate function defs, no dead code
 # =============================================================================
