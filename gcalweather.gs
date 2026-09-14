@@ -95,6 +95,9 @@ const FETCH_RETRY_CODES = new Set([429, 502, 503, 504]);
 const DRIVE_WAQI_FILE = "waqi_token.enc";
 const APPS_SCRIPT_BUDGET_MS = 345000;
 const BUDGET_WARN_AT_MS = [240000, 300000];
+const PAST_DAYS_BUFFER = 1;     // Extra day of historical data beyond historyDays
+const WINDOW_START_BUFFER = 3;  // Days before history window to sweep orphans
+const WINDOW_END_BUFFER = 5;    // Days after forecast window to sweep orphans
 
 let _fetchAllImplGcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverrideGcal = null;
@@ -1121,8 +1124,8 @@ function syncWeatherToCalendar() {
   const globalStats = computeGlobalModelAccuracy(unitSymbol);
 
   // 4. Batch-index calendar events with signature fallback
-  const windowStart = new Date(todayDate.getTime() - (CONFIG.historyDays + 3) * 24 * 60 * 60 * 1000);
-  const windowEnd = new Date(todayDate.getTime() + (CONFIG.forecastDays + 5) * 24 * 60 * 60 * 1000);
+  const windowStart = new Date(todayDate.getTime() - (CONFIG.historyDays + WINDOW_START_BUFFER) * 24 * 60 * 60 * 1000);
+  const windowEnd = new Date(todayDate.getTime() + (CONFIG.forecastDays + WINDOW_END_BUFFER) * 24 * 60 * 60 * 1000);
   const existingEvents = cal.getEvents(windowStart, windowEnd);
 
   const eventMap = new Map();
@@ -1241,14 +1244,15 @@ function fetchAllAtmosphericDataParallel(locationPool) {
   const reqMap = [];
 
   locationPool.forEach((loc, key) => {
-    const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
-    const dHourlyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
+    const pastDays = CONFIG.historyDays + PAST_DAYS_BUFFER;
+    const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${pastDays}&timezone=auto`;
+    const dHourlyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${pastDays}&timezone=auto`;
     const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${CONFIG.forecastDays}&temperature_unit=${u}&timezone=auto`;
     // Open-Meteo Air-Quality API hard-caps forecast_days at 7 (anything higher returns HTTP 400).
     // For regions outside EU/US, the global OpenAQ/WAQI fallback (see fetchGlobalAQI) provides
     // additional coverage when aqProvider is "auto" or explicitly "openaq" or "waqi".
     const aqForecastDays = Math.min(CONFIG.deterministicDays, getOpenMeteoAqCap());
-    const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqForecastDays}&past_days=${CONFIG.historyDays + 1}&timezone=auto`;
+    const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqForecastDays}&past_days=${pastDays}&timezone=auto`;
 
     requests.push({ url: dDailyUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     reqMap.push({ key, type: "det" });
@@ -1640,7 +1644,9 @@ function computeGlobalModelAccuracy(sym) {
           else { buckets.noaa.e += tErr; buckets.noaa.c++; }
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      Logger.log("computeGlobalModelAccuracy: failed to process record " + k + ": " + e);
+    }
   });
 
   if (verifiedSnapshots === 0) {

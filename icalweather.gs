@@ -2411,7 +2411,9 @@ function computeGlobalModelAccuracy(sym) {
           else { buckets.noaa.e += tErr; buckets.noaa.c++; }
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      Logger.log("computeGlobalModelAccuracy: failed to process record " + k + ": " + e);
+    }
   });
 
   if (verifiedSnapshots === 0) {
