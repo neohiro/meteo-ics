@@ -1068,6 +1068,11 @@ if (CONFIG.locations.length === 0) {
     "Check city names or provide explicit { name, lat, lon } entries."
   );
 }
+if (CONFIG.deterministicDays > 16) {
+  throw new Error("syncWeatherToCalendar: CONFIG.deterministicDays (" +
+    CONFIG.deterministicDays + ") exceeds Open-Meteo's max of 16 — " +
+    "deterministic events will be truncated. Reduce deterministicDays or accept ensemble-only forecast.");
+}
 
 function syncWeatherToCalendar() {
   const budget = budgetStart();
