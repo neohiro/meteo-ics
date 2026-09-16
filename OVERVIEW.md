@@ -97,7 +97,8 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 | 42b | gcal | **NaN safety**: `reconcileGroundTruth` guarded `maxT !== null` but not `minT`. Null minT → `Math.round(null) = 0` → wrong recorded actual.minTemp | Added `minT !== null && minT !== undefined` to the guard |
 
 **Investigated but not changed** (false positives or risky):
-- *`assessStargazingConditions` in gcal hardcodes English strings* — would need a translation table to match ical's 8-lang support. Risky refactor; left for explicit feature work.
+- *`assessStargazingConditions` in gcal hardcodes English strings* — **resolved (session 2)**: takes a `lang` param and renders verdicts via `t("sClr"/"sSee"/...)`; call site in `buildDashboardPayload` passes `lang`. All eight languages supported.
+- *`computeDayAudit` volatility + model-grade/`leadCurve` verdicts hardcoded English* — **resolved (session 2)**: `computeDayAudit` now accepts `lang` and emits `t("volStable"/"volMod"/"volHigh"/"volPend")`; grades rendered via new `tGrade()` helper wired to the pre-existing `gA/gB/gC/gCal` keys; `groundTruth`/`accuracyAudit`/`modelBench`/`verifiedLog` audit-section headers and their metrics labels translated via new mirrored `T_L` keys prompting parity in both scripts.
 - *Shared `ASTRONOMICAL_EVENTS` constant duplication* (ical line 214-244 vs gcal) — Apps Script has no `import` mechanism; `Library` config is brittle. Skip.
 
 ### Pass 7: Principal-engineer sign-off — defensive hardening

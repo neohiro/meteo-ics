@@ -571,6 +571,27 @@ const T_L = {
   gA:      { en:"A (High)",             zh:"A (高)",        hi:"A (उच्च)",           es:"A (Alta)",         fr:"A (Élevée)",          ar:"A (مرتفع)",       de:"A (Hoch)",           nl:"A (Hoog)" },
   gB:      { en:"B (Moderate)",         zh:"B (中等)",      hi:"B (मध्यम)",           es:"B (Moderada)",     fr:"B (Modérée)",          ar:"B (متوسط)",       de:"B (Mittel)",         nl:"B (Matig)" },
   gC:      { en:"C (Divergent)",        zh:"C (差异较大)",   hi:"C (भिन्न)",           es:"C (Divergente)",   fr:"C (Divergent)",        ar:"C (متباعد)",      de:"C (Abweichend)",     nl:"C (Uiteenlopend)" },
+  groundTruth:   { en:'Ground Truth (Measured)' zh:'实测数据'           hi:'वास्तविक डेटा'                es:'Datos reales (medidos)'     fr:'Données réelles (mesurées)'     ar:'بيانات فعلية (مقاسة)'     de:'Gemessene Daten'            nl:'Gemeten gegevens'         }
+  accuracyAudit: { en:'Prediction Accuracy Audit' zh:'预测精度审计'         hi:'पूर्वानुमान सटीकता ऑडिट'      es:'Auditoría de precisión'     fr:'Audit de précision'             ar:'تدقيق دقة التوقعات'       de:'Prognosegenauigkeits-Prüfung' nl:'Nauwkeurigheidscontrole'  }
+  modelBench:    { en:'Model Benchmark'        zh:'模型基准'           hi:'मॉडल बेंचमार्क'               es:'Referencia del modelo'      fr:'Référence du modèle'            ar:'معيار النموذج'            de:'Modell-Benchmark'           nl:'Modelbenchmark'           }
+  sky:           { en:'Sky'                    zh:'天空'             hi:'आसमान'                        es:'Cielo'                      fr:'Ciel'                           ar:'السماء'                   de:'Himmel'                     nl:'Lucht'                    }
+  tempDelta:     { en:'Temp Delta'             zh:'温差'             hi:'ताप अंतर'                     es:'Delta de temp'              fr:'Écart de temp'                  ar:'فرق الحرارة'              de:'Temp-Delta'                 nl:'Tempverschil'             }
+  rainDelta:     { en:'Rain Delta'             zh:'雨量差'            hi:'वर्षा अंतर'                   es:'Delta de lluvia'            fr:'Écart de pluie'                 ar:'فرق المطر'                de:'Regen-Delta'                nl:'Regenverschil'            }
+  stability:     { en:'Stability'              zh:'稳定性'            hi:'स्थिरता'                      es:'Estabilidad'                fr:'Stabilité'                      ar:'الاستقرار'                de:'Stabilität'                 nl:'Stabiliteit'              }
+  snapTracked:   { en:'Snapshots Tracked'      zh:'已追踪快照'          hi:'ट्रैक किए गए स्नैपशॉट'        es:'Instantáneas registradas'   fr:'Instantanés suivis'             ar:'لقطات متتبعة'             de:'Verfolgte Snapshots'        nl:'Gevolgde momentopnamen'   }
+  lifeTempMAE:   { en:'Lifetime Temp MAE'      zh:'全时温度平均误差'       hi:'जीवनकाल ताप MAE'              es:'MAE temp. histórico'        fr:'MAE temp. global'               ar:'متوسط خطأ درجة الحرارة'   de:'Gesamt-Temp-MAE'            nl:'Levenslange temp-MAE'     }
+  lifeRainMAE:   { en:'Lifetime Rain MAE'      zh:'全时雨量平均误差'       hi:'जीवनकाल वर्षा MAE'            es:'MAE lluvia histórico'       fr:'MAE pluie global'               ar:'متوسط خطأ المطر'          de:'Gesamt-Regen-MAE'           nl:'Levenslange regen-MAE'    }
+  reliability:   { en:'Reliability'            zh:'可靠性'            hi:'विश्वसनीयता'                  es:'Confiabilidad'              fr:'Fiabilité'                      ar:'الموثوقية'                de:'Zuverlässigkeit'            nl:'Betrouwbaarheid'          }
+  leadCurve:     { en:'Lead Curve'             zh:'提前期曲线'          hi:'लीड वक्र'                     es:'Curva de anticipación'      fr:"Courbe d'avance"                ar:'منحنى التوقع'             de:'Vorlauf-Kurve'              nl:'Leadcurve'                }
+  benchMAE:      { en:'Benchmark MAE'          zh:'基准平均误差'         hi:'बेंचमार्क MAE'                es:'MAE de referencia'          fr:'MAE de référence'               ar:'متوسط خطأ المعيار'        de:'Benchmark-MAE'              nl:'Benchmark-MAE'            }
+  verifiedLog:   { en:'Verified Log'           zh:'已验证日志'          hi:'सत्यापित लॉग'                 es:'Registro verificado'        fr:'Journal vérifié'                ar:'سجل موثّق'                de:'Verifiziertes Protokoll'    nl:'Geverifieerd logboek'     }
+  dAgo:        { en:" d ago"            zh:" 天前"          hi:" दिन पहले"                es:" d atrás"           fr:" j avant"                    ar:" يوم قبل"           de:" T zuvor"              nl:" d geleden"                 }
+  hi:        { en:"High"               zh:"最高"           hi:"अधिकतम"     es:"Máxima"        fr:"Max."                     ar:"القصوى"  de:"Hoch"                  nl:"Hoog"                        }
+  lo:        { en:"Low"                zh:"最低"           hi:"न्यूनतम"    es:"Mínima"        fr:"Min."                     ar:"الدنيا" de:"Tief"                  nl:"Laag"                        }
+  volHigh:       { en:'High Drift'             zh:'高漂移'            hi:'उच्च विचलन'                   es:'Deriva alta'                fr:'Dérive élevée'                  ar:'انحراف مرتفع'             de:'Hohe Abweichung'            nl:'Hoge afwijking'           }
+  volMod:        { en:'Moderate'               zh:'中等'             hi:'मध्यम'                        es:'Moderada'                   fr:'Modérée'                        ar:'متوسط'                    de:'Mittel'                     nl:'Matig'                    }
+  volStable:     { en:'Stable'                 zh:'稳定'             hi:'स्थिर'                        es:'Estable'                    fr:'Stable'                         ar:'مستقر'                    de:'Stabil'                     nl:'Stabiel'                  }
+  volPend:       { en:'Pending'                zh:'待定'             hi:'लंबित'                        es:'Pendiente'                  fr:'En attente'                     ar:'قيد الانتظار'             de:'Ausstehend'                 nl:'In afwachting'            }
   gCal:    { en:"A (Calibrating)",      zh:"A (校准中)",     hi:"A (कैलिब्रेट हो रहा)", es:"A (Calibrando)",   fr:"A (Calibrage en cours)", ar:"A (قيد المعايرة)", de:"A (Kalibrierung)",  nl:"A (Wordt gekalibreerd)" }
   wxClear:      { en:'Clear Sky'            zh:'晴朗'           hi:'साफ़ आसमान'               es:'Ciel despejado'         fr:'Ciel dégagé'                  ar:'سماء صافية'           de:'Klarer Himmel'            nl:'Heldere lucht'            }
   wxMainly:     { en:'Mainly Clear'         zh:'大部晴朗'         hi:'अधिकतर साफ़'              es:'Despejado en general'   fr:'Plutôt dégagé'                ar:'صافٍ في الغالب'       de:'Überwiegend klar'         nl:'Overwegend helder'        }
@@ -586,6 +607,7 @@ const T_L = {
   wxSnowSh:     { en:'Snow Showers'         zh:'阵雪'           hi:'हिम बौछारें'              es:'Chubascos de nieve'     fr:'Averses de neige'             ar:'زخات ثلج'             de:'Schneeschauer'            nl:'Sneeuwbuien'              }
   wxThunder:    { en:'Thunderstorm'         zh:'雷暴'           hi:'आंधी-तूफ़ान'              es:'Tormenta'               fr:'Orage'                        ar:'عاصفة رعدية'          de:'Gewitter'                 nl:'Onweer'                   }
   wxFair:       { en:'Fair'                 zh:'晴朗'           hi:'मौसम साफ़'                es:'Despejado'              fr:'Beau temps'                   ar:'صحو'                  de:'Aufgeheitert'             nl:'Mooi weer'                }
+
 };
 
 function t(key, lang) {
@@ -2370,7 +2392,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     const eventColor = getEventColorEnum(actualMax, false, isC);
     const title = `${weatherGlyph} ${actualMax}${sym} ${loc.name}`;
 
-    const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym);
+    const audit = computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym, lang);
 
     // Generate actionable advice for past day based on actual measured conditions
     const pastAdviceContext = {
@@ -2408,14 +2430,14 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
     const sourcesLines = [`📡 ${tSection("secSources", lang)}`];
     if (aqSource) {
-      sourcesLines.push(`• Air Quality: ${aqSource}`);
+      sourcesLines.push(`• ${t("aq", lang)}: ${aqSource}`);
     }
-    sourcesLines.push(`• Weather & Astronomy: Open-Meteo API`);
-    sourcesLines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
-    sourcesLines.push(`• Wikipedia (main): https://en.wikipedia.org`);
+    sourcesLines.push(`• ${t("wx", lang)}: Open-Meteo API`);
+    sourcesLines.push(`• ${t("wikiApi", lang)}: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
+    sourcesLines.push(`• ${t("wiki", lang)} (main): https://en.wikipedia.org`);
     const newsApiKey = scriptProps.getProperty("NEWS_API_KEY");
     if (newsApiKey) {
-      sourcesLines.push(`• Breaking News: https://newsapi.org`);
+      sourcesLines.push(`• ${t("newsApi", lang)}: https://newsapi.org`);
     }
 
     const sections = [
@@ -2424,9 +2446,9 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       // 2. GROUND TRUTH (MEASURED)
       [
-        `📊 GROUND TRUTH (MEASURED)`,
+        `📊 ${t("groundTruth", lang)}`,
         `• ${t("range", lang)}: ${actualMax}${sym} / ${actualMin}${sym}`,
-        `• Sky: ${weatherGlyph} ${getWeatherName(actualCode, lang)}`,
+        `• ${t("sky", lang)}: ${weatherGlyph} ${getWeatherName(actualCode, lang)}`,
         `• ${t("rain", lang)}: ${Number(actualRain).toFixed(1)} mm`,
         aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}${aqSource ? ", " + aqSource : ""})` : ``,
         astroEvent ? `• ${t("status", lang)}: ${astroEvent}` : ``
@@ -2456,20 +2478,20 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       // 5. PREDICTION ACCURACY AUDIT
       [
-        `🎯 PREDICTION ACCURACY AUDIT`,
-        `• Temp Delta: ${audit.tempDelta}`,
-        `• Rain Delta: ${audit.rainDelta}`,
-        `• Stability: ${audit.volatility}`,
-        `• Snapshots Tracked: ${audit.snapshotsTaken}`
+        `🎯 ${t("accuracyAudit", lang)}`,
+        `• ${t("tempDelta", lang)}: ${audit.tempDelta}`,
+        `• ${t("rainDelta", lang)}: ${audit.rainDelta}`,
+        `• ${t("stability", lang)}: ${audit.volatility}`,
+        `• ${t("snapTracked", lang)}: ${audit.snapshotsTaken}`
       ].join("\n"),
 
       // 6. MODEL BENCHMARK
       [
-        `🌐 MODEL BENCHMARK`,
-        `• Lifetime Temp MAE: ${globalStats.tempMAE}`,
-        `• Lifetime Rain MAE: ${globalStats.rainMAE}`,
-        `• Reliability: ${globalStats.modelGrade}`,
-        `• Lead Curve: ${globalStats.leadCurve}`
+        `🌐 ${t("modelBench", lang)}`,
+        `• ${t("lifeTempMAE", lang)}: ${globalStats.tempMAE}`,
+        `• ${t("lifeRainMAE", lang)}: ${globalStats.rainMAE}`,
+        `• ${t("reliability", lang)}: ${tGrade(globalStats.modelGrade, lang)}`,
+        `• ${t("leadCurve", lang)}: ${globalStats.leadCurve}`
       ].join("\n"),
 
       // 7. 7-DAY AGGREGATE (historical, leading up to this day)
@@ -2484,8 +2506,8 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       // 9. LOCATION & DATE
       [
-        `📍 ${loc.name} · Verified Log`,
-        `📅 ${targetDateStr} (${Math.abs(offset)}d ago)`
+        `📍 ${loc.name} · ${t("verifiedLog", lang)}`,
+        `📅 ${targetDateStr} (${Math.abs(offset)}${t("dAgo", lang)})`
       ].join("\n")
     ];
 
@@ -2587,7 +2609,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     saveDayRecord(cityKey, targetDateStr, record);
   }
 
-  const drift = computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym);
+  const drift = computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym, lang);
   const aggregates = computeContinuousMultiDayAggregates(data, targetDateStr, isC);
   const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, targetDateStr, cloudCover, lang);
 
@@ -2621,8 +2643,8 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 // 2. TEMPERATURE & COMFORT
     [
       `🌡️ ${tSection("secTemp", lang)}`,
-        `• High: ${currentMax}${sym} (${getThermalText(currentMax, isC, lang)})`,
-        `• Low: ${currentMin}${sym} · ${t("feels", lang)}: ~${apparentMax}${sym}`,
+        `• ${t("hi", lang)}: ${currentMax}${sym} (${getThermalText(currentMax, isC, lang)})`,
+        `• ${t("lo", lang)}: ${currentMin}${sym} · ${t("feels", lang)}: ~${apparentMax}${sym}`,
         offset >= CONFIG.deterministicDays
           ? `• ${t("consensus", lang)}: ±${spreadVal}${sym}`
           : `• ${t("rain", lang)}: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
@@ -2673,22 +2695,22 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     [
       `📉 ${tSection("secAudit", lang)}`,
       `• ${t("drift", lang)}: ${drift.tempDelta} · ${t("rain", lang)}: ${drift.rainDelta}`,
-      `• Stability: ${drift.volatility}`,
-      `• Benchmark MAE: ${globalStats.tempMAE} / ${globalStats.rainMAE}`,
-      `• Reliability: ${globalStats.modelGrade}`,
-      `• Lead Curve: ${globalStats.leadCurve}`
+      `• ${t("stability", lang)}: ${drift.volatility}`,
+      `• ${t("benchMAE", lang)}: ${globalStats.tempMAE} / ${globalStats.rainMAE}`,
+      `• ${t("reliability", lang)}: ${tGrade(globalStats.modelGrade, lang)}`,
+      `• ${t("leadCurve", lang)}: ${globalStats.leadCurve}`
     ].join("\n"),
 
     // 8. SOURCES
     (() => {
       const lines = [`📡 ${tSection("secSources", lang)}`];
-      lines.push(aqSource ? `• Air Quality: ${aqSource}` : `• Air Quality: Open-Meteo`);
-      lines.push(`• Weather & Astronomy: Open-Meteo API (https://open-meteo.com)`);
-      lines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
-      lines.push(`• Wikipedia (main): https://en.wikipedia.org`);
+      lines.push(aqSource ? `• ${t("aq", lang)}: ${aqSource}` : `• ${t("aq", lang)}: Open-Meteo`);
+      lines.push(`• ${t("wx", lang)}: Open-Meteo API (https://open-meteo.com)`);
+      lines.push(`• ${t("wikiApi", lang)}: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
+      lines.push(`• ${t("wiki", lang)} (main): https://en.wikipedia.org`);
       const newsApiKey = scriptProps.getProperty("NEWS_API_KEY");
       if (newsApiKey) {
-        lines.push(`• Breaking News: https://newsapi.org`);
+        lines.push(`• ${t("newsApi", lang)}: https://newsapi.org`);
       }
       return lines.join("\n");
     })(),
@@ -3155,15 +3177,15 @@ function cleanupOldStorageKeys() {
 // UTILITIES & CALENDAR HELPERS
 // ==========================================================
 
-function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym) {
+function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym, lang) {
   if (!snapshots || snapshots.length === 0) {
-    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: "Stable", snapshotsTaken: 0 };
+    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: t("volStable", lang), snapshotsTaken: 0 };
   }
   if (snapshots.length === 1) {
-    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: "Stable", snapshotsTaken: 1 };
+    return { tempDelta: "±0" + sym, rainDelta: "0 mm", volatility: t("volStable", lang), snapshotsTaken: 1 };
   }
   if (!Number.isFinite(baselineMax) || !Number.isFinite(baselineRain)) {
-    return { tempDelta: "n/a", rainDelta: "n/a", volatility: "🟡 Pending", snapshotsTaken: snapshots.length };
+    return { tempDelta: "n/a", rainDelta: "n/a", volatility: t("volPend", lang), snapshotsTaken: snapshots.length };
   }
 
   let maxTempDiff = 0, tempDeltaStr = "±0" + sym;
@@ -3189,7 +3211,7 @@ function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym)
   });
 
   const absT = Math.abs(maxTempDiff);
-  const volatility = absT >= 5 ? "🔴 High Drift" : (absT >= 3 ? "🟡 Moderate" : "🟢 Stable");
+  const volatility = absT >= 5 ? t("volHigh", lang) : (absT >= 3 ? t("volMod", lang) : t("volStable", lang));
   return { tempDelta: tempDeltaStr, rainDelta: rainDeltaStr, volatility: volatility, snapshotsTaken: snapshots.length };
 }
 
@@ -3279,6 +3301,12 @@ function getWeatherGlyph(code) {
   if (code === 85 || code === 86) return "🌨️";
   if (code >= 95) return "⚡";
   return "🌤️";
+}
+
+function tGrade(grade, lang) {
+  const map = { "A (Calibrating)": "gCal", "A+ (Excellent)": "gAplus", "A (High)": "gA", "B (Moderate)": "gB", "C (Divergent)": "gC" };
+  const key = map[grade];
+  return key ? t(key, lang) : grade;
 }
 
 function getWeatherName(code, lang) {

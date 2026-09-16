@@ -937,9 +937,80 @@ def test_gcal_build_dashboard_payload_uses_translations():
     assert_true('SUN & CELESTIAL`' not in body, 'old English SUN header must be removed')
     assert_true('`📡 SOURCES`' not in body, 'old English SOURCES header must be removed')
     assert_true('`📉 MODEL AUDIT`' not in body, 'old English MODEL AUDIT header must be removed')
+    assert_true('`📊 GROUND TRUTH (MEASURED)`' not in body, 'GROUND TRUTH header must be translated')
+    assert_true('`🎯 PREDICTION ACCURACY AUDIT`' not in body, 'PREDICTION ACCURACY AUDIT header must be translated')
+    assert_true('`🌐 MODEL BENCHMARK`' not in body, 'MODEL BENCHMARK header must be translated')
+    assert_true('`• Sky:' not in body, 'audit Sky label must be translated')
+    assert_true('Temp Delta:' not in body, 'Temp Delta label must be translated')
+    assert_true('Rain Delta:' not in body, 'Rain Delta label must be translated')
+    assert_true('Snapshots Tracked:' not in body, 'Snapshots Tracked label must be translated')
+    assert_true('Lifetime Temp MAE:' not in body, 'Lifetime Temp MAE label must be translated')
+    assert_true('Lifetime Rain MAE:' not in body, 'Lifetime Rain MAE label must be translated')
+    assert_true('Benchmark MAE:' not in body, 'Benchmark MAE label must be translated')
+    assert_true('Verified Log' not in body, 'Verified Log footer must be translated')
     # Per-verdict labels must route through the translator.
     assert_true('assessStargazingConditions(data, offset, moonInfo.fraction, targetDateStr, cloudCover, lang)' in body,
         'assessStargazingConditions must receive cloudCover + lang in buildDashboardPayload')
+    # Model-audit verdict labels and grade values must route through the translator.
+    for label in ('groundTruth', 'accuracyAudit', 'modelBench', 'sky', 'tempDelta', 'rainDelta',
+                  'stability', 'snapTracked', 'lifeTempMAE', 'lifeRainMAE', 'reliability',
+                  'leadCurve', 'benchMAE', 'verifiedLog'):
+        assert_true(f't("{label}", lang)' in body, f'audit label {label} must be translated')
+    assert_true('tGrade(globalStats.modelGrade, lang)' in body,
+        'model grade must be translated via tGrade at render')
+    assert_true('t("dAgo", lang)' in body, 'd-ago unit suffix must be translated')
+
+
+def test_gcal_computeDayAudit_lang_param():
+    """computeDayAudit must accept (and use) a lang parameter so volatility
+    verdicts (Stable/Moderate/High Drift/Pending) honor CONFIG.language."""
+    fn = re.search(r'function computeDayAudit\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true('function computeDayAudit(' in body and 'lang' in body,
+        'computeDayAudit must accept lang')
+    for key in ('volStable', 'volMod', 'volHigh', 'volPend'):
+        assert_true(f't("{key}", lang)' in body, f'computeDayAudit must use t("{key}", lang)')
+    assert_true('"Stable"' not in body and '"🟡 Pending"' not in body and '"🔴 High Drift"' not in body,
+        'computeDayAudit must not return hardcoded English volatility strings')
+    # Both call sites inside buildDashboardPayload must pass lang.
+    payload = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(payload is not None)
+    pbody = payload.group(0)
+    assert_true('computeDayAudit(snapshots, actualMax, actualRain, aqiVal, sym, lang)' in pbody,
+        'past-day computeDayAudit call must pass lang')
+    assert_true('computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym, lang)' in pbody,
+        'forecast computeDayAudit call must pass lang')
+
+
+def test_gcal_tGrade_wires_to_keys():
+    """tGrade must map the English engine grade strings to existent T_L keys."""
+    fn = re.search(r'function tGrade\([\s\S]*?\n\}', GCAL)
+    assert_true(fn is not None, 'tGrade helper must exist')
+    body = fn.group(0)
+    for eng, key in (('A (Calibrating)', 'gCal'), ('A+ (Excellent)', 'gAplus'), ('A (High)', 'gA'),
+                     ('B (Moderate)', 'gB'), ('C (Divergent)', 'gC')):
+        assert_true(f'"{eng}"' in body, f'tGrade must map {eng}')
+        assert_true(f'"{key}"' in body, f'tGrade must map to T_L key {key}')
+    for key in ('gA', 'gAplus', 'gB', 'gC', 'gCal'):
+        assert_true(re.search(rf'^\s*{key}:\s*\{{', GCAL, re.M) is not None,
+            f'T_L key {key} must exist so tGrade renders a translated grade')
+
+
+def test_gcal_t_l_new_audit_keys_all_langs():
+    """New audit/multilingual keys must carry all 8 language translations."""
+    m = re.search(r'const\s+T_L\s*=\s*\{[\s\S]*?^\};', GCAL, re.M)
+    assert_true(m is not None)
+    block = m.group(0)
+    for key in ('groundTruth', 'accuracyAudit', 'modelBench', 'sky', 'tempDelta', 'rainDelta',
+                'stability', 'snapTracked', 'lifeTempMAE', 'lifeRainMAE', 'reliability',
+                'leadCurve', 'benchMAE', 'verifiedLog', 'volHigh', 'volMod', 'volStable',
+                'volPend', 'dAgo'):
+        km = re.search(rf'^\s*{key}:\s*\{{([\s\S]*?)\}}', block, re.M)
+        assert_true(km is not None, f'T_L key {key} must exist')
+        for lang in ('en', 'zh', 'hi', 'es', 'fr', 'ar', 'de', 'nl'):
+            assert_true(re.search(rf'\b{lang}:', km.group(1)) is not None,
+                f'T_L key {key} missing {lang} translation')
 
 
 def test_supported_langs_in_correct_order():
@@ -2811,8 +2882,10 @@ def test_gcal_event_has_sources_section():
         'gcalweather.gs must define T_SOURCES translation constant at module level')
     assert_true(re.search(r'secSources:\s*T_SOURCES', GCAL),
         'tSection must map secSources to T_SOURCES')
-    assert_true(re.search(r'Weather.*Open-Meteo|Open-Meteo.*Weather', body),
+    assert_true(re.search(r'Open-Meteo', body),
         'gcal SOURCES section must credit Open-Meteo as the weather provider')
+    assert_true(re.search(r't\("wx", lang\)[^\n]*Open-Meteo', body),
+        'gcal SOURCES section must pair the translated Wx label with Open-Meteo')
 
 
 def test_gcal_advice_before_audit():
