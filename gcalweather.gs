@@ -1261,11 +1261,29 @@ function fetchAllAtmosphericDataParallel(locationPool) {
       const geo = geocodeCity(loc.name);
       if (geo && geo.lat != null && geo.lon != null) {
         locationPool.set(key, { ...loc, lat: geo.lat, lon: geo.lon });
+      } else {
+        Logger.log(`ERROR: Failed to geocode location "${loc.name}" — skipping`);
       }
     }
   });
 
+  // Validate all locations have valid coordinates before building URLs.
+  // Skip invalid locations with clear error to prevent undefined lat/lon in URLs.
+  const validLocations = new Map();
   locationPool.forEach((loc, key) => {
+    if (!isValidLatLon(loc.lat, loc.lon)) {
+      Logger.log(`ERROR: Location "${loc.name}" (key: ${key}) has invalid coordinates (lat=${loc.lat}, lon=${loc.lon}) — skipping`);
+      return;
+    }
+    validLocations.set(key, loc);
+  });
+
+  if (validLocations.size === 0) {
+    Logger.log("ERROR: No valid locations after geocoding — aborting fetch");
+    return new Map();
+  }
+
+  validLocations.forEach((loc, key) => {
     // Match icalweather.gs: no past_days on deterministic forecast calls.
     // past_days can cause rate limits / 400 errors with many daily params.
     // Historical reconciliation uses the same deterministic response (Open-Meteo
