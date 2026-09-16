@@ -95,9 +95,15 @@ const FETCH_RETRY_CODES = new Set([429, 502, 503, 504]);
 const DRIVE_WAQI_FILE = "waqi_token.enc";
 const APPS_SCRIPT_BUDGET_MS = 345000;
 const BUDGET_WARN_AT_MS = [240000, 300000];
-const PAST_DAYS_BUFFER = 1;     // Extra day of historical data beyond historyDays
 const WINDOW_START_BUFFER = 3;  // Days before history window to sweep orphans
 const WINDOW_END_BUFFER = 5;    // Days after forecast window to sweep orphans
+// Lead-time bucket thresholds for model accuracy (must match icalweather.gs)
+const LEAD_BUCKETS = [
+  { maxLead: 3,   key: 'short', defaultErr: 0.8 },
+  { maxLead: 7,   key: 'mid',   defaultErr: 1.7 },
+  { maxLead: 14,  key: 'long',  defaultErr: 2.9 },
+  { maxLead: Infinity, key: 'noaa', defaultErr: 4.3 }
+];
 
 let _fetchAllImplGcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverrideGcal = null;
@@ -1248,16 +1254,30 @@ function fetchAllAtmosphericDataParallel(locationPool) {
   const requests = [];
   const reqMap = [];
 
+  // Geo-code any locations missing coordinates before building URLs.
+  // This ensures valid lat/lon for API requests (fix for fast-empty sync).
   locationPool.forEach((loc, key) => {
-    const pastDays = CONFIG.historyDays + PAST_DAYS_BUFFER;
-    const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${pastDays}&timezone=auto`;
-    const dHourlyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&past_days=${pastDays}&timezone=auto`;
+    if ((loc.lat == null || loc.lon == null) && loc.name) {
+      const geo = geocodeCity(loc.name);
+      if (geo && geo.lat != null && geo.lon != null) {
+        locationPool.set(key, { ...loc, lat: geo.lat, lon: geo.lon });
+      }
+    }
+  });
+
+  locationPool.forEach((loc, key) => {
+    // Match icalweather.gs: no past_days on deterministic forecast calls.
+    // past_days can cause rate limits / 400 errors with many daily params.
+    // Historical reconciliation uses the same deterministic response (Open-Meteo
+    // returns ~7 days history by default without past_days).
+    const dDailyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,weather_code,precipitation_sum,precipitation_probability_max,windspeed_10m_max,sunrise,sunset,uv_index_max,et0_fao_evapotranspiration,shortwave_radiation_sum&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&timezone=auto`;
+    const dHourlyUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl,soil_temperature_0cm&temperature_unit=${u}&forecast_days=${CONFIG.deterministicDays}&timezone=auto`;
     const eUrl = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${loc.lat}&longitude=${loc.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&models=gfs_seamless&forecast_days=${CONFIG.forecastDays}&temperature_unit=${u}&timezone=auto`;
     // Open-Meteo Air-Quality API hard-caps forecast_days at 7 (anything higher returns HTTP 400).
     // For regions outside EU/US, the global OpenAQ/WAQI fallback (see fetchGlobalAQI) provides
     // additional coverage when aqProvider is "auto" or explicitly "openaq" or "waqi".
     const aqForecastDays = Math.min(CONFIG.deterministicDays, getOpenMeteoAqCap());
-    const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqForecastDays}&past_days=${pastDays}&timezone=auto`;
+    const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}&hourly=european_aqi,us_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,dust,alder_pollen,birch_pollen,grass_pollen&forecast_days=${aqForecastDays}&timezone=auto`;
 
     requests.push({ url: dDailyUrl, muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     reqMap.push({ key, type: "det" });
@@ -1642,11 +1662,15 @@ function computeGlobalModelAccuracy(sym) {
           totalRainError += rErr;
           verifiedSnapshots++;
 
-          const lead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
-          if (lead <= 3) { buckets.short.e += tErr; buckets.short.c++; }
-          else if (lead <= 7) { buckets.mid.e += tErr; buckets.mid.c++; }
-          else if (lead <= 14) { buckets.long.e += tErr; buckets.long.c++; }
-          else { buckets.noaa.e += tErr; buckets.noaa.c++; }
+          const rawLead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
+          const lead = Number.isFinite(rawLead) && rawLead >= 0 ? rawLead : 0;
+          LEAD_BUCKETS.forEach(bucket => {
+            if (lead <= bucket.maxLead) {
+              buckets[bucket.key].e += tErr;
+              buckets[bucket.key].c++;
+              return false; // break forEach
+            }
+          });
         });
       }
     } catch (e) {
@@ -1668,10 +1692,10 @@ function computeGlobalModelAccuracy(sym) {
   const avgTempMAE = (totalTempError / verifiedSnapshots).toFixed(1);
   const avgRainMAE = (totalRainError / verifiedSnapshots).toFixed(1);
 
-  const bShort = buckets.short.c > 0 ? (buckets.short.e / buckets.short.c).toFixed(1) : "0.8";
-  const bMid   = buckets.mid.c > 0 ? (buckets.mid.e / buckets.mid.c).toFixed(1) : "1.7";
-  const bLong  = buckets.long.c > 0 ? (buckets.long.e / buckets.long.c).toFixed(1) : "2.9";
-  const bNoaa  = buckets.noaa.c > 0 ? (buckets.noaa.e / buckets.noaa.c).toFixed(1) : "4.3";
+  const bShort = buckets.short.c > 0 ? (buckets.short.e / buckets.short.c).toFixed(1) : String(LEAD_BUCKETS[0].defaultErr);
+  const bMid   = buckets.mid.c > 0 ? (buckets.mid.e / buckets.mid.c).toFixed(1) : String(LEAD_BUCKETS[1].defaultErr);
+  const bLong  = buckets.long.c > 0 ? (buckets.long.e / buckets.long.c).toFixed(1) : String(LEAD_BUCKETS[2].defaultErr);
+  const bNoaa  = buckets.noaa.c > 0 ? (buckets.noaa.e / buckets.noaa.c).toFixed(1) : String(LEAD_BUCKETS[3].defaultErr);
 
   let grade = "A";
   if (avgTempMAE <= 1.5) grade = "A+ (Excellent)";
@@ -1793,32 +1817,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         })()
       : "--";
 
-    const historicalAggregate = (() => {
-      if (!data.det || !data.det.time) return null;
-      const times = data.det.time;
-      const idx = times.indexOf(targetDateStr);
-      if (idx === -1) return null;
-      let totalRain = 0, totalMax = 0, totalMin = 0, wDays = 0;
-      const base10 = isC ? 10 : 50;
-      for (let d = 0; d < 7; d++) {
-        const lookIdx = idx - d;
-        if (lookIdx < 0) break;
-        const dStr = times[lookIdx];
-        const dMax = data.det.temperature_2m_max[lookIdx];
-        const dMin = data.det.temperature_2m_min[lookIdx];
-        const dRain = (data.det.precipitation_sum ? data.det.precipitation_sum[lookIdx] : 0) || 0;
-        if (dMax != null && dMin != null) {
-          totalRain += dRain;
-          totalMax += dMax;
-          totalMin += dMin;
-          wDays++;
-        }
-      }
-      return {
-        rain: totalRain.toFixed(1),
-        meanTemp: wDays > 0 ? ((totalMax + totalMin) / (wDays * 2)).toFixed(1) : "--"
-      };
-    })();
+    const historicalAggregate = computeHistoricalAggregate(data, targetDateStr, isC);
 
     const sourcesLines = [`📡 SOURCES`];
     if (aqSource) {
@@ -1836,16 +1835,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       // 1. ACTIONABLE ADVICE — bullets only (from today's forecast context)
       prioritizedAdvice.map(adv => `${adv}`).filter(Boolean).join("\n"),
 
-      // 2. ON THIS DAY — cultural + Wikipedia + breaking news combined
-      (() => {
-        const parts = [];
-        if (onThisDayText) parts.push(onThisDayText);
-        if (wikiOnThisDay) parts.push(wikiOnThisDay);
-        if (breakingNews) parts.push(breakingNews);
-        return parts.length > 0 ? `ON THIS DAY\n${parts.join("\n")}` : null;
-      })(),
-
-      // 3. GROUND TRUTH (MEASURED)
+      // 2. GROUND TRUTH (MEASURED)
       [
         `📊 GROUND TRUTH (MEASURED)`,
         `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
@@ -1855,7 +1845,20 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         astroEvent ? `• Event: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
 
-      // 4. SUN & CELESTIAL
+      // 3. BREAKING NEWS
+      breakingNews ? (
+        `📰 BREAKING NEWS\n${breakingNews}`
+      ) : null,
+
+      // 4. WIKIPEDIA ON THIS DAY
+      (() => {
+        const parts = [];
+        if (onThisDayText) parts.push(onThisDayText);
+        if (wikiOnThisDay) parts.push(wikiOnThisDay);
+        return parts.length > 0 ? `📚 WIKIPEDIA ON THIS DAY\n${parts.join("\n")}` : null;
+      })(),
+
+      // 5. SUN & CELESTIAL
       [
         `☀️ SUN & CELESTIAL`,
         astroEvent ? `• ${astroEvent}` : ``,
@@ -2209,6 +2212,35 @@ function computeContinuousMultiDayAggregates(data, baseDateStr, isC) {
   };
 }
 
+// Compute 7-day historical aggregate looking backward from a target date.
+// Used for past-day (verified ground truth) event cards.
+function computeHistoricalAggregate(data, targetDateStr, isC) {
+  if (!data.det || !data.det.time) return null;
+  const times = data.det.time;
+  const idx = times.indexOf(targetDateStr);
+  if (idx === -1) return null;
+  let totalRain = 0, totalMax = 0, totalMin = 0, wDays = 0;
+  const base10 = isC ? 10 : 50;
+  for (let d = 0; d < 7; d++) {
+    const lookIdx = idx - d;
+    if (lookIdx < 0) break;
+    const dStr = times[lookIdx];
+    const dMax = data.det.temperature_2m_max[lookIdx];
+    const dMin = data.det.temperature_2m_min[lookIdx];
+    const dRain = (data.det.precipitation_sum ? data.det.precipitation_sum[lookIdx] : 0) || 0;
+    if (dMax != null && dMin != null) {
+      totalRain += dRain;
+      totalMax += dMax;
+      totalMin += dMin;
+      wDays++;
+    }
+  }
+  return {
+    rain: totalRain.toFixed(1),
+    meanTemp: wDays > 0 ? ((totalMax + totalMin) / (wDays * 2)).toFixed(1) : "--"
+  };
+}
+
 // ==========================================================
 // PRIORITY ADVICE & ACTION ENGINE
 // ==========================================================
@@ -2534,7 +2566,8 @@ function computeDayAudit(snapshots, baselineMax, baselineRain, baselineAqi, sym)
     const pMax = snap.predictedMax;
     if (!Number.isFinite(pMax)) return;
     const tDiff = pMax - baselineMax;
-    const lead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
+    const rawLead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
+    const lead = Number.isFinite(rawLead) && rawLead >= 0 ? rawLead : 0;
     const label = lead === 0 ? "D0" : `D${lead}`;
 
     if (Math.abs(tDiff) > Math.abs(maxTempDiff)) {

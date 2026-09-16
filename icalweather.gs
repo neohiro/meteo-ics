@@ -161,6 +161,13 @@ const DRIVE_WAQI_FILE = "waqi_token.enc";
 const WAQI_MIN_PASSPHRASE_LEN = 12;
 const APPS_SCRIPT_BUDGET_MS = 345000;
 const BUDGET_WARN_AT_MS = [240000, 300000];
+// Lead-time bucket thresholds for model accuracy (must match gcalweather.gs)
+const LEAD_BUCKETS = [
+  { maxLead: 3,   key: 'short', defaultErr: 0.8 },
+  { maxLead: 7,   key: 'mid',   defaultErr: 1.7 },
+  { maxLead: 14,  key: 'long',  defaultErr: 2.9 },
+  { maxLead: Infinity, key: 'noaa', defaultErr: 4.3 }
+];
 
 let _fetchAllImplIcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverrideIcal = null;
@@ -644,6 +651,7 @@ function clamp(v, min, max) {
 
 // In-memory cache for timezone lookups (per execution)
 const _tzCache = {};
+const _tzCacheOrder = []; // Track insertion order for spec-compliant FIFO eviction
 const TZ_CACHE_MAX = 100; // Cap in-memory timezone cache per execution
 // Persistent timezone cache in ScriptProperties with 24h TTL to avoid
 // repeated Open-Meteo /v1/timezone lookups for the same coordinates
@@ -663,6 +671,7 @@ function _tzCacheRead(cacheKey) {
       if (entry && entry.tz && Number.isFinite(entry.ts) &&
           Date.now() - entry.ts < TZ_CACHE_TTL_MS) {
         _tzCache[cacheKey] = entry.tz;
+        _tzCacheOrder.push(cacheKey);
         return entry.tz;
       }
       // Stale entry — evict
@@ -677,12 +686,13 @@ function _tzCacheRead(cacheKey) {
 }
 
 function _tzCacheWrite(cacheKey, tz) {
-  // FIFO eviction if cache exceeds limit
-  if (Object.keys(_tzCache).length >= TZ_CACHE_MAX) {
-    const firstKey = Object.keys(_tzCache)[0];
+  // FIFO eviction if cache exceeds limit (spec-compliant using insertion-order queue)
+  if (_tzCacheOrder.length >= TZ_CACHE_MAX) {
+    const firstKey = _tzCacheOrder.shift();
     delete _tzCache[firstKey];
   }
   _tzCache[cacheKey] = tz;
+  _tzCacheOrder.push(cacheKey);
   try {
     _scriptProps.setProperty(
       TZ_CACHE_PROP_PREFIX + cacheKey,
@@ -1327,10 +1337,32 @@ function doGet(e) {
   try {
     icsContent = generateIcsFeed(locations, temperatureUnit, { lang, days, hazards, dryRun, aqProvider, aqRadius });
   } catch (e) {
-    // Surface actionable errors as plain-text instead of a raw Apps Script exception.
-    return ContentService.createTextOutput("Feed generation failed: " + String(e))
-      .setMimeType(ContentService.MimeType.TEXT)
-      .downloadAsFile("feed_error.txt");
+    // Return a minimal valid ICS feed with an error event so calendar clients
+    // (especially iOS) don't reject the feed with "Validation failed".
+    const today = new Date();
+    const todayStr = Utilities.formatDate(today, "UTC", "yyyyMMdd");
+    const errorIcs = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Weather Astronomical Dashboard//ERROR",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      "X-WR-CALNAME:Weather Feed Error",
+      `BEGIN:VEVENT`,
+      `UID:error_${todayStr}@weatherdashboard`,
+      `DTSTAMP:${todayStr}T000000Z`,
+      `DTSTART;VALUE=DATE:${todayStr}`,
+      `DTEND;VALUE=DATE:${todayStr}`,
+      `SUMMARY:Feed Error — Check Configuration`,
+      `DESCRIPTION:Feed generation failed: ${escapeIcsText(String(e))}`,
+      "STATUS:CONFIRMED",
+      "TRANSP:TRANSPARENT",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+    return ContentService.createTextOutput(errorIcs)
+      .setMimeType(ContentService.MimeType.ICAL)
+      .downloadAsFile("weather_feed_error.ics");
   }
   if (dryRun) {
     return ContentService.createTextOutput(icsContent)
@@ -2404,11 +2436,15 @@ function computeGlobalModelAccuracy(sym) {
           totalRainError += rErr;
           verifiedSnapshots++;
 
-          const lead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
-          if (lead <= 3) { buckets.short.e += tErr; buckets.short.c++; }
-          else if (lead <= 7) { buckets.mid.e += tErr; buckets.mid.c++; }
-          else if (lead <= 14) { buckets.long.e += tErr; buckets.long.c++; }
-          else { buckets.noaa.e += tErr; buckets.noaa.c++; }
+          const rawLead = snap.daysBeforeDDay !== undefined ? snap.daysBeforeDDay : (snap.daysAgoLogged || 0);
+          const lead = Number.isFinite(rawLead) && rawLead >= 0 ? rawLead : 0;
+          LEAD_BUCKETS.forEach(bucket => {
+            if (lead <= bucket.maxLead) {
+              buckets[bucket.key].e += tErr;
+              buckets[bucket.key].c++;
+              return false; // break forEach
+            }
+          });
         });
       }
     } catch (e) {
@@ -2430,10 +2466,10 @@ function computeGlobalModelAccuracy(sym) {
   const avgTempMAE = (totalTempError / verifiedSnapshots).toFixed(1);
   const avgRainMAE = (totalRainError / verifiedSnapshots).toFixed(1);
 
-  const bShort = buckets.short.c > 0 ? (buckets.short.e / buckets.short.c).toFixed(1) : "0.8";
-  const bMid   = buckets.mid.c > 0 ? (buckets.mid.e / buckets.mid.c).toFixed(1) : "1.7";
-  const bLong  = buckets.long.c > 0 ? (buckets.long.e / buckets.long.c).toFixed(1) : "2.9";
-  const bNoaa  = buckets.noaa.c > 0 ? (buckets.noaa.e / buckets.noaa.c).toFixed(1) : "4.3";
+  const bShort = buckets.short.c > 0 ? (buckets.short.e / buckets.short.c).toFixed(1) : String(LEAD_BUCKETS[0].defaultErr);
+  const bMid   = buckets.mid.c > 0 ? (buckets.mid.e / buckets.mid.c).toFixed(1) : String(LEAD_BUCKETS[1].defaultErr);
+  const bLong  = buckets.long.c > 0 ? (buckets.long.e / buckets.long.c).toFixed(1) : String(LEAD_BUCKETS[2].defaultErr);
+  const bNoaa  = buckets.noaa.c > 0 ? (buckets.noaa.e / buckets.noaa.c).toFixed(1) : String(LEAD_BUCKETS[3].defaultErr);
 
   let grade = "A";
   if (avgTempMAE <= 1.5) grade = "A+ (Excellent)";
