@@ -28,7 +28,7 @@
  *    if missing (first-run bootstrap). Calendar-by-id path still throws if the
  *    explicit id is invalid (caller misconfiguration, not recoverable by auto-create).
  *  - Storage cleanup gracefully falls back to UTC if calendar resolution fails.
- *  - Empty CONFIG.locations (post-geocoding) raises a clear, actionable error.
+ *  - Empty CONFIG.locations (post-geocoding) raises a clear, actionable error; fallback coordinates for common cities prevent total failure when geocoder is unavailable.
  *  - ASTRONOMICAL_EVENTS hoisted to a module-level const for fast lookup across hot paths.
  *  - CONFIG.dryRun = true skips all calendar writes (log-only mode for validation).
  *  - saveDayRecord() defensively catches JSON.stringify failures (won't crash the sync).
