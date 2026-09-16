@@ -2450,7 +2450,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         `• ${t("range", lang)}: ${actualMax}${sym} / ${actualMin}${sym}`,
         `• ${t("sky", lang)}: ${weatherGlyph} ${getWeatherName(actualCode, lang)}`,
         `• ${t("rain", lang)}: ${Number(actualRain).toFixed(1)} mm`,
-        aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}${aqSource ? ", " + aqSource : ""})` : ``,
+        aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}) [${aqiType}]` : ``,
         astroEvent ? `• ${t("status", lang)}: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
 
@@ -2655,7 +2655,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     // 3. AIR QUALITY & BIO (above SUN)
     [
       `🧪 ${tSection("secAir", lang)}`,
-      aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}${aqSource ? ", " + aqSource : ""})` : `• ${t("aqi", lang)}: ${t("mon", lang)}${aqSource ? " (" + aqSource + ")" : ""}`,
+      aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}) [${aqiType}]` : `• ${t("aqi", lang)}: ${t("mon", lang)}`,
       pm25Val !== null ? `• ${t("pm25", lang)}: ${pm25Val} · ${t("pm10", lang)}: ${pm10Val || "--"} µg/m³` : ``,
       pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³` : `• ${t("pollen", lang)}: ${t("polLow", lang)}`
     ].filter(Boolean).join("\n"),

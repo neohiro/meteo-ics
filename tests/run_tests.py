@@ -2736,22 +2736,29 @@ def test_gcal_fetchAllAtmosphericDataParallel_tags_aqSource():
 
 
 def test_gcal_buildDashboardPayload_renders_aqSource():
-    """The dashboard payload must surface the aqSource label next to AQI/label.
+    """The dashboard payload must attribute the AQI source in the SOURCES category only.
 
     Operators reading the calendar event need to know whether the displayed AQI
-    came from Open-Meteo, OpenAQ, or WAQI. The label is appended inside the
-    parentheses of the existing AQI line.
+    came from Open-Meteo, OpenAQ, or WAQI. The aqSource label belongs in the
+    SOURCES category lower in the event content — it must NOT be duplicated
+    inline in the AQI display line, which instead carries the qualitative label
+    and the glyph-tag [${aqiType}] as context for the score.
     """
     fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
-    assert_true(fn is not None, 'buildDashboardPayload must exist')
+    assert_true(fn is not None)
     body = fn.group(0)
-    # Must read the source field from data.aq.
+    # Must read the source field from data.aq into a local aqSource variable.
     assert_true(re.search(r'aqSource\s*=\s*data\.aq\s*&&\s*data\.aq\._source', body),
         'buildDashboardPayload must read data.aq._source into a local aqSource variable')
-    # Must append it to the AQI display line(s) when present.
-    # Pattern in source: aqSource ? ", " + aqSource : ""  (with literal space between + and aqSource)
-    assert_true(re.search(r'aqSource\s*\?[^:]*?\+\s*aqSource\s*:\s*""', body),
-        'buildDashboardPayload must conditionally append aqSource in the AQI display line')
+    # The source must be pushed into the SOURCES category only (sourcesLines).
+    assert_true(re.search(r'sourcesLines\.push\([^\n]*aqSource', body),
+        'buildDashboardPayload must push aqSource into sourcesLines (SOURCES category)')
+    # The AQI display line must carry the qualitative label AND the glyph-tag
+    # [${aqiType}] — NOT the inline source.
+    assert_true(re.search(r'getAqiLabel\([^\n]*\)[^\n]*\[\$\{aqiType\}\]', body),
+        'buildDashboardPayload AQI line must render (label) [${aqiType}]')
+    assert_true(not re.search(r'getAqiLabel\([^\n]*aqSource|aqSource\s*\?\s*[^:]*?\+\s*aqSource\s*:\s*""', body),
+        'buildDashboardPayload AQI line must NOT inline the aqSource next to the label (source lives in SOURCES)')
 
 
 def test_gcal_aqSource_routing_values():
