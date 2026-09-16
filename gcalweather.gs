@@ -1079,45 +1079,53 @@ function getBreakingNewsText(dateStr) {
   }
   return fetchBreakingNews(dateStr);
 }
+
+// Initialize and validate CONFIG: geocode locations, check deterministicDays cap.
+// Returns { locations: Location[], errors: string[] } for testability.
+function initConfig() {
+  const errors = [];
+  const locations = CONFIG.locations.filter(loc => {
+    if (loc.lat && loc.lon) return true;
+    const trimmedName = (loc.name || "").trim();
+    if (!trimmedName) {
+      errors.push(`Skipping location with empty/whitespace name.`);
+      return false;
+    }
+    const query = loc.country ? `${trimmedName},${loc.country}` : trimmedName;
+    const geo = geocodeCity(trimmedName, loc.country);
+    if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lon) && geo.name) {
+      loc.lat = geo.lat;
+      loc.lon = geo.lon;
+      loc.name = geo.name;
+      if (geo.tz) loc.tz = geo.tz;
+      if (geo.country) loc.country = geo.country;
+      return true;
+    }
+    errors.push(`Skipping unresolvable location: "${trimmedName}".`);
+    return false;
+  });
+
+  if (locations.length === 0) {
+    errors.push("CONFIG.locations resolved to an empty array — all locations failed geocoding. Check city names or provide explicit { name, lat, lon } entries.");
+  }
+  if (CONFIG.deterministicDays > 16) {
+    errors.push(`CONFIG.deterministicDays (${CONFIG.deterministicDays}) exceeds Open-Meteo's max of 16 — deterministic events will be truncated. Reduce deterministicDays or accept ensemble-only forecast.`);
+  }
+  return { locations, errors };
+}
+
 // State is encapsulated in a closure — no module-level lets that can collide
 // with other scripts deployed in the same Apps Script project.
 
-// Auto-geocode locations that lack GPS coordinates (city-only entries are resolved via Open-Meteo geocoder;
-// "country" is an optional hint that narrows the search). Locations that fail geocoding are filtered out.
-CONFIG.locations = CONFIG.locations.filter(loc => {
-  if (loc.lat && loc.lon) return true;
-  const trimmedName = (loc.name || "").trim();
-  if (!trimmedName) {
-    Logger.log(`WARNING: Skipping location with empty/whitespace name.`);
-    return false;
-  }
-  const query = loc.country ? `${trimmedName},${loc.country}` : trimmedName;
-  const geo = geocodeCity(query);
-  if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lon) && geo.name) {
-    loc.lat = geo.lat;
-    loc.lon = geo.lon;
-    loc.name = geo.name;
-    return true;
-  }
-  Logger.log(`WARNING: Skipping unresolvable location: "${trimmedName}". Run validateConfig() for details.`);
-  return false;
-});
-
-if (CONFIG.locations.length === 0) {
-  throw new Error(
-    "CONFIG.locations resolved to an empty array — all locations failed geocoding. " +
-    "Check city names or provide explicit { name, lat, lon } entries."
-  );
-}
-if (CONFIG.deterministicDays > 16) {
-  throw new Error("syncWeatherToCalendar: CONFIG.deterministicDays (" +
-    CONFIG.deterministicDays + ") exceeds Open-Meteo's max of 16 — " +
-    "deterministic events will be truncated. Reduce deterministicDays or accept ensemble-only forecast.");
-}
-
 function syncWeatherToCalendar() {
   const budget = budgetStart();
-  Logger.log(`syncWeatherToCalendar: starting with ${CONFIG.locations.length} configured location(s) (dryRun=${CONFIG.dryRun})`);
+  const { locations, errors } = initConfig();
+  errors.forEach(e => Logger.log(`CONFIG init: ${e}`));
+  if (locations.length === 0) {
+    Logger.log("No valid locations after initConfig — aborting sync");
+    return;
+  }
+  Logger.log(`syncWeatherToCalendar: starting with ${locations.length} configured location(s) (dryRun=${CONFIG.dryRun})`);
   const cal = resolveCalendar();
   const primaryCal = CalendarApp.getDefaultCalendar();
   const calTz = cal.getTimeZone();
@@ -1130,12 +1138,12 @@ function syncWeatherToCalendar() {
   // 1. Build schedule (-historyDays to +forecastDays)
   const daySchedule = [];
   const locationPool = new Map();
-  CONFIG.locations.forEach(loc => locationPool.set(norm(loc.name), loc));
+  locations.forEach(loc => locationPool.set(norm(loc.name), loc));
 
   for (let d = -CONFIG.historyDays; d < CONFIG.forecastDays; d++) {
     checkBudget(budget, "day-loop d=" + d);
     const targetDate = new Date(todayDate.getTime() + d * 24 * 60 * 60 * 1000);
-    const dayLocKeys = new Set(CONFIG.locations.map(l => norm(l.name)));
+    const dayLocKeys = new Set(locations.map(l => norm(l.name)));
 
     if (CONFIG.autoDetectFromEvents && primaryCal) {
       primaryCal.getEventsForDay(targetDate).forEach(ev => {
@@ -1293,9 +1301,9 @@ function fetchAllAtmosphericDataParallel(locationPool) {
   // This ensures valid lat/lon for API requests (fix for fast-empty sync).
   locationPool.forEach((loc, key) => {
     if ((loc.lat == null || loc.lon == null) && loc.name) {
-      const geo = geocodeCity(loc.name);
+      const geo = geocodeCity(loc.name, loc.country);
       if (geo && geo.lat != null && geo.lon != null) {
-        locationPool.set(key, { ...loc, lat: geo.lat, lon: geo.lon });
+        locationPool.set(key, { ...loc, lat: geo.lat, lon: geo.lon, tz: geo.tz, country: geo.country });
       } else {
         Logger.log(`ERROR: Failed to geocode location "${loc.name}" — skipping`);
       }
@@ -2812,7 +2820,7 @@ function validateConfig() {
     }
     if (!loc.lat || !loc.lon) {
       errors.push(`Location ${i} ('${loc.name || "unnamed"}'): no coordinates — geocoding required`);
-      const geo = geocodeCity(loc.name || "");
+      const geo = geocodeCity(loc.name || "", loc.country);
       if (!geo || !geo.lat || !geo.lon) {
         errors.push(`  geocodeCity('${loc.name}') failed — city not found in Open-Meteo database`);
       } else {
