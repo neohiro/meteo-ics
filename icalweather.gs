@@ -178,6 +178,7 @@ let _wikiCacheOrderIcal = []; // Track insertion order for spec-compliant FIFO e
 const _BREAKING_NEWS_CACHE_MAX = 50; // Cap in-memory breaking news cache per execution
 let _breakingNewsCacheIcal = {}; // Deduplicate breaking news fetches per date per execution
 let _breakingNewsCacheOrderIcal = []; // Track insertion order for spec-compliant FIFO eviction
+let _geoCacheIcal = {}; // In-memory geocoding cache per execution
 const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
 // ============================================================
@@ -2298,20 +2299,46 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
   return null;
 }
 
-function geocodeCity(name) {
-  try {
-    const res = UrlFetchApp.fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`,
-      { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
-    );
-    const data = JSON.parse(res.getContentText()).results;
-    if (data && data.length) {
-      return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude, tz: data[0].timezone };
-    }
-  } catch (e) {
-    Logger.log("geocodeCity failed for " + name + ": " + e);
-    CB.recordFailure('geocoder');
+function geocodeCity(name, country) {
+  if (!name) return null;
+  const cacheKey = (country ? country + ':' : '') + name.toLowerCase().trim();
+  if (_geoCacheIcal[cacheKey] !== undefined) return _geoCacheIcal[cacheKey];
+
+  const query = country ? `${name},${country}` : name;
+  if (!CB.isCallAllowed('geocoder')) {
+    Logger.log("Circuit [geocoder] OPEN — skipping geocode for " + name);
+    return null;
   }
+  let attempt = 0;
+  while (attempt < 2) {
+    attempt++;
+    try {
+      const res = UrlFetchApp.fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`,
+        { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
+      );
+      const code = res.getResponseCode();
+      if (code === 200) {
+        const data = JSON.parse(res.getContentText());
+        if (data.results && data.results.length) {
+          const r = data.results[0];
+          const result = { name: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone || 'UTC', country: r.country_code || country };
+          _geoCacheIcal[cacheKey] = result;
+          CB.recordSuccess('geocoder');
+          return result;
+        }
+      } else if (code >= 500 && attempt < 2) {
+        Utilities.sleep(500 * attempt);
+        continue;
+      }
+      CB.recordFailure('geocoder');
+    } catch (e) {
+      CB.recordFailure('geocoder');
+      Logger.log("geocodeCity failed for " + name + ": " + e);
+    }
+    break;
+  }
+  _geoCacheIcal[cacheKey] = null;
   return null;
 }
 

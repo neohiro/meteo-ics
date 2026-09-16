@@ -52,22 +52,51 @@
  *   ]
  */
 
-function geocodeCity(name) {
-  try {
-    const res = UrlFetchApp.fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&format=json`,
-      { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
-    );
-    const data = JSON.parse(res.getContentText()).results;
-    if (data && data.length) {
-      return { name: data[0].name, lat: data[0].latitude, lon: data[0].longitude };
-    }
-  } catch (e) {
-    Logger.log("geocodeCity failed for " + name + ": " + e);
-    CB.recordFailure('geocoder');
+function geocodeCity(name, country) {
+  if (!name) return null;
+  const cacheKey = (country ? country + ':' : '') + name.toLowerCase().trim();
+  if (_geoCacheGcal[cacheKey] !== undefined) return _geoCacheGcal[cacheKey];
+
+  const query = country ? `${name},${country}` : name;
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('geocoder')) {
+    Logger.log("Circuit [geocoder] OPEN — skipping geocode for " + name);
+    return null;
   }
+  let attempt = 0;
+  while (attempt < 2) {
+    attempt++;
+    try {
+      const res = UrlFetchApp.fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`,
+        { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS }
+      );
+      const code = res.getResponseCode();
+      if (code === 200) {
+        const data = JSON.parse(res.getContentText());
+        if (data.results && data.results.length) {
+          const r = data.results[0];
+          const result = { name: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone || 'UTC', country: r.country_code || country };
+          _geoCacheGcal[cacheKey] = result;
+          CB.recordSuccess('geocoder');
+          return result;
+        }
+      } else if (code >= 500 && attempt < 2) {
+        Utilities.sleep(500 * attempt);
+        continue;
+      }
+      CB.recordFailure('geocoder');
+    } catch (e) {
+      CB.recordFailure('geocoder');
+      Logger.log("geocodeCity failed for " + name + ": " + e);
+    }
+    break;
+  }
+  _geoCacheGcal[cacheKey] = null;
   return null;
 }
+
+const _geoCacheGcal = {}; // In-memory geocoding cache per execution
 
 const CONFIG = {
   calendarId: "",
