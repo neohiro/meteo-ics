@@ -11,6 +11,12 @@
 2. **Deploy to Google Apps Script**
    - Open [script.google.com](https://script.google.com)
    - New project → paste contents of `gcalweather.gs` or `icalweather.gs`
+   - **Keep the file named `gcalweather.gs` / `icalweather.gs`** — not `Code.gs`.
+     Apps Script imports the whole file body; if your editor only offers
+     `Code.gs`, rename **before** pasting. A stale-paste symptom is
+     `Syntax error: Unexpected identifier 'zh'` (or any `xx:` in the
+     translation table) — this happens when the `const T_L = {` opener or a
+     closing `}` was dropped mid-import, spilling object keys out of scope.
    - Save → deploy as Web App (for iCal) or installable trigger (for gCal)
 
 3. **Run tests**
