@@ -181,6 +181,20 @@ let _breakingNewsCacheOrderIcal = []; // Track insertion order for spec-complian
 let _geoCacheIcal = {}; // In-memory geocoding cache per execution
 const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
+// Fallback coordinates for common cities when geocoding API is unavailable
+const FALLBACK_CITY_COORDS = {
+  "kyoto": { name: "Kyoto", lat: 35.0116, lon: 135.7681, tz: "Asia/Tokyo", country: "JP" },
+  "brunssum": { name: "Brunssum", lat: 50.9467, lon: 5.9706, tz: "Europe/Amsterdam", country: "NL" },
+  "tokyo": { name: "Tokyo", lat: 35.6762, lon: 139.6503, tz: "Asia/Tokyo", country: "JP" },
+  "london": { name: "London", lat: 51.5074, lon: -0.1278, tz: "Europe/London", country: "GB" },
+  "paris": { name: "Paris", lat: 48.8566, lon: 2.3522, tz: "Europe/Paris", country: "FR" },
+  "new york": { name: "New York", lat: 40.7128, lon: -74.0060, tz: "America/New_York", country: "US" },
+  "los angeles": { name: "Los Angeles", lat: 34.0522, lon: -118.2437, tz: "America/Los_Angeles", country: "US" },
+  "berlin": { name: "Berlin", lat: 52.5200, lon: 13.4050, tz: "Europe/Berlin", country: "DE" },
+  "amsterdam": { name: "Amsterdam", lat: 52.3676, lon: 4.9041, tz: "Europe/Amsterdam", country: "NL" },
+  "sydney": { name: "Sydney", lat: -33.8688, lon: 151.2093, tz: "Australia/Sydney", country: "AU" },
+};
+
 // ============================================================
 // CIRCUIT BREAKER — prevents cascade failures from API outages
 // ============================================================
@@ -2339,6 +2353,15 @@ function geocodeCity(name, country) {
     break;
   }
   _geoCacheIcal[cacheKey] = null;
+  // Try fallback coordinates as last resort
+  const fallbackKey = name.toLowerCase().trim();
+  if (FALLBACK_CITY_COORDS[fallbackKey]) {
+    const fb = FALLBACK_CITY_COORDS[fallbackKey];
+    const result = { name: fb.name, lat: fb.lat, lon: fb.lon, tz: fb.tz, country: country || fb.country };
+    _geoCacheIcal[cacheKey] = result;
+    Logger.log(`geocodeCity: using fallback coordinates for "${name}"`);
+    return result;
+  }
   return null;
 }
 
