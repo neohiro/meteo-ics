@@ -902,6 +902,46 @@ def test_t_l_required_keys():
         f'{len(uncovered)}/{len(used)} t() keys have no T_L entry (and no inline default)')
 
 
+def test_gcal_t_l_key_parity_with_ical():
+    """gcalweather.gs and icalweather.gs must share the same T_L translation keys.
+    Both scripts ship independently; if one gains a translation and the other
+    is forgotten, configured languages diverge visually between the two feeds."""
+    def keys_of(src):
+        m = re.search(r'const\s+T_L\s*=\s*\{[\s\S]*?^\};', src, re.M)
+        assert_true(m is not None, 'T_L must be defined')
+        return set(re.findall(r'^\s*(\w+):\s*\{', m.group(0), re.M))
+    gcal_keys = keys_of(GCAL)
+    ical_keys = keys_of(ICAL)
+    assert_true(gcal_keys == ical_keys,
+        f'T_L keys differ between files: gcal-only={sorted(gcal_keys - ical_keys)}, '
+        f'ical-only={sorted(ical_keys - gcal_keys)}')
+
+
+def test_gcal_build_dashboard_payload_uses_translations():
+    """Assess stargazing must be multilingual in gcalweather.gs: any hardcoded
+    English-only verdict string in buildDashboardPayload would silently ignore
+    CONFIG.language. All section titles must route through tSection() and the
+    stargazing/UV/thermal/AQI labels through t()."""
+    fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Section titles must be translated (not left as English-only literals).
+    assert_true('tSection("secTemp"' in body, 'TEMPERATURE section must use tSection()')
+    assert_true('tSection("secAir"' in body, 'AIR QUALITY section must use tSection()')
+    assert_true('tSection("secSun"' in body, 'SUN & CELESTIAL section must use tSection()')
+    assert_true('tSection("secAgg"' in body, 'AGGREGATE section must use tSection()')
+    assert_true('tSection("secAudit"' in body, 'MODEL AUDIT section must use tSection()')
+    assert_true('tSection("secSources"' in body, 'SOURCES section must use tSection()')
+    assert_true('tSection("secOnThisDay"' in body, 'ON THIS DAY section must use tSection()')
+    # Backwards-compat: hardcoded English headers must NOT remain.
+    assert_true('SUN & CELESTIAL`' not in body, 'old English SUN header must be removed')
+    assert_true('`📡 SOURCES`' not in body, 'old English SOURCES header must be removed')
+    assert_true('`📉 MODEL AUDIT`' not in body, 'old English MODEL AUDIT header must be removed')
+    # Per-verdict labels must route through the translator.
+    assert_true('assessStargazingConditions(data, offset, moonInfo.fraction, targetDateStr, cloudCover, lang)' in body,
+        'assessStargazingConditions must receive cloudCover + lang in buildDashboardPayload')
+
+
 def test_supported_langs_in_correct_order():
     """SUPPORTED_LANGS must list all 8 supported languages."""
     fn = re.search(r'SUPPORTED_LANGS\s*=\s*\[([\s\S]*?)\]', ICAL)
@@ -2765,8 +2805,12 @@ def test_gcal_event_has_sources_section():
     fn = re.search(r'function buildDashboardPayload[\s\S]+?\n\}\n', GCAL)
     assert_true(fn is not None)
     body = fn.group(0)
-    assert_true(re.search(r'📡\s*SOURCES', body),
-        'gcal event must have a 📡 SOURCES section')
+    assert_true(re.search(r'📡\s*\$\{tSection\("secSources"', body),
+        'gcal event must have a 📡 SOURCES section via tSection("secSources")')
+    assert_true('T_SOURCES' in GCAL,
+        'gcalweather.gs must define T_SOURCES translation constant at module level')
+    assert_true(re.search(r'secSources:\s*T_SOURCES', GCAL),
+        'tSection must map secSources to T_SOURCES')
     assert_true(re.search(r'Weather.*Open-Meteo|Open-Meteo.*Weather', body),
         'gcal SOURCES section must credit Open-Meteo as the weather provider')
 
@@ -2780,11 +2824,11 @@ def test_gcal_advice_before_audit():
     # Advice now at top as bullets (prioritizedAdvice) without title
     # Check that prioritizedAdvice is used and rendered before MODEL AUDIT
     assert_true('prioritizedAdvice' in body, 'gcal must use prioritizedAdvice')
-    audit_idx = body.find('📉 MODEL AUDIT')
+    audit_idx = body.find('tSection("secAudit"')
     # prioritizedAdvice.map() used to render advice bullets
     advice_idx = body.find('prioritizedAdvice.map')
     assert_true(advice_idx != -1 and audit_idx != -1,
-        'gcal must have prioritizedAdvice and MODEL AUDIT')
+        'gcal must have prioritizedAdvice and MODEL AUDIT (tSection)')
     if advice_idx > 0 and audit_idx > 0:
         assert_true(advice_idx < audit_idx,
             'gcal advice bullets must appear before MODEL AUDIT')
@@ -3476,7 +3520,7 @@ def test_gcal_breaking_news_in_future_section():
     # Breaking news now combined into ON THIS DAY section
     # Check that breakingNews is called and its content appears in ON THIS DAY
     assert_true('getBreakingNewsText' in body, 'buildDashboardPayload must call getBreakingNewsText')
-    assert_true('ON THIS DAY' in body, 'buildDashboardPayload must have ON THIS DAY section')
+    assert_true('tSection("secOnThisDay"' in body, 'buildDashboardPayload must have ON THIS DAY section via tSection()')
     # The ON THIS DAY section should contain breakingNews when available
     # Check that breakingNews variable is used in ON THIS DAY construction
     assert_true('breakingNews' in body, 'buildDashboardPayload must reference breakingNews variable')
@@ -3514,7 +3558,8 @@ def test_onthisday_smoke_gcal():
     assert_true(fn is not None)
     body = fn.group(0)
     # Check that ON THIS DAY section title is present
-    assert_true('ON THIS DAY' in body, 'OnThisDay section title must appear')
+    assert_true('secOnThisDay' in body, 'OnThisDay section key must appear')
+    assert_true('tSection("secOnThisDay"' in body, 'OnThisDay must use tSection()')
     # Wikipedia and Breaking News are now combined into ON THIS DAY (no separate titles)
     assert_true('getWikipediaOnThisDayText' in body, 'buildDashboardPayload must call getWikipediaOnThisDayText')
     assert_true('getBreakingNewsText' in body, 'buildDashboardPayload must call getBreakingNewsText')

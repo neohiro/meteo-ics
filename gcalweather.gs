@@ -107,18 +107,323 @@ function geocodeCity(name, country) {
 
 const _geoCacheGcal = {}; // In-memory geocoding cache per execution
 
-// Fallback coordinates for common cities when geocoding API is unavailable
+// Fallback coordinates (per-execution geocoding cache) when the geocoding API is unavailable.
+// Covers 195 UN member states, with multiple cities for large/climatically diverse countries.
 const FALLBACK_CITY_COORDS = {
   "kyoto": { name: "Kyoto", lat: 35.0116, lon: 135.7681, tz: "Asia/Tokyo", country: "JP" },
   "brunssum": { name: "Brunssum", lat: 50.9467, lon: 5.9706, tz: "Europe/Amsterdam", country: "NL" },
   "tokyo": { name: "Tokyo", lat: 35.6762, lon: 139.6503, tz: "Asia/Tokyo", country: "JP" },
+  "osaka": { name: "Osaka", lat: 34.6937, lon: 135.5023, tz: "Asia/Tokyo", country: "JP" },
+  "sapporo": { name: "Sapporo", lat: 43.0618, lon: 141.3545, tz: "Asia/Tokyo", country: "JP" },
   "london": { name: "London", lat: 51.5074, lon: -0.1278, tz: "Europe/London", country: "GB" },
+  "manchester": { name: "Manchester", lat: 53.4808, lon: -2.2426, tz: "Europe/London", country: "GB" },
+  "edinburgh": { name: "Edinburgh", lat: 55.9533, lon: -3.1883, tz: "Europe/London", country: "GB" },
   "paris": { name: "Paris", lat: 48.8566, lon: 2.3522, tz: "Europe/Paris", country: "FR" },
+  "marseille": { name: "Marseille", lat: 43.2965, lon: 5.3698, tz: "Europe/Paris", country: "FR" },
+  "lyon": { name: "Lyon", lat: 45.7640, lon: 4.8357, tz: "Europe/Paris", country: "FR" },
   "new york": { name: "New York", lat: 40.7128, lon: -74.0060, tz: "America/New_York", country: "US" },
   "los angeles": { name: "Los Angeles", lat: 34.0522, lon: -118.2437, tz: "America/Los_Angeles", country: "US" },
+  "chicago": { name: "Chicago", lat: 41.8781, lon: -87.6298, tz: "America/Chicago", country: "US" },
+  "houston": { name: "Houston", lat: 29.7604, lon: -95.3698, tz: "America/Chicago", country: "US" },
+  "miami": { name: "Miami", lat: 25.7617, lon: -80.1918, tz: "America/New_York", country: "US" },
+  "seattle": { name: "Seattle", lat: 47.6062, lon: -122.3321, tz: "America/Los_Angeles", country: "US" },
+  "denver": { name: "Denver", lat: 39.7392, lon: -104.9903, tz: "America/Denver", country: "US" },
   "berlin": { name: "Berlin", lat: 52.5200, lon: 13.4050, tz: "Europe/Berlin", country: "DE" },
+  "munich": { name: "Munich", lat: 48.1351, lon: 11.5820, tz: "Europe/Berlin", country: "DE" },
+  "hamburg": { name: "Hamburg", lat: 53.5511, lon: 9.9937, tz: "Europe/Berlin", country: "DE" },
   "amsterdam": { name: "Amsterdam", lat: 52.3676, lon: 4.9041, tz: "Europe/Amsterdam", country: "NL" },
+  "rotterdam": { name: "Rotterdam", lat: 51.9244, lon: 4.4777, tz: "Europe/Amsterdam", country: "NL" },
   "sydney": { name: "Sydney", lat: -33.8688, lon: 151.2093, tz: "Australia/Sydney", country: "AU" },
+  "melbourne": { name: "Melbourne", lat: -37.8136, lon: 144.9631, tz: "Australia/Melbourne", country: "AU" },
+  "brisbane": { name: "Brisbane", lat: -27.4698, lon: 153.0251, tz: "Australia/Brisbane", country: "AU" },
+  "perth": { name: "Perth", lat: -31.9505, lon: 115.8605, tz: "Australia/Perth", country: "AU" },
+  "adelaide": { name: "Adelaide", lat: -34.9285, lon: 138.6007, tz: "Australia/Adelaide", country: "AU" },
+  "canberra": { name: "Canberra", lat: -35.2809, lon: 149.1300, tz: "Australia/Sydney", country: "AU" },
+  "kabul": { name: "Kabul", lat: 34.5553, lon: 69.2075, tz: "Asia/Kabul", country: "AF" },
+  "tirana": { name: "Tirana", lat: 41.3275, lon: 19.8187, tz: "Europe/Tirane", country: "AL" },
+  "algiers": { name: "Algiers", lat: 36.7538, lon: 3.0588, tz: "Africa/Algiers", country: "DZ" },
+  "andorra la vella": { name: "Andorra la Vella", lat: 42.5063, lon: 1.5218, tz: "Europe/Andorra", country: "AD" },
+  "luanda": { name: "Luanda", lat: -8.8390, lon: 13.2894, tz: "Africa/Luanda", country: "AO" },
+  "st. john's": { name: "St. John's", lat: 17.1210, lon: -61.8497, tz: "America/Antigua", country: "AG" },
+  "buenos aires": { name: "Buenos Aires", lat: -34.6037, lon: -58.3816, tz: "America/Argentina/Buenos_Aires", country: "AR" },
+  "cordoba": { name: "Cordoba", lat: -31.4201, lon: -64.1888, tz: "America/Argentina/Cordoba", country: "AR" },
+  "rosario": { name: "Rosario", lat: -32.9442, lon: -60.6505, tz: "America/Argentina/Cordoba", country: "AR" },
+  "yerevan": { name: "Yerevan", lat: 40.1792, lon: 44.4991, tz: "Asia/Yerevan", country: "AM" },
+  "vienna": { name: "Vienna", lat: 48.2082, lon: 16.3738, tz: "Europe/Vienna", country: "AT" },
+  "graz": { name: "Graz", lat: 47.0707, lon: 15.4395, tz: "Europe/Vienna", country: "AT" },
+  "baku": { name: "Baku", lat: 40.4093, lon: 49.8671, tz: "Asia/Baku", country: "AZ" },
+  "nassau": { name: "Nassau", lat: 25.0343, lon: -77.3963, tz: "America/Nassau", country: "BS" },
+  "manama": { name: "Manama", lat: 26.2285, lon: 50.5860, tz: "Asia/Bahrain", country: "BH" },
+  "dhaka": { name: "Dhaka", lat: 23.8103, lon: 90.4125, tz: "Asia/Dhaka", country: "BD" },
+  "chattogram": { name: "Chattogram", lat: 22.3569, lon: 91.7832, tz: "Asia/Dhaka", country: "BD" },
+  "bridgetown": { name: "Bridgetown", lat: 13.1132, lon: -59.5988, tz: "America/Barbados", country: "BB" },
+  "minsk": { name: "Minsk", lat: 53.9006, lon: 27.5590, tz: "Europe/Minsk", country: "BY" },
+  "brussels": { name: "Brussels", lat: 50.8503, lon: 4.3517, tz: "Europe/Brussels", country: "BE" },
+  "antwerp": { name: "Antwerp", lat: 51.2194, lon: 4.4025, tz: "Europe/Brussels", country: "BE" },
+  "belmopan": { name: "Belmopan", lat: 17.2510, lon: -88.7712, tz: "America/Belize", country: "BZ" },
+  "porto-novo": { name: "Porto-Novo", lat: 6.4969, lon: 2.6286, tz: "Africa/Porto-Novo", country: "BJ" },
+  "cotonou": { name: "Cotonou", lat: 6.3703, lon: 2.3912, tz: "Africa/Porto-Novo", country: "BJ" },
+  "thimphu": { name: "Thimphu", lat: 27.4728, lon: 89.6390, tz: "Asia/Thimphu", country: "BT" },
+  "la paz": { name: "La Paz", lat: -16.5000, lon: -68.1500, tz: "America/La_Paz", country: "BO" },
+  "santa cruz": { name: "Santa Cruz", lat: -17.7833, lon: -63.1821, tz: "America/La_Paz", country: "BO" },
+  "sarajevo": { name: "Sarajevo", lat: 43.8563, lon: 18.4131, tz: "Europe/Sarajevo", country: "BA" },
+  "gaborone": { name: "Gaborone", lat: -24.6282, lon: 25.9231, tz: "Africa/Gaborone", country: "BW" },
+  "brasilia": { name: "Brasilia", lat: -15.8267, lon: -47.9218, tz: "America/Sao_Paulo", country: "BR" },
+  "rio de janeiro": { name: "Rio de Janeiro", lat: -22.9068, lon: -43.1729, tz: "America/Sao_Paulo", country: "BR" },
+  "sao paulo": { name: "Sao Paulo", lat: -23.5505, lon: -46.6333, tz: "America/Sao_Paulo", country: "BR" },
+  "salvador": { name: "Salvador", lat: -12.9777, lon: -38.5016, tz: "America/Bahia", country: "BR" },
+  "manaus": { name: "Manaus", lat: -3.1190, lon: -60.0217, tz: "America/Manaus", country: "BR" },
+  "brunei": { name: "Bandar Seri Begawan", lat: 4.9031, lon: 114.9398, tz: "Asia/Brunei", country: "BN" },
+  "sofia": { name: "Sofia", lat: 42.6977, lon: 23.3219, tz: "Europe/Sofia", country: "BG" },
+  "ouagadougou": { name: "Ouagadougou", lat: 12.3714, lon: -1.5197, tz: "Africa/Ouagadougou", country: "BF" },
+  "bujumbura": { name: "Bujumbura", lat: -3.3614, lon: 29.3599, tz: "Africa/Bujumbura", country: "BI" },
+  "praia": { name: "Praia", lat: 14.9330, lon: -23.5133, tz: "Atlantic/Cape_Verde", country: "CV" },
+  "phnom penh": { name: "Phnom Penh", lat: 11.5564, lon: 104.9282, tz: "Asia/Phnom_Penh", country: "KH" },
+  "yaounde": { name: "Yaounde", lat: 3.8480, lon: 11.5021, tz: "Africa/Douala", country: "CM" },
+  "douala": { name: "Douala", lat: 4.0511, lon: 9.7679, tz: "Africa/Douala", country: "CM" },
+  "ottawa": { name: "Ottawa", lat: 45.4215, lon: -75.6972, tz: "America/Toronto", country: "CA" },
+  "toronto": { name: "Toronto", lat: 43.6532, lon: -79.3832, tz: "America/Toronto", country: "CA" },
+  "montreal": { name: "Montreal", lat: 45.5019, lon: -73.5674, tz: "America/Toronto", country: "CA" },
+  "vancouver": { name: "Vancouver", lat: 49.2827, lon: -123.1207, tz: "America/Vancouver", country: "CA" },
+  "calgary": { name: "Calgary", lat: 51.0447, lon: -114.0719, tz: "America/Edmonton", country: "CA" },
+  "halifax": { name: "Halifax", lat: 44.6488, lon: -63.5752, tz: "America/Halifax", country: "CA" },
+  "bangui": { name: "Bangui", lat: 4.3947, lon: 18.5582, tz: "Africa/Bangui", country: "CF" },
+  "n'djamena": { name: "N'Djamena", lat: 12.1348, lon: 15.0557, tz: "Africa/Ndjamena", country: "TD" },
+  "santiago": { name: "Santiago", lat: -33.4489, lon: -70.6693, tz: "America/Santiago", country: "CL" },
+  "valparaiso": { name: "Valparaiso", lat: -33.0472, lon: -71.6127, tz: "America/Santiago", country: "CL" },
+  "beijing": { name: "Beijing", lat: 39.9042, lon: 116.4074, tz: "Asia/Shanghai", country: "CN" },
+  "shanghai": { name: "Shanghai", lat: 31.2304, lon: 121.4737, tz: "Asia/Shanghai", country: "CN" },
+  "guangzhou": { name: "Guangzhou", lat: 23.1291, lon: 113.2644, tz: "Asia/Shanghai", country: "CN" },
+  "chengdu": { name: "Chengdu", lat: 30.5728, lon: 104.0668, tz: "Asia/Shanghai", country: "CN" },
+  "kunming": { name: "Kunming", lat: 25.0389, lon: 102.7183, tz: "Asia/Shanghai", country: "CN" },
+  "urumqi": { name: "Urumqi", lat: 43.8256, lon: 87.6168, tz: "Asia/Shanghai", country: "CN" },
+  "harbin": { name: "Harbin", lat: 45.8038, lon: 126.5350, tz: "Asia/Shanghai", country: "CN" },
+  "bogota": { name: "Bogota", lat: 4.7110, lon: -74.0721, tz: "America/Bogota", country: "CO" },
+  "medellin": { name: "Medellin", lat: 6.2442, lon: -75.5812, tz: "America/Bogota", country: "CO" },
+  "moroni": { name: "Moroni", lat: -11.7172, lon: 43.2473, tz: "Indian/Comoro", country: "KM" },
+  "brazzaville": { name: "Brazzaville", lat: -4.2634, lon: 15.2429, tz: "Africa/Brazzaville", country: "CG" },
+  "kinshasa": { name: "Kinshasa", lat: -4.4419, lon: 15.2663, tz: "Africa/Kinshasa", country: "CD" },
+  "lubumbashi": { name: "Lubumbashi", lat: -11.6876, lon: 27.5026, tz: "Africa/Lubumbashi", country: "CD" },
+  "san jose": { name: "San Jose", lat: 9.9281, lon: -84.0907, tz: "America/Costa_Rica", country: "CR" },
+  "abidjan": { name: "Abidjan", lat: 5.3599, lon: -4.0083, tz: "Africa/Abidjan", country: "CI" },
+  "zagreb": { name: "Zagreb", lat: 45.8150, lon: 15.9819, tz: "Europe/Zagreb", country: "HR" },
+  "havana": { name: "Havana", lat: 23.1136, lon: -82.3666, tz: "America/Havana", country: "CU" },
+  "nicosia": { name: "Nicosia", lat: 35.1856, lon: 33.3823, tz: "Asia/Nicosia", country: "CY" },
+  "prague": { name: "Prague", lat: 50.0755, lon: 14.4378, tz: "Europe/Prague", country: "CZ" },
+  "copenhagen": { name: "Copenhagen", lat: 55.6761, lon: 12.5683, tz: "Europe/Copenhagen", country: "DK" },
+  "djibouti": { name: "Djibouti", lat: 11.8251, lon: 42.5903, tz: "Africa/Djibouti", country: "DJ" },
+  "roseau": { name: "Roseau", lat: 15.3092, lon: -61.3797, tz: "America/Dominica", country: "DM" },
+  "santo domingo": { name: "Santo Domingo", lat: 18.4861, lon: -69.9312, tz: "America/Santo_Domingo", country: "DO" },
+  "quito": { name: "Quito", lat: -0.1807, lon: -78.4678, tz: "America/Guayaquil", country: "EC" },
+  "guayaquil": { name: "Guayaquil", lat: -2.1894, lon: -79.8891, tz: "America/Guayaquil", country: "EC" },
+  "cairo": { name: "Cairo", lat: 30.0444, lon: 31.2357, tz: "Africa/Cairo", country: "EG" },
+  "alexandria": { name: "Alexandria", lat: 31.2001, lon: 29.9187, tz: "Africa/Cairo", country: "EG" },
+  "san salvador": { name: "San Salvador", lat: 13.6929, lon: -89.2182, tz: "America/El_Salvador", country: "SV" },
+  "malabo": { name: "Malabo", lat: 3.7504, lon: 8.7371, tz: "Africa/Malabo", country: "GQ" },
+  "asmara": { name: "Asmara", lat: 15.3229, lon: 38.9251, tz: "Africa/Asmara", country: "ER" },
+  "tallinn": { name: "Tallinn", lat: 59.4370, lon: 24.7536, tz: "Europe/Tallinn", country: "EE" },
+  "addis ababa": { name: "Addis Ababa", lat: 9.0244, lon: 38.7469, tz: "Africa/Addis_Ababa", country: "ET" },
+  "suva": { name: "Suva", lat: -18.1248, lon: 178.4501, tz: "Pacific/Fiji", country: "FJ" },
+  "helsinki": { name: "Helsinki", lat: 60.1699, lon: 24.9384, tz: "Europe/Helsinki", country: "FI" },
+  "tampere": { name: "Tampere", lat: 61.4978, lon: 23.7610, tz: "Europe/Helsinki", country: "FI" },
+  "tbilisi": { name: "Tbilisi", lat: 41.7151, lon: 44.8271, tz: "Asia/Tbilisi", country: "GE" },
+  "athens": { name: "Athens", lat: 37.9838, lon: 23.7275, tz: "Europe/Athens", country: "GR" },
+  "thessaloniki": { name: "Thessaloniki", lat: 40.6401, lon: 22.9444, tz: "Europe/Athens", country: "GR" },
+  "st. george's": { name: "St. George's", lat: 12.0561, lon: -61.7488, tz: "America/Grenada", country: "GD" },
+  "guatemala city": { name: "Guatemala City", lat: 14.6349, lon: -90.5069, tz: "America/Guatemala", country: "GT" },
+  "conakry": { name: "Conakry", lat: 9.6412, lon: -13.5784, tz: "Africa/Conakry", country: "GN" },
+  "bissau": { name: "Bissau", lat: 11.8636, lon: -15.5977, tz: "Africa/Bissau", country: "GW" },
+  "georgetown": { name: "Georgetown", lat: 6.8013, lon: -58.1551, tz: "America/Guyana", country: "GY" },
+  "port-au-prince": { name: "Port-au-Prince", lat: 18.5944, lon: -72.3074, tz: "America/Port-au-Prince", country: "HT" },
+  "tegucigalpa": { name: "Tegucigalpa", lat: 14.0723, lon: -87.1921, tz: "America/Tegucigalpa", country: "HN" },
+  "budapest": { name: "Budapest", lat: 47.4979, lon: 19.0402, tz: "Europe/Budapest", country: "HU" },
+  "reykjavik": { name: "Reykjavik", lat: 64.1466, lon: -21.9426, tz: "Atlantic/Reykjavik", country: "IS" },
+  "new delhi": { name: "New Delhi", lat: 28.6139, lon: 77.2090, tz: "Asia/Kolkata", country: "IN" },
+  "mumbai": { name: "Mumbai", lat: 19.0760, lon: 72.8777, tz: "Asia/Kolkata", country: "IN" },
+  "kolkata": { name: "Kolkata", lat: 22.5726, lon: 88.3639, tz: "Asia/Kolkata", country: "IN" },
+  "chennai": { name: "Chennai", lat: 13.0827, lon: 80.2707, tz: "Asia/Kolkata", country: "IN" },
+  "bangalore": { name: "Bangalore", lat: 12.9716, lon: 77.5946, tz: "Asia/Kolkata", country: "IN" },
+  "hyderabad": { name: "Hyderabad", lat: 17.3850, lon: 78.4867, tz: "Asia/Kolkata", country: "IN" },
+  "ahmedabad": { name: "Ahmedabad", lat: 23.0225, lon: 72.5714, tz: "Asia/Kolkata", country: "IN" },
+  "guwahati": { name: "Guwahati", lat: 26.1445, lon: 91.7362, tz: "Asia/Kolkata", country: "IN" },
+  "jakarta": { name: "Jakarta", lat: -6.2088, lon: 106.8456, tz: "Asia/Jakarta", country: "ID" },
+  "surabaya": { name: "Surabaya", lat: -7.2575, lon: 112.7521, tz: "Asia/Jakarta", country: "ID" },
+  "medan": { name: "Medan", lat: 3.5952, lon: 98.6722, tz: "Asia/Jakarta", country: "ID" },
+  "makassar": { name: "Makassar", lat: -5.1477, lon: 119.4327, tz: "Asia/Makassar", country: "ID" },
+  "jayapura": { name: "Jayapura", lat: -2.5364, lon: 140.7111, tz: "Asia/Jayapura", country: "ID" },
+  "tehran": { name: "Tehran", lat: 35.6892, lon: 51.3890, tz: "Asia/Tehran", country: "IR" },
+  "mashhad": { name: "Mashhad", lat: 36.2605, lon: 59.6168, tz: "Asia/Tehran", country: "IR" },
+  "baghdad": { name: "Baghdad", lat: 33.3152, lon: 44.3661, tz: "Asia/Baghdad", country: "IQ" },
+  "basra": { name: "Basra", lat: 30.5081, lon: 47.7804, tz: "Asia/Baghdad", country: "IQ" },
+  "dublin": { name: "Dublin", lat: 53.3498, lon: -6.2603, tz: "Europe/Dublin", country: "IE" },
+  "cork": { name: "Cork", lat: 51.8985, lon: -8.4756, tz: "Europe/Dublin", country: "IE" },
+  "jerusalem": { name: "Jerusalem", lat: 31.7683, lon: 35.2137, tz: "Asia/Jerusalem", country: "IL" },
+  "tel aviv": { name: "Tel Aviv", lat: 32.0853, lon: 34.7818, tz: "Asia/Jerusalem", country: "IL" },
+  "rome": { name: "Rome", lat: 41.9028, lon: 12.4964, tz: "Europe/Rome", country: "IT" },
+  "milan": { name: "Milan", lat: 45.4642, lon: 9.1900, tz: "Europe/Rome", country: "IT" },
+  "naples": { name: "Naples", lat: 40.8518, lon: 14.2681, tz: "Europe/Rome", country: "IT" },
+  "palermo": { name: "Palermo", lat: 38.1157, lon: 13.3615, tz: "Europe/Rome", country: "IT" },
+  "kingston": { name: "Kingston", lat: 18.0179, lon: -76.8099, tz: "America/Jamaica", country: "JM" },
+  "amman": { name: "Amman", lat: 31.9454, lon: 35.9284, tz: "Asia/Amman", country: "JO" },
+  "astana": { name: "Astana", lat: 51.1605, lon: 71.4704, tz: "Asia/Almaty", country: "KZ" },
+  "almaty": { name: "Almaty", lat: 43.2380, lon: 76.8829, tz: "Asia/Almaty", country: "KZ" },
+  "nairobi": { name: "Nairobi", lat: -1.2921, lon: 36.8219, tz: "Africa/Nairobi", country: "KE" },
+  "mombasa": { name: "Mombasa", lat: -4.0435, lon: 39.6682, tz: "Africa/Nairobi", country: "KE" },
+  "tarawa": { name: "Tarawa", lat: 1.4518, lon: 172.9728, tz: "Pacific/Tarawa", country: "KI" },
+  "pyongyang": { name: "Pyongyang", lat: 39.0392, lon: 125.7625, tz: "Asia/Pyongyang", country: "KP" },
+  "seoul": { name: "Seoul", lat: 37.5665, lon: 126.9780, tz: "Asia/Seoul", country: "KR" },
+  "busan": { name: "Busan", lat: 35.1796, lon: 129.0756, tz: "Asia/Seoul", country: "KR" },
+  "kuwait city": { name: "Kuwait City", lat: 29.3759, lon: 47.9774, tz: "Asia/Kuwait", country: "KW" },
+  "bishkek": { name: "Bishkek", lat: 42.8746, lon: 74.5698, tz: "Asia/Bishkek", country: "KG" },
+  "vientiane": { name: "Vientiane", lat: 17.9757, lon: 102.6331, tz: "Asia/Vientiane", country: "LA" },
+  "riga": { name: "Riga", lat: 56.9496, lon: 24.1052, tz: "Europe/Riga", country: "LV" },
+  "beirut": { name: "Beirut", lat: 33.8938, lon: 35.5018, tz: "Asia/Beirut", country: "LB" },
+  "maseru": { name: "Maseru", lat: -29.3142, lon: 27.4833, tz: "Africa/Maseru", country: "LS" },
+  "monrovia": { name: "Monrovia", lat: 6.2907, lon: -10.7605, tz: "Africa/Monrovia", country: "LR" },
+  "tripoli": { name: "Tripoli", lat: 32.8872, lon: 13.1913, tz: "Africa/Tripoli", country: "LY" },
+  "vilnius": { name: "Vilnius", lat: 54.6872, lon: 25.2797, tz: "Europe/Vilnius", country: "LT" },
+  "luxembourg": { name: "Luxembourg", lat: 49.6116, lon: 6.1319, tz: "Europe/Luxembourg", country: "LU" },
+  "skopje": { name: "Skopje", lat: 41.9973, lon: 21.4280, tz: "Europe/Skopje", country: "MK" },
+  "antananarivo": { name: "Antananarivo", lat: -18.8792, lon: 47.5079, tz: "Indian/Antananarivo", country: "MG" },
+  "lilongwe": { name: "Lilongwe", lat: -13.9626, lon: 33.7741, tz: "Africa/Blantyre", country: "MW" },
+  "kuala lumpur": { name: "Kuala Lumpur", lat: 3.1390, lon: 101.6869, tz: "Asia/Kuala_Lumpur", country: "MY" },
+  "george town": { name: "George Town", lat: 5.4141, lon: 100.3288, tz: "Asia/Kuala_Lumpur", country: "MY" },
+  "male": { name: "Male", lat: 4.1755, lon: 73.5093, tz: "Indian/Maldives", country: "MV" },
+  "bamako": { name: "Bamako", lat: 12.6392, lon: -8.0029, tz: "Africa/Bamako", country: "ML" },
+  "valletta": { name: "Valletta", lat: 35.8989, lon: 14.5146, tz: "Europe/Malta", country: "MT" },
+  "majuro": { name: "Majuro", lat: 7.1164, lon: 171.1858, tz: "Pacific/Majuro", country: "MH" },
+  "nouakchott": { name: "Nouakchott", lat: 18.0735, lon: -15.9582, tz: "Africa/Nouakchott", country: "MR" },
+  "port louis": { name: "Port Louis", lat: -20.1609, lon: 57.5012, tz: "Indian/Mauritius", country: "MU" },
+  "mexico city": { name: "Mexico City", lat: 19.4326, lon: -99.1332, tz: "America/Mexico_City", country: "MX" },
+  "guadalajara": { name: "Guadalajara", lat: 20.6597, lon: -103.3496, tz: "America/Mexico_City", country: "MX" },
+  "monterrey": { name: "Monterrey", lat: 25.6866, lon: -100.3161, tz: "America/Monterrey", country: "MX" },
+  "merida": { name: "Merida", lat: 20.9674, lon: -89.5926, tz: "America/Merida", country: "MX" },
+  "chisinau": { name: "Chisinau", lat: 47.0105, lon: 28.8638, tz: "Europe/Chisinau", country: "MD" },
+  "ulaanbaatar": { name: "Ulaanbaatar", lat: 47.8864, lon: 106.9057, tz: "Asia/Ulaanbaatar", country: "MN" },
+  "podgorica": { name: "Podgorica", lat: 42.4304, lon: 19.2594, tz: "Europe/Podgorica", country: "ME" },
+  "rabat": { name: "Rabat", lat: 34.0209, lon: -6.8417, tz: "Africa/Casablanca", country: "MA" },
+  "casablanca": { name: "Casablanca", lat: 33.5731, lon: -7.5898, tz: "Africa/Casablanca", country: "MA" },
+  "maputo": { name: "Maputo", lat: -25.9692, lon: 32.5732, tz: "Africa/Maputo", country: "MZ" },
+  "naypyidaw": { name: "Naypyidaw", lat: 19.7633, lon: 96.0785, tz: "Asia/Yangon", country: "MM" },
+  "yangon": { name: "Yangon", lat: 16.8409, lon: 96.1735, tz: "Asia/Yangon", country: "MM" },
+  "windhoek": { name: "Windhoek", lat: -22.5609, lon: 17.0658, tz: "Africa/Windhoek", country: "NA" },
+  "kathmandu": { name: "Kathmandu", lat: 27.7172, lon: 85.3240, tz: "Asia/Kathmandu", country: "NP" },
+  "wellington": { name: "Wellington", lat: -41.2866, lon: 174.7756, tz: "Pacific/Auckland", country: "NZ" },
+  "auckland": { name: "Auckland", lat: -36.8509, lon: 174.7645, tz: "Pacific/Auckland", country: "NZ" },
+  "christchurch": { name: "Christchurch", lat: -43.5321, lon: 172.6362, tz: "Pacific/Auckland", country: "NZ" },
+  "managua": { name: "Managua", lat: 12.1140, lon: -86.2362, tz: "America/Managua", country: "NI" },
+  "niamey": { name: "Niamey", lat: 13.5116, lon: 2.1254, tz: "Africa/Niamey", country: "NE" },
+  "abuja": { name: "Abuja", lat: 9.0765, lon: 7.3986, tz: "Africa/Lagos", country: "NG" },
+  "lagos": { name: "Lagos", lat: 6.5244, lon: 3.3792, tz: "Africa/Lagos", country: "NG" },
+  "oslo": { name: "Oslo", lat: 59.9139, lon: 10.7522, tz: "Europe/Oslo", country: "NO" },
+  "bergen": { name: "Bergen", lat: 60.3913, lon: 5.3221, tz: "Europe/Oslo", country: "NO" },
+  "muscat": { name: "Muscat", lat: 23.5880, lon: 58.3829, tz: "Asia/Muscat", country: "OM" },
+  "islamabad": { name: "Islamabad", lat: 33.6844, lon: 73.0479, tz: "Asia/Karachi", country: "PK" },
+  "karachi": { name: "Karachi", lat: 24.8607, lon: 67.0011, tz: "Asia/Karachi", country: "PK" },
+  "lahore": { name: "Lahore", lat: 31.5204, lon: 74.3587, tz: "Asia/Karachi", country: "PK" },
+  "ngerulmud": { name: "Ngerulmud", lat: 7.5004, lon: 134.6242, tz: "Pacific/Palau", country: "PW" },
+  "panama city": { name: "Panama City", lat: 8.9824, lon: -79.5199, tz: "America/Panama", country: "PA" },
+  "port moresby": { name: "Port Moresby", lat: -9.4438, lon: 147.1803, tz: "Pacific/Port_Moresby", country: "PG" },
+  "asuncion": { name: "Asuncion", lat: -25.2637, lon: -57.5759, tz: "America/Asuncion", country: "PY" },
+  "lima": { name: "Lima", lat: -12.0464, lon: -77.0428, tz: "America/Lima", country: "PE" },
+  "arequipa": { name: "Arequipa", lat: -16.3989, lon: -71.5350, tz: "America/Lima", country: "PE" },
+  "manila": { name: "Manila", lat: 14.5995, lon: 120.9842, tz: "Asia/Manila", country: "PH" },
+  "cebu": { name: "Cebu", lat: 10.3157, lon: 123.8854, tz: "Asia/Manila", country: "PH" },
+  "davao": { name: "Davao", lat: 7.1907, lon: 125.4553, tz: "Asia/Manila", country: "PH" },
+  "warsaw": { name: "Warsaw", lat: 52.2297, lon: 21.0122, tz: "Europe/Warsaw", country: "PL" },
+  "krakow": { name: "Krakow", lat: 50.0647, lon: 19.9450, tz: "Europe/Warsaw", country: "PL" },
+  "lisbon": { name: "Lisbon", lat: 38.7223, lon: -9.1393, tz: "Europe/Lisbon", country: "PT" },
+  "porto": { name: "Porto", lat: 41.1579, lon: -8.6291, tz: "Europe/Lisbon", country: "PT" },
+  "doha": { name: "Doha", lat: 25.2854, lon: 51.5310, tz: "Asia/Qatar", country: "QA" },
+  "bucharest": { name: "Bucharest", lat: 44.4268, lon: 26.1025, tz: "Europe/Bucharest", country: "RO" },
+  "cluj-napoca": { name: "Cluj-Napoca", lat: 46.7712, lon: 23.6236, tz: "Europe/Bucharest", country: "RO" },
+  "moscow": { name: "Moscow", lat: 55.7558, lon: 37.6173, tz: "Europe/Moscow", country: "RU" },
+  "saint petersburg": { name: "Saint Petersburg", lat: 59.9311, lon: 30.3609, tz: "Europe/Moscow", country: "RU" },
+  "novosibirsk": { name: "Novosibirsk", lat: 55.0084, lon: 82.9357, tz: "Asia/Novosibirsk", country: "RU" },
+  "yekaterinburg": { name: "Yekaterinburg", lat: 56.8389, lon: 60.6057, tz: "Asia/Yekaterinburg", country: "RU" },
+  "vladivostok": { name: "Vladivostok", lat: 43.1332, lon: 131.9113, tz: "Asia/Vladivostok", country: "RU" },
+  "kigali": { name: "Kigali", lat: -1.9441, lon: 30.0619, tz: "Africa/Kigali", country: "RW" },
+  "kingstown": { name: "Kingstown", lat: 13.1607, lon: -61.2244, tz: "America/St_Vincent", country: "VC" },
+  "apia": { name: "Apia", lat: -13.8507, lon: -171.7514, tz: "Pacific/Apia", country: "WS" },
+  "san marino": { name: "San Marino", lat: 43.9334, lon: 12.4474, tz: "Europe/San_Marino", country: "SM" },
+  "sao tome": { name: "Sao Tome", lat: 0.3365, lon: 6.7273, tz: "Africa/Sao_Tome", country: "ST" },
+  "riyadh": { name: "Riyadh", lat: 24.7136, lon: 46.6753, tz: "Asia/Riyadh", country: "SA" },
+  "jeddah": { name: "Jeddah", lat: 21.4858, lon: 39.1925, tz: "Asia/Riyadh", country: "SA" },
+  "mecca": { name: "Mecca", lat: 21.3891, lon: 39.8579, tz: "Asia/Riyadh", country: "SA" },
+  "dakar": { name: "Dakar", lat: 14.7167, lon: -17.4677, tz: "Africa/Dakar", country: "SN" },
+  "belgrade": { name: "Belgrade", lat: 44.7866, lon: 20.4489, tz: "Europe/Belgrade", country: "RS" },
+  "victoria": { name: "Victoria", lat: -4.6184, lon: 55.4503, tz: "Indian/Mahe", country: "SC" },
+  "freetown": { name: "Freetown", lat: 8.4846, lon: -13.2343, tz: "Africa/Freetown", country: "SL" },
+  "singapore": { name: "Singapore", lat: 1.3521, lon: 103.8198, tz: "Asia/Singapore", country: "SG" },
+  "bratislava": { name: "Bratislava", lat: 48.1486, lon: 17.1077, tz: "Europe/Bratislava", country: "SK" },
+  "ljubljana": { name: "Ljubljana", lat: 46.0569, lon: 14.5058, tz: "Europe/Ljubljana", country: "SI" },
+  "honiara": { name: "Honiara", lat: -9.4456, lon: 159.9729, tz: "Pacific/Guadalcanal", country: "SB" },
+  "mogadishu": { name: "Mogadishu", lat: 2.0469, lon: 45.3182, tz: "Africa/Mogadishu", country: "SO" },
+  "pretoria": { name: "Pretoria", lat: -25.7479, lon: 28.2293, tz: "Africa/Johannesburg", country: "ZA" },
+  "johannesburg": { name: "Johannesburg", lat: -26.2041, lon: 28.0473, tz: "Africa/Johannesburg", country: "ZA" },
+  "cape town": { name: "Cape Town", lat: -33.9249, lon: 18.4241, tz: "Africa/Johannesburg", country: "ZA" },
+  "durban": { name: "Durban", lat: -29.8587, lon: 31.0218, tz: "Africa/Johannesburg", country: "ZA" },
+  "juba": { name: "Juba", lat: 4.8594, lon: 31.5713, tz: "Africa/Juba", country: "SS" },
+  "madrid": { name: "Madrid", lat: 40.4168, lon: -3.7038, tz: "Europe/Madrid", country: "ES" },
+  "barcelona": { name: "Barcelona", lat: 41.3851, lon: 2.1734, tz: "Europe/Madrid", country: "ES" },
+  "valencia": { name: "Valencia", lat: 39.4699, lon: -0.3763, tz: "Europe/Madrid", country: "ES" },
+  "sevilla": { name: "Sevilla", lat: 37.3891, lon: -5.9845, tz: "Europe/Madrid", country: "ES" },
+  "bilbao": { name: "Bilbao", lat: 43.2630, lon: -2.9350, tz: "Europe/Madrid", country: "ES" },
+  "las palmas": { name: "Las Palmas", lat: 28.1235, lon: -15.4363, tz: "Atlantic/Canary", country: "ES" },
+  "colombo": { name: "Colombo", lat: 6.9271, lon: 79.8612, tz: "Asia/Colombo", country: "LK" },
+  "khartoum": { name: "Khartoum", lat: 15.5007, lon: 32.5599, tz: "Africa/Khartoum", country: "SD" },
+  "paramaribo": { name: "Paramaribo", lat: 5.8520, lon: -55.2038, tz: "America/Paramaribo", country: "SR" },
+  "mbabane": { name: "Mbabane", lat: -26.3054, lon: 31.1367, tz: "Africa/Mbabane", country: "SZ" },
+  "stockholm": { name: "Stockholm", lat: 59.3293, lon: 18.0686, tz: "Europe/Stockholm", country: "SE" },
+  "gothenburg": { name: "Gothenburg", lat: 57.7089, lon: 11.9746, tz: "Europe/Stockholm", country: "SE" },
+  "berne": { name: "Berne", lat: 46.9480, lon: 7.4474, tz: "Europe/Zurich", country: "CH" },
+  "zurich": { name: "Zurich", lat: 47.3769, lon: 8.5417, tz: "Europe/Zurich", country: "CH" },
+  "geneva": { name: "Geneva", lat: 46.2044, lon: 6.1432, tz: "Europe/Zurich", country: "CH" },
+  "damascus": { name: "Damascus", lat: 33.5138, lon: 36.2765, tz: "Asia/Damascus", country: "SY" },
+  "taipei": { name: "Taipei", lat: 25.0330, lon: 121.5654, tz: "Asia/Taipei", country: "TW" },
+  "dushanbe": { name: "Dushanbe", lat: 38.5598, lon: 68.7870, tz: "Asia/Dushanbe", country: "TJ" },
+  "dar es salaam": { name: "Dar es Salaam", lat: -6.7924, lon: 39.2083, tz: "Africa/Dar_es_Salaam", country: "TZ" },
+  "dodoma": { name: "Dodoma", lat: -6.1630, lon: 35.7516, tz: "Africa/Dar_es_Salaam", country: "TZ" },
+  "bangkok": { name: "Bangkok", lat: 13.7563, lon: 100.5018, tz: "Asia/Bangkok", country: "TH" },
+  "chiang mai": { name: "Chiang Mai", lat: 18.7883, lon: 98.9853, tz: "Asia/Bangkok", country: "TH" },
+  "dili": { name: "Dili", lat: -8.5569, lon: 125.5603, tz: "Asia/Dili", country: "TL" },
+  "lome": { name: "Lome", lat: 6.1725, lon: 1.2314, tz: "Africa/Lome", country: "TG" },
+  "nuku'alofa": { name: "Nuku'alofa", lat: -21.1394, lon: -175.2048, tz: "Pacific/Tongatapu", country: "TO" },
+  "port of spain": { name: "Port of Spain", lat: 10.6549, lon: -61.5019, tz: "America/Port_of_Spain", country: "TT" },
+  "tunis": { name: "Tunis", lat: 36.8065, lon: 10.1815, tz: "Africa/Tunis", country: "TN" },
+  "ankara": { name: "Ankara", lat: 39.9334, lon: 32.8597, tz: "Europe/Istanbul", country: "TR" },
+  "istanbul": { name: "Istanbul", lat: 41.0082, lon: 28.9784, tz: "Europe/Istanbul", country: "TR" },
+  "izmir": { name: "Izmir", lat: 38.4237, lon: 27.1428, tz: "Europe/Istanbul", country: "TR" },
+  "ashgabat": { name: "Ashgabat", lat: 37.9601, lon: 58.3261, tz: "Asia/Ashgabat", country: "TM" },
+  "funafuti": { name: "Funafuti", lat: -8.5211, lon: 179.1962, tz: "Pacific/Funafuti", country: "TV" },
+  "kampala": { name: "Kampala", lat: 0.3476, lon: 32.5825, tz: "Africa/Kampala", country: "UG" },
+  "kyiv": { name: "Kyiv", lat: 50.4501, lon: 30.5234, tz: "Europe/Kiev", country: "UA" },
+  "odessa": { name: "Odessa", lat: 46.4840, lon: 30.7325, tz: "Europe/Kiev", country: "UA" },
+  "abu dhabi": { name: "Abu Dhabi", lat: 24.4539, lon: 54.3773, tz: "Asia/Dubai", country: "AE" },
+  "dubai": { name: "Dubai", lat: 25.2048, lon: 55.2708, tz: "Asia/Dubai", country: "AE" },
+  "montevideo": { name: "Montevideo", lat: -34.9011, lon: -56.1645, tz: "America/Montevideo", country: "UY" },
+  "tashkent": { name: "Tashkent", lat: 41.2995, lon: 69.2401, tz: "Asia/Tashkent", country: "UZ" },
+  "samarqand": { name: "Samarqand", lat: 39.6545, lon: 66.9597, tz: "Asia/Samarkand", country: "UZ" },
+  "port vila": { name: "Port Vila", lat: -17.7333, lon: 168.3270, tz: "Pacific/Efate", country: "VU" },
+  "caracas": { name: "Caracas", lat: 10.4806, lon: -66.9036, tz: "America/Caracas", country: "VE" },
+  "maracaibo": { name: "Maracaibo", lat: 10.6556, lon: -71.6406, tz: "America/Caracas", country: "VE" },
+  "hanoi": { name: "Hanoi", lat: 21.0278, lon: 105.8342, tz: "Asia/Ho_Chi_Minh", country: "VN" },
+  "ho chi minh city": { name: "Ho Chi Minh City", lat: 10.8231, lon: 106.6297, tz: "Asia/Ho_Chi_Minh", country: "VN" },
+  "da nang": { name: "Da Nang", lat: 16.0544, lon: 108.2022, tz: "Asia/Ho_Chi_Minh", country: "VN" },
+  "sanaa": { name: "Sanaa", lat: 15.3694, lon: 44.1910, tz: "Asia/Aden", country: "YE" },
+  "lusaka": { name: "Lusaka", lat: -15.3875, lon: 28.3228, tz: "Africa/Lusaka", country: "ZM" },
+  "harare": { name: "Harare", lat: -17.8252, lon: 31.0335, tz: "Africa/Harare", country: "ZW" },
+  "palikir": { name: "Palikir", lat: 6.9248, lon: 158.1611, tz: "Pacific/Pohnpei", country: "FM" },
+  "libreville": { name: "Libreville", lat: 0.4162, lon: 9.4673, tz: "Africa/Libreville", country: "GA" },
+  "accra": { name: "Accra", lat: 5.6037, lon: -0.1870, tz: "Africa/Accra", country: "GH" },
+  "banjul": { name: "Banjul", lat: 13.4549, lon: -16.5790, tz: "Africa/Banjul", country: "GM" },
+  "basseterre": { name: "Basseterre", lat: 17.3026, lon: -62.7177, tz: "America/St_Kitts", country: "KN" },
+  "castries": { name: "Castries", lat: 14.0101, lon: -60.9870, tz: "America/St_Lucia", country: "LC" },
+  "vaduz": { name: "Vaduz", lat: 47.1410, lon: 9.5209, tz: "Europe/Vaduz", country: "LI" },
+  "monaco": { name: "Monaco", lat: 43.7384, lon: 7.4246, tz: "Europe/Monaco", country: "MC" },
+  "yaren": { name: "Yaren", lat: -0.5467, lon: 166.9211, tz: "Pacific/Nauru", country: "NR" },
+  "ramallah": { name: "Ramallah", lat: 31.9038, lon: 35.2034, tz: "Asia/Hebron", country: "PS" },
+  "vatican city": { name: "Vatican City", lat: 41.9029, lon: 12.4534, tz: "Europe/Rome", country: "VA" },
 };
 
 const CONFIG = {
@@ -133,6 +438,7 @@ const CONFIG = {
   dryRun: false,
   aqProvider: "auto",
   aqRadius: 25,
+  language: "en",
   locations: [
     { name: "Kyoto" },
     { name: "Brunssum" }
@@ -156,6 +462,160 @@ const LEAD_BUCKETS = [
   { maxLead: 14,  key: 'long',  defaultErr: 2.9 },
   { maxLead: Infinity, key: 'noaa', defaultErr: 4.3 }
 ];
+
+// Translation infrastructure (mirrors icalweather.gs for stargazing and shared terms)
+const SUPPORTED_LANGS = ["en", "zh", "hi", "es", "fr", "ar", "de", "nl"];
+const T_L = {
+  pin:      { en:"Pin",                          zh:"位置",                  hi:"स्थान",                       es:"Ubicación",                fr:"Lieu",                        ar:"الموقع",                    de:"Ort",                         nl:"Plaats" },
+  cal:      { en:"Calendar",                     zh:"日历",                  hi:"कैलेंडर",                     es:"Calendario",                fr:"Calendrier",                  ar:"التقويم",                   de:"Kalender",                    nl:"Kalender" },
+  range:     { en:"Range",                        zh:"范围",                  hi:"सीमा",                        es:"Rango",                      fr:"Plage",                      ar:"المدى",                       de:"Bereich",                     nl:"Bereik" },
+  feels:     { en:"Feels",                        zh:"体感",                  hi:"महसूस",                       es:"Sensación",                  fr:"Ressenti",                   ar:"إحساس",                      de:"Gefühlt",                    nl:"Voelt als" },
+  dew:       { en:"Dew",                          zh:"露点",                  hi:"ओसांश",                       es:"Rocío",                     fr:"Rosée",                      ar:"الندى",                      de:"Taupunkt",                   nl:"Dauwpunt" },
+  humid:     { en:"Humidity",                     zh:"湿度",                  hi:"नमी",                         es:"Humedad",                    fr:"Humidité",                    ar:"الرطوبة",                    de:"Luftfeuchte",                 nl:"Luchtvochtigheid" },
+  rain:      { en:"Rain",                         zh:"降雨",                  hi:"वर्षा",                       es:"Lluvia",                     fr:"Pluie",                      ar:"المطر",                       de:"Regen",                       nl:"Regen" },
+  consensus: { en:"Consensus",                     zh:"集合一致性",            hi:"सर्वसम्मति",                   es:"Consenso",                   fr:"Consensus",                   ar:"الإجماع",                     de:"Konsens",                     nl:"Consensus" },
+  wind:      { en:"Wind",                         zh:"风",                    hi:"हवा",                         es:"Viento",                     fr:"Vent",                       ar:"الرياح",                      de:"Wind",                        nl:"Wind" },
+  gusts:     { en:"Gusts",                        zh:"阵风",                  hi:"झोंके",                       es:"Ráfagas",                    fr:"Rafales",                     ar:"هبّات",                      de:"Böen",                        nl:"Windstoten" },
+  baro:      { en:"Barometer",                    zh:"气压",                  hi:"वायुदाब",                      es:"Barómetro",                  fr:"Baromètre",                   ar:"البارومتر",                   de:"Barometer",                   nl:"Barometer" },
+  daylight:  { en:"Daylight",                     zh:"日照",                  hi:"दिन की रोशनी",                es:"Luz diurna",                 fr:"Durée du jour",               ar:"ساعات النهار",                 de:"Tageslicht",                  nl:"Daglicht" },
+  goldenHr:  { en:"Golden Hr",                    zh:"黄金时刻",              hi:"गोल्डन ऑवर",                  es:"Hora dorada",                fr:"Heure dorée",                 ar:"الساعة الذهبية",               de:"Goldene Stunde",              nl:"Gouden uur" },
+  cloud:     { en:"Cloud Cover",                   zh:"云量",                  hi:"बादल",                        es:"Nubosidad",                  fr:"Couverture nuageuse",         ar:"الغيوم",                      de:"Bewölkung",                   nl:"Bewolking" },
+  moon:      { en:"Moon",                         zh:"月相",                  hi:"चाँद",                        es:"Luna",                       fr:"Lune",                        ar:"القمر",                       de:"Mond",                        nl:"Maan" },
+  star:      { en:"Stargazing",                    zh:"观星",                  hi:"तारा-दर्शन",                  es:"Observación de estrellas",   fr:"Observation des étoiles",     ar:"رصد النجوم",                   de:"Sternbeobachtung",            nl:"Sterrenkijken" },
+  uv:        { en:"UV Index",                     zh:"紫外线指数",             hi:"यूवी सूचकांक",                 es:"Índice UV",                   fr:"Indice UV",                   ar:"مؤشر الأشعة فوق البنفسجية",  de:"UV-Index",                    nl:"UV-index" },
+  et:        { en:"Evapotrans.",                    zh:"蒸散",                  hi:"वाष्पीकरण",                    es:"Evapotranspiración",         fr:"Évapotranspiration",          ar:"البخر",                       de:"Evapotranspiration",          nl:"Verdamping" },
+  rad:       { en:"Solar Radiation",              zh:"太阳辐射",               hi:"सौर विकिरण",                   es:"Radiación solar",            fr:"Rayonnement solaire",          ar:"الإشعاع الشمسي",               de:"Sonnenstrahlung",             nl:"Zonnestraling" },
+  aqi:       { en:"AQI",                         zh:"空气质量",               hi:"वायु गुणवत्ता सूचकांक",        es:"ICA",                        fr:"IQA",                         ar:"مؤشر جودة الهواء",             de:"Luftqualität (AQI)",          nl:"Luchtkwaliteit (AQI)" },
+  mon:       { en:"Monitoring",                  zh:"监测中",                hi:"निगरानी",                       es:"Monitoreo",                   fr:"En suivi",                    ar:"قيد المراقبة",                 de:"Wird überwacht",               nl:"Wordt gemeten" },
+  pm25:      { en:"PM2.5",                       zh:"细颗粒物",               hi:"पीएम 2.5",                     es:"PM2.5",                      fr:"PM2.5",                       ar:"الجسيمات الدقيقة",              de:"PM2.5",                        nl:"PM2.5" },
+  pm10:      { en:"PM10",                        zh:"可吸入颗粒",             hi:"पीएम 10",                      es:"PM10",                       fr:"PM10",                        ar:"الجسيمات الكبيرة",              de:"PM10",                         nl:"PM10" },
+  pollen:    { en:"Pollen Load",                  zh:"花粉浓度",               hi:"पराग",                          es:"Polen",                      fr:"Pollens",                     ar:"حبوب اللقاح",                   de:"Pollenbelastung",              nl:"Pollenbelasting" },
+  polLow:    { en:"Low",                         zh:"低",                    hi:"कम",                           es:"Bajo",                       fr:"Faible",                      ar:"منخفض",                       de:"Niedrig",                      nl:"Laag" },
+  rainSum:   { en:"Rain Sum",                     zh:"累计降雨",               hi:"कुल वर्षा",                     es:"Lluvia total",                fr:"Cumul de pluie",              ar:"إجمالي المطر",                 de:"Regensumme",                   nl:"Regensom" },
+  meanTemp:  { en:"Mean Temp",                   zh:"平均气温",               hi:"औसत तापमान",                    es:"Temp. media",                 fr:"Temp. moyenne",                ar:"متوسط الحرارة",                 de:"Mittlere Temp.",               nl:"Gem. temperatuur" },
+  gdd:       { en:"Growing Deg",                 zh:"有效积温",               hi:"ग्रोइंग डिग्री",                 es:"Grados-día",                  fr:"Degrés-jours",                 ar:"درجات النمو",                   de:"Wärmesumme",                  nl:"Groeigraden" },
+  aqi7:      { en:"7-Day Mean AQI",             zh:"7天平均空气质量",         hi:"7-दिन औसत वायु",                  es:"ICA medio 7d",                fr:"IQA moyen 7j",                 ar:"متوسط 7 أيام للجودة",            de:"7-Tage AQI-Mittel",            nl:"7-dagen gem. AQI" },
+  status:    { en:"Status",                       zh:"状态",                  hi:"स्थिति",                         es:"Estado",                      fr:"Statut",                       ar:"الحالة",                       de:"Status",                       nl:"Status" },
+  drift:     { en:"Expected Lead Drift",          zh:"预计误差",               hi:"अपेक्षित ड्रिफ्ट",                 es:"Deriva esperada",              fr:"Dérive attendue",               ar:"الانحراف المتوقع",               de:"Erwartete Abweichung",          nl:"Verwachte drift" },
+  ground:    { en:"Ground",                       zh:"地表",                  hi:"भूमि",                           es:"Suelo",                       fr:"Sol",                          ar:"الأرض",                        de:"Boden",                        nl:"Bodem" },
+  advisory:  { en:"Advisory",                     zh:"建议",                  hi:"सलाह",                           es:"Aviso",                       fr:"Avis",                         ar:"تنبيه",                        de:"Hinweis",                      nl:"Advies" },
+  engine:    { en:"Engine",                       zh:"引擎",                  hi:"इंजन",                         es:"Motor",                      fr:"Moteur",                      ar:"المحرك",                      de:"Engine",                       nl:"Engine" },
+  wx:        { en:"Weather",                      zh:"天气",                  hi:"मौसम",                         es:"Clima",                      fr:"Météo",                       ar:"الطقس",                       de:"Wetter",                       nl:"Weer" },
+  aq:        { en:"Air Quality",                  zh:"空气质量",              hi:"वायु गुणवत्ता",                  es:"Calidad del aire",            fr:"Qualité de l'air",            ar:"جودة الهواء",                  de:"Luftqualität",                nl:"Luchtkwaliteit" },
+  wiki:      { en:"Wikipedia",                   zh:"维基百科",               hi:"विकिपीडिया",                     es:"Wikipedia",                  fr:"Wikipédia",                   ar:"ويكيبيديا",                    de:"Wikipedia",                   nl:"Wikipedia" },
+  wikiApi:   { en:"Wikipedia On This Day API",   zh:"维基百科历史事件API",    hi:"विकिपीडिया इतिहास API",         es:"API Wikipedia En Este Día",   fr:"API Wikipédia Ce Jour-Là",    ar:"واجهة برمجة ويكيبيديا",        de:"Wikipedia An Diesem Tag API",  nl:"Wikipedia Op Deze Dag API" },
+  newsApi:   { en:"NewsAPI",                     zh:"NewsAPI",                hi:"NewsAPI",                        es:"NewsAPI",                    fr:"NewsAPI",                     ar:"NewsAPI",                       de:"NewsAPI",                     nl:"NewsAPI" },
+  // --- Road statuses ---
+  rdBI:     { en:"BLACK ICE DANGER",            zh:"黑冰危险",              hi:"काली बर्फ का खतरा",             es:"PELIGRO DE HIELO NEGRO",    fr:"DANGER DE VERGLAS",          ar:"خطر الجليد الأسود",          de:"SCHWARZES EIS",              nl:"ZWART IJS-GEVAAR" },
+  rdFrost:  { en:"FROST / SLICK SPOTS",         zh:"霜冻/路面湿滑",         hi:"पाला/फिसलन",                   es:"HELADAS / RESBALADIZO",     fr:"GELÉES / GLISSANT",          ar:"صقيع/انزلاق",                de:"FROST / RUTSCHIG",           nl:"VORST / GLADDE" },
+  rdSpray:  { en:"COLD SPRAY RISK",            zh:"冷溅水风险",             hi:"ठंडी छींट",                     es:"RIESGO DE SALPICADURAS",    fr:"RISQUE D'ÉCLABOUSSURES",    ar:"خطر الرذاذ البارد",           de:"KÄLTE-SPRÜH-RISIKO",        nl:"KOUD-SPUITRISICO" },
+  rdChill:  { en:"CHILLED ASPHALT",            zh:"冷柏油路",               hi:"ठंडा डामर",                    es:"ASFALTO FRÍO",              fr:"ASPHALTE FROID",             ar:"إسفلت بارد",                 de:"KALTER ASPHALT",              nl:"KOUDE ASFALT" },
+  rdAdvBI:  { en:"Glazed surface. Triple braking distance.", zh:"结冰路面。请保持三倍刹车距离。", hi:"फिसलन सतह। तिगुना ब्रेकिंग दूरी।", es:"Superficie helada. Triplica la distancia.", fr:"Surface verglacée. Triplez la distance.", ar:"سطح جليدي. ثلاثة أضعاف مسافة الفرملة.", de:"Spiegelglatt. Dreifacher Bremsweg.", nl:"Bevroren oppervlak. Verdrievoudig remweg." },
+  rdAdvFr:  { en:"Bridges & shaded ramps prone to ice.", zh:"桥梁和背阴坡道易结冰。", hi:"पुल और छायादार रैंप बर्फ के शिकार।", es:"Puentes y rampas en sombra propensos al hielo.", fr:"Ponts et rampes ombragées sujets au verglas.", ar:"الجسور والمنحدرات المظللة عرضة للجليد.", de:"Brücken und schattige Rampen vereist.", nl:"Bruggen en schaduwrijke hellingen ijzelgevoelig." },
+  rdAdvSp:  { en:"Reduced grip on summer tires.", zh:"夏季轮胎抓地力下降。", hi:"ग्रीष्मकालीन टायरों पर कम पकड़।", es:"Menor agarre en neumáticos de verano.", fr:"Adhérence réduite sur pneus été.", ar:"تماسك أقل مع الإطارات الصيفية.", de:"Reduzierter Grip auf Sommerreifen.", nl:"Minder grip op zomerbanden." },
+  rdAdvCh:  { en:"Sub-7°C rubber hardening threshold.", zh:"低于7°C橡胶硬化阈值。", hi:"7°C से नीचे रबर सख्त होने की सीमा।", es:"Umbral de endurecimiento del caucho bajo 7°C.", fr:"Seuil de durcissement du caoutchouc sous 7°C.", ar:"عتبة تصلب المطاط دون 7°C.", de:"Unter 7°C härtet Gummi aus.", nl:"Onder 7°C wordt rubber harder." },
+  // --- GDD ---
+  gddDorm: { en:"Dormant",        zh:"休眠期",              hi:"सुप्त",              es:"Latente",            fr:"Dormant",            ar:"خامد",             de:"Ruhend",             nl:"Rustend" },
+  gddCool: { en:"Cool greens active", zh:"冷凉蔬菜活跃",      hi:"ठंडी सब्ज़ियाँ सक्रिय", es:"Hortalizas frías activas", fr:"Légumes frais actifs", ar:"خضروات باردة نشطة", de:"Kühlgemüse aktiv",   nl:"Koude groenten actief" },
+  gddFoli: { en:"Steady root foliage", zh:"根部生长稳定",    hi:"जड़ें मज़बूत",      es:"Follaje de raíz estable", fr:"Feuillage racinaire stable", ar:"أوراق الجذور مستقرة", de:"Stetige Blattbildung", nl:"Stabiele bladgroei" },
+  gddBrss: { en:"Brassicas booming",  zh:"十字花科蔬菜旺盛",  hi:"ब्रैसिका फल-फूल", es:"Brásicas en auge",    fr:"Brassiques en plein essor", ar:"الكرنبية في أوجها", de:"Kreuzblütler-Boost", nl:"Koolsoorten pieken" },
+  gddPeak: { en:"Peak warm growth",   zh:"高温生长峰值",      hi:"गर्म वृद्धि चरम",  es:"Pico de calor",      fr:"Pic de chaleur",      ar:"ذروة النمو",        de:"Wachstumsspitze",   nl:"Piek warmtegroei" },
+  // --- Stargazing ---
+  starExc:  { en:"Exceptional",         zh:"极佳",               hi:"असाधारण",           es:"Excepcional",          fr:"Exceptionnel",         ar:"استثنائي",           de:"Hervorragend",         nl:"Uitstekend" },
+  starFair: { en:"Fair",                 zh:"良好",               hi:"अच्छा",             es:"Aceptable",            fr:"Correct",             ar:"جيد",               de:"Gut",                  nl:"Redelijk" },
+  starMod:  { en:"Moderate",             zh:"一般",               hi:"मध्यम",             es:"Moderado",             fr:"Modéré",              ar:"متوسط",             de:"Mäßig",                 nl:"Matig" },
+  starObsc: { en:"Obscured",             zh:"被遮挡",             hi:"अस्पष्ट",           es:"Obstruido",            fr:"Masqué",              ar:"محجوب",             de:"Verdeckt",              nl:"Verduisterd" },
+  starMoon: { en:"Moonlit",              zh:"月光明亮",           hi:"चाँदनी",           es:"Iluminado por la luna", fr:"Éclairé par la lune", ar:"منير بالقمر",    de:"Mondbeschienen",       nl:"Maanverlicht" },
+  starFlt:  { en:"Filtered by Moon",    zh:"月光干扰",           hi:"चाँद के कारण",     es:"Filtrado por la luna",  fr:"Filtré par la lune",   ar:"مُرشَّح بالقمر", de:"Mond-getrübt",          nl:"Maangestoorde hemel" },
+  starDec:  { en:"Decent",              zh:"尚可",               hi:"ठीक",               es:"Aceptable",            fr:"Correct",             ar:"مقبول",             de:"Brauchbar",             nl:"Redelijk" },
+  // --- AQI ---
+  aqiGood:  { en:"Good",                       zh:"良好",              hi:"अच्छा",              es:"Buena",              fr:"Bonne",               ar:"جيد",               de:"Gut",               nl:"Goed" },
+  aqiFair:  { en:"Fair",                       zh:"一般",              hi:"सामान्य",            es:"Aceptable",          fr:"Acceptable",         ar:"مقبول",             de:"Mäßig",              nl:"Redelijk" },
+  aqiMod:   { en:"Moderate",                   zh:"中等",              hi:"मध्यम",             es:"Moderada",           fr:"Modérée",             ar:"متوسط",             de:"Mittel",             nl:"Matig" },
+  aqiPoor:  { en:"Poor",                       zh:"较差",              hi:"खराब",              es:"Mala",               fr:"Mauvaise",            ar:"سيئ",               de:"Schlecht",           nl:"Slecht" },
+  aqiSens:  { en:"Unhealthy for Sensitive",     zh:"对敏感人群不健康",   hi:"संवेदनशील के लिए अस्वस्थ", es:"Dañina para sensibles", fr:"Mauvaise pour sensibles", ar:"غير صحي للحساسين", de:"Ungesund für Empfindliche", nl:"Ongezond voor gevoeligen" },
+  aqiUnh:   { en:"Unhealthy",                   zh:"不健康",            hi:"अस्वस्थ",            es:"Dañina",            fr:"Mauvaise",            ar:"غير صحي",           de:"Ungesund",           nl:"Ongezond" },
+  aqiVunh:   { en:"Very Unhealthy",             zh:"极不健康",          hi:"बहुत अस्वस्थ",       es:"Muy dañina",         fr:"Très mauvaise",      ar:"غير صحي جداً",       de:"Sehr ungesund",      nl:"Zeer ongezond" },
+  aqiHzd:   { en:"Hazardous",                   zh:"危险",              hi:"खतरनाक",            es:"Peligrosa",          fr:"Dangereuse",          ar:"خطير",              de:"Gefährlich",         nl:"Gevaarlijk" },
+  aqiUnk:   { en:"Unknown",                     zh:"未知",              hi:"अज्ञात",              es:"Desconocida",        fr:"Inconnue",            ar:"غير معروف",          de:"Unbekannt",          nl:"Onbekend" },
+  // --- UV ---
+  uvLow:    { en:"Low",       zh:"低",     hi:"कम",     es:"Bajo",     fr:"Faible",     ar:"منخفض",    de:"Niedrig",    nl:"Laag" },
+  uvMod:    { en:"Moderate",  zh:"中等",   hi:"मध्यम",  es:"Moderado",  fr:"Modéré",    ar:"متوسط",    de:"Mittel",     nl:"Matig" },
+  uvHigh:   { en:"High",      zh:"强",     hi:"उच्च",   es:"Alto",     fr:"Élevé",     ar:"مرتفع",    de:"Hoch",       nl:"Hoog" },
+  uvVhigh:  { en:"Very High", zh:"很强",   hi:"बहुत उच्च", es:"Muy alto", fr:"Très élevé", ar:"مرتفع جداً", de:"Sehr hoch",  nl:"Zeer hoog" },
+  // --- Humidity ---
+  humDry:   { en:"Dry Air",       zh:"干燥",   hi:"शुष्क हवा",   es:"Aire seco",    fr:"Air sec",     ar:"هواء جاف",  de:"Trockene Luft",  nl:"Droge lucht" },
+  humComf:  { en:"Comfortable",  zh:"舒适",   hi:"आरामदायक",    es:"Confortable",  fr:"Confortable", ar:"مريح",       de:"Angenehm",        nl:"Comfortabel" },
+  humHumid: { en:"Humid",         zh:"潮湿",   hi:"उमस",         es:"Húmedo",       fr:"Humide",       ar:"رطب",        de:"Feucht",           nl:"Vochtig" },
+  humMuggy: { en:"Very Muggy",    zh:"闷热",   hi:"बहुत उमस",    es:"Muy bochornoso", fr:"Très lourd", ar:"خانق جداً",  de:"Schwül",           nl:"Zeer benauwd" },
+  // --- Thermal ---
+  tFreeze: { en:"Freezing",     zh:"严寒",    hi:"हिमांक",    es:"Helado",       fr:"Glacial",       ar:"متجمد",    de:"Frost",       nl:"Vriezend" },
+  tChilly: { en:"Chilly",       zh:"寒冷",    hi:"ठंडा",      es:"Fresco",       fr:"Frais",         ar:"بارد",      de:"Kühl",        nl:"Fris" },
+  tComf:   { en:"Comfortable",  zh:"舒适",    hi:"आरामदायक",  es:"Confortable",  fr:"Confortable",   ar:"مريح",      de:"Angenehm",     nl:"Comfortabel" },
+  tPleas:  { en:"Pleasant",     zh:"宜人",    hi:"सुहावना",    es:"Agradable",    fr:"Agréable",      ar:"لطيف",      de:"Angenehm",     nl:"Aangenaam" },
+  tWarm:   { en:"Warm",         zh:"温暖",    hi:"गर्म",       es:"Cálido",       fr:"Tiède",         ar:"دافئ",      de:"Warm",         nl:"Warm" },
+  tHot:    { en:"Hot",          zh:"炎热",    hi:"गर्म",       es:"Caluroso",     fr:"Chaud",         ar:"حار",        de:"Heiß",         nl:"Warm" },
+  // --- Model bands ---
+  dDay:    { en:"D-Day (Today)",        zh:"D日（今天）",   hi:"डी-डे (आज)",        es:"Día D (Hoy)",           fr:"Jour J (Aujourd'hui)",     ar:"اليوم (د-داي)",       de:"Tag D (Heute)",       nl:"D-Dag (Vandaag)" },
+  mDet:    { en:"Deterministic",        zh:"确定性",         hi:"निर्धारक",            es:"Determinista",          fr:"Déterministe",            ar:"حتمي",               de:"Deterministisch",     nl:"Deterministisch" },
+  mEns:    { en:"NOAA Ensemble",        zh:"NOAA集合",       hi:"एनओएए समुच्चय",      es:"Conjunto NOAA",        fr:"Ensemble NOAA",             ar:"مجموعة NOAA",         de:"NOAA-Ensemble",        nl:"NOAA-Ensemble" },
+  // --- Lead band labels ---
+  lS:      { en:"D1-3 High",          zh:"1-3天 高精度",   hi:"D1-3 उच्च",        es:"D1-3 Alta",       fr:"J1-3 Élevée",       ar:"1-3 يوم مرتفع",    de:"T1-3 Hoch",       nl:"D1-3 Hoog" },
+  lM:      { en:"D4-7 Medium",        zh:"4-7天 中等",     hi:"D4-7 मध्यम",        es:"D4-7 Media",      fr:"J4-7 Modérée",      ar:"4-7 يوم متوسط",    de:"T4-7 Mittel",      nl:"D4-7 Gemiddeld" },
+  lL:      { en:"D8-14 Extended",     zh:"8-14天 延伸",    hi:"D8-14 विस्तारित",   es:"D8-14 Extendida", fr:"J8-14 Étendue",     ar:"8-14 يوم موسع",    de:"T8-14 Erweitert",   nl:"D8-14 Uitgebreid" },
+  lN:      { en:"D15+ Ensemble",      zh:"15天以上 集合",  hi:"D15+ एनसम्बल",      es:"D15+ Conjunto",   fr:"J15+ Ensemble",      ar:"15+ يوم مجموعة",    de:"T15+ Ensemble",      nl:"D15+ Ensemble" },
+  lGt:     { en:"Ground-Truth (Live)", zh:"实测（实时）",    hi:"ग्राउंड-ट्रुथ (लाइव)", es:"Verificado en vivo", fr:"Mesure réelle (Direct)", ar:"الواقع (مباشر)", de:"Echtzeit-Messung",  nl:"Gemeten (live)" },
+  lCal:    { en:"Calibrating",          zh:"校准中",          hi:"कैलिब्रेट",         es:"Calibrando",       fr:"Calibrage en cours", ar:"قيد المعايرة",     de:"Kalibrierung läuft", nl:"Wordt gekalibreerd" },
+  // --- Grades ---
+  gAplus:  { en:"A+ (Excellent)",       zh:"A+ (极佳)",     hi:"A+ (उत्कृष्ट)",      es:"A+ (Excelente)",   fr:"A+ (Excellent)",       ar:"A+ (ممتاز)",      de:"A+ (Ausgezeichnet)", nl:"A+ (Uitstekend)" },
+  gA:      { en:"A (High)",             zh:"A (高)",        hi:"A (उच्च)",           es:"A (Alta)",         fr:"A (Élevée)",          ar:"A (مرتفع)",       de:"A (Hoch)",           nl:"A (Hoog)" },
+  gB:      { en:"B (Moderate)",         zh:"B (中等)",      hi:"B (मध्यम)",           es:"B (Moderada)",     fr:"B (Modérée)",          ar:"B (متوسط)",       de:"B (Mittel)",         nl:"B (Matig)" },
+  gC:      { en:"C (Divergent)",        zh:"C (差异较大)",   hi:"C (भिन्न)",           es:"C (Divergente)",   fr:"C (Divergent)",        ar:"C (متباعد)",      de:"C (Abweichend)",     nl:"C (Uiteenlopend)" },
+  gCal:    { en:"A (Calibrating)",      zh:"A (校准中)",     hi:"A (कैलिब्रेट हो रहा)", es:"A (Calibrando)",   fr:"A (Calibrage en cours)", ar:"A (قيد المعايرة)", de:"A (Kalibrierung)",  nl:"A (Wordt gekalibreerd)" }
+  wxClear:      { en:'Clear Sky'            zh:'晴朗'           hi:'साफ़ आसमान'               es:'Ciel despejado'         fr:'Ciel dégagé'                  ar:'سماء صافية'           de:'Klarer Himmel'            nl:'Heldere lucht'            }
+  wxMainly:     { en:'Mainly Clear'         zh:'大部晴朗'         hi:'अधिकतर साफ़'              es:'Despejado en general'   fr:'Plutôt dégagé'                ar:'صافٍ في الغالب'       de:'Überwiegend klar'         nl:'Overwegend helder'        }
+  wxPartly:     { en:'Partly Cloudy'        zh:'多云'           hi:'आंशिक रूप से बादल'        es:'Parcialmente nublado'   fr:'Partiellement nuageux'        ar:'غائم جزئياً'          de:'Teilweise bewölkt'        nl:'Half bewolkt'             }
+  wxOvercast:   { en:'Overcast'             zh:'阴天'           hi:'घटाटोप'                   es:'Cubierto'               fr:'Couvert'                      ar:'غائم كلياً'           de:'Bedeckt'                  nl:'Geheel bewolkt'           }
+  wxFog:        { en:'Foggy'                zh:'有雾'           hi:'धुंध'                     es:'Niebla'                 fr:'Brouillard'                   ar:'ضباب'                 de:'Neblig'                   nl:'Mistig'                   }
+  wxDrizzle:    { en:'Drizzle'              zh:'毛毛雨'          hi:'बूंदाबांदी'               es:'Llovizna'               fr:'Bruine'                       ar:'رذاذ'                 de:'Nieselregen'              nl:'Motregen'                 }
+  wxFreezeDz:   { en:'Freezing Drizzle'     zh:'冻毛毛雨'         hi:'जमने वाली बूंदाबांदी'     es:'Llovizna helada'        fr:'Bruine verglaçante'           ar:'رذاذ متجمد'           de:'Gefrierender Nieselregen' nl:'IJzel en motregen'        }
+  wxRain:       { en:'Rain'                 zh:'雨'            hi:'बारिश'                    es:'Lluvia'                 fr:'Pluie'                        ar:'مطر'                  de:'Regen'                    nl:'Regen'                    }
+  wxFreezeRain: { en:'Freezing Rain'        zh:'冻雨'           hi:'जमने वाली बारिश'          es:'Lluvia helada'          fr:'Pluie verglaçante'            ar:'أمطار متجمدة'         de:'Gefrierender Regen'       nl:'IJzelregen'               }
+  wxSnow:       { en:'Snow'                 zh:'雪'            hi:'हिमपात'                   es:'Nieve'                  fr:'Neige'                        ar:'ثلج'                  de:'Schnee'                   nl:'Sneeuw'                   }
+  wxShowers:    { en:'Showers'              zh:'阵雨'           hi:'बौछारें'                  es:'Chubascos'              fr:'Averses'                      ar:'زخات مطر'             de:'Regenschauer'             nl:'Buien'                    }
+  wxSnowSh:     { en:'Snow Showers'         zh:'阵雪'           hi:'हिम बौछारें'              es:'Chubascos de nieve'     fr:'Averses de neige'             ar:'زخات ثلج'             de:'Schneeschauer'            nl:'Sneeuwbuien'              }
+  wxThunder:    { en:'Thunderstorm'         zh:'雷暴'           hi:'आंधी-तूफ़ान'              es:'Tormenta'               fr:'Orage'                        ar:'عاصفة رعدية'          de:'Gewitter'                 nl:'Onweer'                   }
+  wxFair:       { en:'Fair'                 zh:'晴朗'           hi:'मौसम साफ़'                es:'Despejado'              fr:'Beau temps'                   ar:'صحو'                  de:'Aufgeheitert'             nl:'Mooi weer'                }
+};
+
+function t(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const entry = T_L[key];
+  if (!entry) return key;
+  return entry[lang] || entry.en || key;
+}
+
+const T_SEC   = { en:"SUN & CELESTIAL",            zh:"太阳与天象",            hi:"सूर्य और खगोल",              es:"SOL Y CIELO",               fr:"SOLEIL ET CIEL",              ar:"الشمس والسماء",               de:"SONNE & HIMMEL",               nl:"ZON & HEMEL" };
+const T_TEMP  = { en:"TEMPERATURE & COMFORT",       zh:"温度与体感",            hi:"तापमान और आराम",              es:"TEMPERATURA Y CONFORT",      fr:"TEMPÉRATURE ET CONFORT",     ar:"الحرارة والراحة",             de:"TEMPERATUR & KOMFORT",        nl:"TEMPERATUUR & COMFORT" };
+const T_AIR   = { en:"AIR QUALITY & BIO",          zh:"空气质量与生物",         hi:"वायु गुणवत्ता और जैव",        es:"CALIDAD DEL AIRE Y BIO",     fr:"QUALITÉ DE L'AIR & BIO",     ar:"جودة الهواء والبيئة",          de:"LUFTQUALITÄT & BIO",         nl:"LUCHTKWALITEIT & BIO" };
+const T_AGG   = { en:"7-DAY AGGREGATE",            zh:"近7天汇总",             hi:"7-दिन का सारांश",              es:"AGREGADO 7 DÍAS",           fr:"AGRÉGAT 7 JOURS",           ar:"ملخص 7 أيام",                  de:"7-TAGE-AGGREGAT",             nl:"7-DAGEN TOTAAL" };
+const T_AUDIT = { en:"MODEL AUDIT",                zh:"模型校准",               hi:"मॉडल ऑडिट",                  es:"AUDITORÍA DEL MODELO",      fr:"AUDIT DU MODÈLE",            ar:"تدقيق النموذج",                de:"MODELL-AUDIT",                nl:"MODEL-AUDIT" };
+const T_ROAD  = { en:"ROAD SAFETY",                zh:"道路安全",               hi:"सड़क सुरक्षा",                  es:"SEGURIDAD VIAL",             fr:"SÉCURITÉ ROUTIÈRE",          ar:"سلامة الطرق",                  de:"STRAßENSICHERHEIT",          nl:"WEGVEILIGHEID" };
+const T_ADV   = { en:"ACTIONABLE ADVICE",           zh:"行动建议",               hi:"सुझाव",                        es:"CONSEJOS PRÁCTICOS",         fr:"CONSEILS PRATIQUES",         ar:"نصائح عملية",                  de:"PRAKTISCHE TIPPS",           nl:"ADVIES" };
+const T_SOURCES = { en:"SOURCES",                    zh:"数据来源",               hi:"स्रोत",                         es:"FUENTES",                    fr:"SOURCES",                    ar:"المصادر",                    de:"QUELLEN",                     nl:"BRONNEN" };
+const T_ONTHISDAY = { en:"ON THIS DAY",               zh:"今日回顾",               hi:"आज के दिन",                    es:"EN ESTE DÍA",               fr:"CE JOUR-LÀ",                ar:"في مثل هذا اليوم",              de:"AN DIESEM TAG",              nl:"OP DEZE DAG" };
+const T_WIKI = { en:"WIKIPEDIA ON THIS DAY",         zh:"维基今日",               hi:"विकिपीडिया पर इस दिन",        es:"WIKIPEDIA EN ESTE DÍA",     fr:"WIKIPEDIA CE JOUR-LÀ",      ar:"ويكيبيديا في مثل هذا اليوم",  de:"WIKIPEDIA AN DIESEM TAG",   nl:"WIKIPEDIA OP DEZE DAG" };
+const T_BREAKING = { en:"BREAKING NEWS (TODAY)",      zh:"今日突发新闻",           hi:"आज की ताज़ा खबर",             es:"ÚLTIMAS NOTICIAS (HOY)",    fr:"DERNIÈRES NOUVELLES (AUJ.)", ar:"الأخبار العاجلة (اليوم)",    de:"BREAKING NEWS (HEUTE)",       nl:"NIEUWS VANDAAG" };
+
+function tSection(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const sections = { secTemp:T_TEMP, secSun:T_SEC, secAir:T_AIR, secAgg:T_AGG, secAudit:T_AUDIT, secRoad:T_ROAD, secAdvice:T_ADV, secSources:T_SOURCES, secOnThisDay:T_ONTHISDAY, secWiki:T_WIKI, secBreaking:T_BREAKING };
+  const map = sections[key];
+  if (!map) return key;
+  return map[lang] || map.en || key;
+}
 
 let _fetchAllImplGcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverrideGcal = null;
@@ -291,7 +751,7 @@ const CB = (() => {
   return { create, isCallAllowed, recordSuccess, recordFailure, getState, cfg, STATES };
 })();
 
-const { budgetStart, checkBudget } = (() => {
+const { budgetStart, budgetSetNow, checkBudget } = (() => {
   const APPS_SCRIPT_BUDGET_MS = 345000;
   const BUDGET_WARN_AT_MS = [240000, 300000];
   let _budgetWarnedAt = new Set();
@@ -1134,6 +1594,48 @@ function initConfig() {
   if (CONFIG.deterministicDays > 16) {
     errors.push(`CONFIG.deterministicDays (${CONFIG.deterministicDays}) exceeds Open-Meteo's max of 16 — deterministic events will be truncated. Reduce deterministicDays or accept ensemble-only forecast.`);
   }
+
+  // Validate forecastDays
+  if (!Number.isInteger(CONFIG.forecastDays) || CONFIG.forecastDays < 1 || CONFIG.forecastDays > 30) {
+    errors.push(`CONFIG.forecastDays (${CONFIG.forecastDays}) must be an integer between 1 and 30.`);
+  }
+
+  // Validate historyDays
+  if (!Number.isInteger(CONFIG.historyDays) || CONFIG.historyDays < 0 || CONFIG.historyDays > 14) {
+    errors.push(`CONFIG.historyDays (${CONFIG.historyDays}) must be an integer between 0 and 14.`);
+  }
+
+  // Validate temperatureUnit
+  if (CONFIG.temperatureUnit !== "celsius" && CONFIG.temperatureUnit !== "fahrenheit") {
+    errors.push(`CONFIG.temperatureUnit ("${CONFIG.temperatureUnit}") must be "celsius" or "fahrenheit".`);
+  }
+
+  // Validate aqProvider
+  const validAqProviders = ["auto", "openaq", "waqi"];
+  if (!validAqProviders.includes(CONFIG.aqProvider)) {
+    errors.push(`CONFIG.aqProvider ("${CONFIG.aqProvider}") must be one of: ${validAqProviders.join(", ")}.`);
+  }
+
+  // Validate aqRadius
+  if (!Number.isInteger(CONFIG.aqRadius) || CONFIG.aqRadius < 1 || CONFIG.aqRadius > 100) {
+    errors.push(`CONFIG.aqRadius (${CONFIG.aqRadius}) must be an integer between 1 and 100.`);
+  }
+
+  // Validate calendarName
+  if (!CONFIG.calendarName || typeof CONFIG.calendarName !== "string" || CONFIG.calendarName.trim() === "") {
+    errors.push(`CONFIG.calendarName must be a non-empty string.`);
+  }
+
+  // Validate dryRun
+  if (typeof CONFIG.dryRun !== "boolean") {
+    errors.push(`CONFIG.dryRun must be a boolean.`);
+  }
+
+  // Validate autoDetectFromEvents
+  if (typeof CONFIG.autoDetectFromEvents !== "boolean") {
+    errors.push(`CONFIG.autoDetectFromEvents must be a boolean.`);
+  }
+
   return { locations, errors };
 }
 
@@ -1806,6 +2308,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   if (!loc || !loc.name || !data) return null;
   if (typeof targetDateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(targetDateStr)) return null;
   const isC = CONFIG.temperatureUnit === "celsius";
+  const lang = CONFIG.language || "en";
   const cityKey = norm(loc.name);
   const record = getDayRecord(cityKey, targetDateStr);
   const snapshots = record.snapshots || [];
@@ -1903,7 +2406,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
     const historicalAggregate = computeHistoricalAggregate(data, targetDateStr, isC);
 
-    const sourcesLines = [`📡 SOURCES`];
+    const sourcesLines = [`📡 ${tSection("secSources", lang)}`];
     if (aqSource) {
       sourcesLines.push(`• Air Quality: ${aqSource}`);
     }
@@ -1922,16 +2425,16 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       // 2. GROUND TRUTH (MEASURED)
       [
         `📊 GROUND TRUTH (MEASURED)`,
-        `• Temp: ${actualMax}${sym} / ${actualMin}${sym}`,
-        `• Sky: ${weatherGlyph} ${getWeatherName(actualCode)}`,
-        `• Rain: ${Number(actualRain).toFixed(1)} mm`,
-        aqiVal !== null ? `• AQI: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : ``,
-        astroEvent ? `• Event: ${astroEvent}` : ``
+        `• ${t("range", lang)}: ${actualMax}${sym} / ${actualMin}${sym}`,
+        `• Sky: ${weatherGlyph} ${getWeatherName(actualCode, lang)}`,
+        `• ${t("rain", lang)}: ${Number(actualRain).toFixed(1)} mm`,
+        aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}${aqSource ? ", " + aqSource : ""})` : ``,
+        astroEvent ? `• ${t("status", lang)}: ${astroEvent}` : ``
       ].filter(Boolean).join("\n"),
 
       // 3. BREAKING NEWS
       breakingNews ? (
-        `📰 BREAKING NEWS\n${breakingNews}`
+        `📰 ${tSection("secBreaking", lang)}\n${breakingNews}`
       ) : null,
 
       // 4. WIKIPEDIA ON THIS DAY
@@ -1939,16 +2442,16 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         const parts = [];
         if (onThisDayText) parts.push(onThisDayText);
         if (wikiOnThisDay) parts.push(wikiOnThisDay);
-        return parts.length > 0 ? `📚 WIKIPEDIA ON THIS DAY\n${parts.join("\n")}` : null;
+        return parts.length > 0 ? `${tSection("secWiki", lang)}\n${parts.join("\n")}` : null;
       })(),
 
       // 5. SUN & CELESTIAL
       [
-        `☀️ SUN & CELESTIAL`,
+        `☀️ ${tSection("secSun", lang)}`,
         astroEvent ? `• ${astroEvent}` : ``,
-        sunrisePast ? `• Daylight: 🌅${sunrisePast}–🌇${sunsetPast} (${daylightPast})` : ``,
-        sunrisePast ? `• Golden Hr: ~${getGoldenHourWindow(sunsetPast)}` : ``,
-        `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`
+        sunrisePast ? `• ${t("daylight", lang)}: 🌅${sunrisePast}–🌇${sunsetPast} (${daylightPast})` : ``,
+        sunrisePast ? `• ${t("goldenHr", lang)}: ~${getGoldenHourWindow(sunsetPast)}` : ``,
+        `• ${t("moon", lang)}: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`
       ].filter(Boolean).join("\n"),
 
       // 5. PREDICTION ACCURACY AUDIT
@@ -1971,9 +2474,9 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       // 7. 7-DAY AGGREGATE (historical, leading up to this day)
       historicalAggregate ? [
-        `📅 7-DAY AGGREGATE (HISTORICAL)`,
-        `• Rain Sum: ${historicalAggregate.rain} mm`,
-        `• Mean Temp: ${historicalAggregate.meanTemp}${sym}`
+        `📅 ${tSection("secAgg", lang)}`,
+        `• ${t("rainSum", lang)}: ${historicalAggregate.rain} mm`,
+        `• ${t("meanTemp", lang)}: ${historicalAggregate.meanTemp}${sym}`
       ].join("\n") : null,
 
       // 8. SOURCES
@@ -1993,6 +2496,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   let currentMax = null, currentMin = null, apparentMax = null;
   let currentRain = 0, currentWind = 0, rainProb = 0, weatherCode = 0;
   let uvIndex = 0, et0 = 0, radiation = 0, pressure = 1013.25, soilTempMin = 10;
+  let cloudCover = null;
   let sunriseStr = "--:--", sunsetStr = "--:--", daylightFormatted = "--";
   let title = "", modelLabel = "", certaintyGlyph = "", spreadVal = 0;
   let eventColor = CalendarApp.EventColor.GRAY;
@@ -2023,6 +2527,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         soilTempMin = Number.isFinite(data.hourlyAgg[targetDateStr].soilMin)
           ? data.hourlyAgg[targetDateStr].soilMin
           : currentMin;
+        cloudCover = data.hourlyAgg[targetDateStr].cloudCover;
       } else {
         soilTempMin = currentMin;
       }
@@ -2084,13 +2589,13 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
   const drift = computeDayAudit(snapshots, currentMax, currentRain, aqiVal, sym);
   const aggregates = computeContinuousMultiDayAggregates(data, targetDateStr, isC);
-  const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, targetDateStr);
+  const stargazing = assessStargazingConditions(data, offset, moonInfo.fraction, targetDateStr, cloudCover, lang);
 
   const tempMinInC = isC ? currentMin : (currentMin - 32) * (5 / 9);
   const renderRoadHazards = tempMinInC <= 7;
 
   const pressureAtm = (pressure / 1013.25).toFixed(2);
-  const gddNote = getGddAction(aggregates.sevenDayGDD);
+  const gddNote = getGddAction(aggregates.sevenDayGDD, lang);
 
   const adviceContext = {
     tempMax: currentMax,
@@ -2113,46 +2618,46 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     // 1. ACTIONABLE ADVICE — bullets only, top for quick glance
     prioritizedAdvice.map(adv => `${adv}`).filter(Boolean).join("\n"),
 
-    // 2. TEMPERATURE & COMFORT
+// 2. TEMPERATURE & COMFORT
     [
-      `🌡️ TEMPERATURE & COMFORT`,
-      `• High: ${currentMax}${sym} (${getThermalText(currentMax, isC)})`,
-      `• Low: ${currentMin}${sym} · Feels: ~${apparentMax}${sym}`,
-      offset >= CONFIG.deterministicDays
-        ? `• Consensus: ±${spreadVal}${sym}`
-        : `• Rain: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
-      offset < CONFIG.deterministicDays ? `• Wind: ${currentWind} km/h` : ``,
-      offset < CONFIG.deterministicDays ? `• Barometer: ${pressureAtm} atm` : ``
-    ].filter(Boolean).join("\n"),
+      `🌡️ ${tSection("secTemp", lang)}`,
+        `• High: ${currentMax}${sym} (${getThermalText(currentMax, isC, lang)})`,
+        `• Low: ${currentMin}${sym} · ${t("feels", lang)}: ~${apparentMax}${sym}`,
+        offset >= CONFIG.deterministicDays
+          ? `• ${t("consensus", lang)}: ±${spreadVal}${sym}`
+          : `• ${t("rain", lang)}: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
+        offset < CONFIG.deterministicDays ? `• ${t("wind", lang)}: ${currentWind} km/h` : ``,
+        offset < CONFIG.deterministicDays ? `• ${t("baro", lang)}: ${pressureAtm} atm` : ``
+      ].filter(Boolean).join("\n"),
 
     // 3. AIR QUALITY & BIO (above SUN)
     [
-      `🧪 AIR QUALITY & BIO`,
-      aqiVal !== null ? `• AQI: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType)}${aqSource ? ", " + aqSource : ""})` : `• AQI: Monitoring${aqSource ? " (" + aqSource + ")" : ""}`,
-      pm25Val !== null ? `• PM2.5: ${pm25Val} · PM10: ${pm10Val || "--"} µg/m³` : ``,
-      pollenVal > 0 ? `• Pollen Load: ${pollenVal} gr/m³` : `• Pollen Load: Low`
+      `🧪 ${tSection("secAir", lang)}`,
+      aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}${aqSource ? ", " + aqSource : ""})` : `• ${t("aqi", lang)}: ${t("mon", lang)}${aqSource ? " (" + aqSource + ")" : ""}`,
+      pm25Val !== null ? `• ${t("pm25", lang)}: ${pm25Val} · ${t("pm10", lang)}: ${pm10Val || "--"} µg/m³` : ``,
+      pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³` : `• ${t("pollen", lang)}: ${t("polLow", lang)}`
     ].filter(Boolean).join("\n"),
 
     // 4. SUN & CELESTIAL
     [
-      `☀️ SUN & CELESTIAL`,
+      `☀️ ${tSection("secSun", lang)}`,
       astroEvent ? `• ${astroEvent}` : ``,
-      `• Daylight: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
-      `• Golden Hr: ~${getGoldenHourWindow(sunsetStr)}`,
-      `• Moon: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
-      `• Stargazing: ${stargazing}`,
-      uvIndex > 0 ? `• UV Index: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex)})` : ``,
-      et0 > 0 ? `• Evapotranspiration: ${et0.toFixed(1)} mm` : ``,
-      radiation > 0 ? `• Solar Radiation: ${radiation.toFixed(1)} MJ/m²` : ``
+      `• ${t("daylight", lang)}: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
+      `• ${t("goldenHr", lang)}: ~${getGoldenHourWindow(sunsetStr)}`,
+      `• ${t("moon", lang)}: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
+      `• ${t("star", lang)}: ${stargazing}`,
+      uvIndex > 0 ? `• ${t("uv", lang)}: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex, lang)})` : ``,
+      et0 > 0 ? `• ${t("et", lang)}: ${et0.toFixed(1)} mm` : ``,
+      radiation > 0 ? `• ${t("rad", lang)}: ${radiation.toFixed(1)} MJ/m²` : ``
     ].filter(Boolean).join("\n"),
 
     // 5. 7-DAY AGGREGATE
     [
-      `📅 7-DAY AGGREGATE`,
-      `• Rain Sum: ${aggregates.sevenDayRain} mm`,
-      `• Mean Temp: ${aggregates.sevenDayMeanTemp}${sym}`,
-      `• Growing Deg: ${aggregates.sevenDayGDD} GDD (${gddNote})`,
-      `• 7-Day Mean AQI: ${aggregates.sevenDayAqi}`
+      `📅 ${tSection("secAgg", lang)}`,
+      `• ${t("rainSum", lang)}: ${aggregates.sevenDayRain} mm`,
+      `• ${t("meanTemp", lang)}: ${aggregates.sevenDayMeanTemp}${sym}`,
+      `• ${t("gdd", lang)}: ${aggregates.sevenDayGDD} GDD (${gddNote})`,
+      `• ${t("aqi7", lang)}: ${aggregates.sevenDayAqi}`
     ].join("\n"),
 
     // 6. ON THIS DAY — Wikipedia + Breaking News combined (one section)
@@ -2161,13 +2666,13 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       if (onThisDayText) parts.push(onThisDayText);
       if (wikiOnThisDay) parts.push(wikiOnThisDay);
       if (breakingNews) parts.push(breakingNews);
-      return parts.length > 0 ? `ON THIS DAY\n${parts.join("\n")}` : null;
+      return parts.length > 0 ? `${tSection("secOnThisDay", lang)}\n${parts.join("\n")}` : null;
     })(),
 
     // 7. MODEL AUDIT
     [
-      `📉 MODEL AUDIT`,
-      `• Drift: ${drift.tempDelta} · Rain: ${drift.rainDelta}`,
+      `📉 ${tSection("secAudit", lang)}`,
+      `• ${t("drift", lang)}: ${drift.tempDelta} · ${t("rain", lang)}: ${drift.rainDelta}`,
       `• Stability: ${drift.volatility}`,
       `• Benchmark MAE: ${globalStats.tempMAE} / ${globalStats.rainMAE}`,
       `• Reliability: ${globalStats.modelGrade}`,
@@ -2176,7 +2681,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
     // 8. SOURCES
     (() => {
-      const lines = [`📡 SOURCES`];
+      const lines = [`📡 ${tSection("secSources", lang)}`];
       lines.push(aqSource ? `• Air Quality: ${aqSource}` : `• Air Quality: Open-Meteo`);
       lines.push(`• Weather & Astronomy: Open-Meteo API (https://open-meteo.com)`);
       lines.push(`• Wikipedia On This Day: https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/`);
@@ -2191,16 +2696,16 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     // 9. LOCATION & DATE — at the bottom
     [
       `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
-      `📅 ${offset === 0 ? "D-Day (Today)" : `D-${offset}`} · ${targetDateStr}`
+      `📅 ${offset === 0 ? t("dDay", lang) : `D-${offset}`} · ${targetDateStr}`
     ].join("\n")
   ];
 
   if (renderRoadHazards) {
-    const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC);
+    const roadHazard = assessRoadConditions(currentMin, soilTempMin, currentRain, isC, lang);
     sections.push([
-      `🚗 ROAD SAFETY (<=7°C)`,
-      `• Status: ${roadHazard.status}`,
-      `• Ground: ${Math.round(soilTempMin)}${sym} (${roadHazard.advisory})`
+      `🚗 ${tSection("secRoad", lang)} (<=7°C)`,
+      `• ${t("status", lang)}: ${roadHazard.status}`,
+      `• ${t("ground", lang)}: ${Math.round(soilTempMin)}${sym} (${roadHazard.advisory})`
     ].join("\n"));
   }
 
@@ -2422,33 +2927,50 @@ function generatePrioritizedAdvices(ctx) {
 // ROAD HAZARD, GDD & CELESTIAL LOGIC
 // ==========================================================
 
-function getGddAction(gdd) {
+function getGddAction(gdd, lang) {
   const g = Number(gdd) || 0;
-  if (g === 0) return "Dormant";
-  if (g < 25) return "Cool greens active";
-  if (g < 60) return "Steady root foliage";
-  if (g < 100) return "Brassicas booming";
-  return "Peak warm growth";
+  if (g === 0) return t("gddDorm", lang);
+  if (g < 25) return t("gddCool", lang);
+  if (g < 60) return t("gddFoli", lang);
+  if (g < 100) return t("gddBrss", lang);
+  return t("gddPeak", lang);
 }
 
-function assessRoadConditions(tMin, soilMin, rainVol, isC) {
+function tRoadStatus(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const map = { rdBI:T_L.rdBI, rdFrost:T_L.rdFrost, rdSpray:T_L.rdSpray, rdChill:T_L.rdChill }[key];
+  if (!map) return key;
+  return map[lang] || map.en || key;
+}
+
+function tRoadAdv(key, lang) {
+  lang = (lang || "en").toLowerCase().split(/[-_]/)[0];
+  if (!SUPPORTED_LANGS.includes(lang)) lang = "en";
+  const map = { advBI:T_L.rdAdvBI, advFr:T_L.rdAdvFr, advSp:T_L.rdAdvSp, advCh:T_L.rdAdvCh }[key];
+  if (!map) return key;
+  return map[lang] || map.en || key;
+}
+
+function assessRoadConditions(tMin, soilMin, rainVol, isC, lang) {
+  lang = lang || "en";
   // Guard raw inputs with Number.isFinite so null/undefined don't silently
   // pass through isNaN (isNaN(null) === false) and trigger a false black-ice
   // advisory after the unit conversion below.
   if (!Number.isFinite(tMin) || !Number.isFinite(soilMin) || !Number.isFinite(rainVol)) {
-    return { status: "🚗 CHILLED ASPHALT", advisory: "Sub-7°C rubber hardening threshold." };
+    return { status: tRoadStatus("rdChill", lang), advisory: tRoadAdv("advCh", lang) };
   }
   const minC = isC ? tMin : (tMin - 32) * (5 / 9);
   const groundC = isC ? soilMin : (soilMin - 32) * (5 / 9);
 
   if (groundC <= 0 && rainVol > 0.2) {
-    return { status: "🧊 BLACK ICE DANGER", advisory: "Glazed surface. Triple braking distance." };
+    return { status: tRoadStatus("rdBI", lang), advisory: tRoadAdv("advBI", lang) };
   } else if (groundC <= 0) {
-    return { status: "❄️ FROST / SLICK SPOTS", advisory: "Bridges & shaded ramps prone to ice." };
+    return { status: tRoadStatus("rdFrost", lang), advisory: tRoadAdv("advFr", lang) };
   } else if (minC <= 3 && rainVol > 2.0) {
-    return { status: "💧 COLD SPRAY RISK", advisory: "Reduced grip on summer tires." };
+    return { status: tRoadStatus("rdSpray", lang), advisory: tRoadAdv("advSp", lang) };
   } else {
-    return { status: "🚗 CHILLED ASPHALT", advisory: "Sub-7°C rubber hardening threshold." };
+    return { status: tRoadStatus("rdChill", lang), advisory: tRoadAdv("advCh", lang) };
   }
 }
 
@@ -2542,23 +3064,24 @@ function getMoonPhaseDetails(date) {
   return { glyph, name, fraction: illumination, illumination: Math.round(illumination * 100) + "%" };
 }
 
-function assessStargazingConditions(data, offset, moonFraction, targetDateStr, cloudCover) {
+function assessStargazingConditions(data, offset, moonFraction, targetDateStr, cloudCover, lang) {
+  lang = lang || CONFIG.language || "en";
   if (offset >= CONFIG.deterministicDays || !data.det || !data.det.time) {
-    return moonFraction > 0.7 ? "🌕 Filtered by Moon" : "🔭 Decent";
+    return moonFraction > 0.7 ? "🌕 " + t("starFlt", lang) : "🔭 " + t("starDec", lang);
   }
   const idx = data.det.time.indexOf(targetDateStr);
-  if (idx === -1) return "🔭 Moderate";
+  if (idx === -1) return "🔭 " + t("starMod", lang);
 
   const codes = data.det.weather_code || data.det.weathercode || [];
   const code = codes[idx] !== undefined ? codes[idx] : 0;
   const rainProb = data.det.precipitation_probability_max ? data.det.precipitation_probability_max[idx] : 0;
 
-  if (cloudCover !== undefined && cloudCover !== null && cloudCover > 70) return "☁️ Obscured";
-  if ([0].includes(code) && moonFraction <= 0.3) return "🔭 Exceptional";
-  if ([0, 1].includes(code) && moonFraction > 0.7) return "🌕 Moonlit";
-  if ([0, 1, 2].includes(code)) return "🔭 Fair";
-  if (rainProb > 40 || code >= 3) return "☁️ Obscured";
-  return "🔭 Moderate";
+  if (cloudCover !== undefined && cloudCover !== null && cloudCover > 70) return "☁️ " + t("starObsc", lang);
+  if ([0].includes(code) && moonFraction <= 0.3) return "🔭 " + t("starExc", lang);
+  if ([0, 1].includes(code) && moonFraction > 0.7) return "🌕 " + t("starMoon", lang);
+  if ([0, 1, 2].includes(code)) return "🔭 " + t("starFair", lang);
+  if (rainProb > 40 || code >= 3) return "☁️ " + t("starObsc", lang);
+  return "🔭 " + t("starMod", lang);
 }
 
 function getGoldenHourWindow(sunsetStr) {
@@ -2758,34 +3281,34 @@ function getWeatherGlyph(code) {
   return "🌤️";
 }
 
-function getWeatherName(code) {
-  if (code === null || code === undefined || isNaN(code)) return "Fair";
+function getWeatherName(code, lang) {
+  if (code === null || code === undefined || isNaN(code)) return t("wxFair", lang);
   code = Number(code);
-  if (code === 0) return "Clear Sky";
-  if (code === 1) return "Mainly Clear";
-  if (code === 2) return "Partly Cloudy";
-  if (code === 3) return "Overcast";
-  if (code === 45 || code === 48) return "Foggy";
-  if (code >= 51 && code <= 55) return "Drizzle";
-  if (code === 56 || code === 57) return "Freezing Drizzle";
-  if (code >= 61 && code <= 65) return "Rain";
-  if (code === 66 || code === 67) return "Freezing Rain";
-  if (code >= 71 && code <= 77) return "Snow";
-  if (code >= 80 && code <= 82) return "Showers";
-  if (code === 85 || code === 86) return "Snow Showers";
-  if (code >= 95) return "Thunderstorm";
-  return "Fair";
+  if (code === 0) return t("wxClear", lang);
+  if (code === 1) return t("wxMainly", lang);
+  if (code === 2) return t("wxPartly", lang);
+  if (code === 3) return t("wxOvercast", lang);
+  if (code === 45 || code === 48) return t("wxFog", lang);
+  if (code >= 51 && code <= 55) return t("wxDrizzle", lang);
+  if (code === 56 || code === 57) return t("wxFreezeDz", lang);
+  if (code >= 61 && code <= 65) return t("wxRain", lang);
+  if (code === 66 || code === 67) return t("wxFreezeRain", lang);
+  if (code >= 71 && code <= 77) return t("wxSnow", lang);
+  if (code >= 80 && code <= 82) return t("wxShowers", lang);
+  if (code === 85 || code === 86) return t("wxSnowSh", lang);
+  if (code >= 95) return t("wxThunder", lang);
+  return t("wxFair", lang);
 }
 
-function getThermalText(t, isC) {
-  if (t == null || isNaN(t)) return "Freezing";
-  const c = isC ? t : (t - 32) * (5 / 9);
-  if (c <= 0) return "Freezing";
-  if (c <= 10) return "Chilly";
-  if (c <= 20) return "Comfortable";
-  if (c <= 26) return "Pleasant";
-  if (c <= 32) return "Warm";
-  return "Hot";
+function getThermalText(tempC, isC, lang) {
+  if (tempC == null || isNaN(tempC)) return t("tFreeze", lang);
+  const c = isC ? tempC : (tempC - 32) * (5 / 9);
+  if (c <= 0) return t("tFreeze", lang);
+  if (c <= 10) return t("tChilly", lang);
+  if (c <= 20) return t("tComf", lang);
+  if (c <= 26) return t("tPleas", lang);
+  if (c <= 32) return t("tWarm", lang);
+  return t("tHot", lang);
 }
 
 function getAqiGlyph(aqi, aqiType) {
@@ -2811,28 +3334,28 @@ function getAqiScale(aqiType) {
   return null;
 }
 
-function getAqiLabel(aqi, aqiType) {
-  if (aqi == null || isNaN(aqi)) return "Unknown";
+function getAqiLabel(aqi, aqiType, lang) {
+  if (aqi == null || isNaN(aqi)) return t("aqiUnk", lang);
   if (aqiType === "USAQI") {
-    if (aqi <= 50) return "Good";
-    if (aqi <= 100) return "Moderate";
-    if (aqi <= 150) return "Unhealthy for Sensitive";
-    if (aqi <= 200) return "Unhealthy";
-    if (aqi <= 300) return "Very Unhealthy";
-    return "Hazardous";
+    if (aqi <= 50) return t("aqiGood", lang);
+    if (aqi <= 100) return t("aqiMod", lang);
+    if (aqi <= 150) return t("aqiSens", lang);
+    if (aqi <= 200) return t("aqiUnh", lang);
+    if (aqi <= 300) return t("aqiVunh", lang);
+    return t("aqiHzd", lang);
   }
-  if (aqi <= 20) return "Good";
-  if (aqi <= 40) return "Fair";
-  if (aqi <= 60) return "Moderate";
-  if (aqi <= 80) return "Poor";
-  return "Hazardous";
+  if (aqi <= 20) return t("aqiGood", lang);
+  if (aqi <= 40) return t("aqiFair", lang);
+  if (aqi <= 60) return t("aqiMod", lang);
+  if (aqi <= 80) return t("aqiPoor", lang);
+  return t("aqiHzd", lang);
 }
 
-function getUvAdvice(uv) {
-  if (uv <= 2) return "Low";
-  if (uv <= 5) return "Moderate";
-  if (uv <= 7) return "High";
-  return "Very High";
+function getUvAdvice(uv, lang) {
+  if (uv <= 2) return t("uvLow", lang);
+  if (uv <= 5) return t("uvMod", lang);
+  if (uv <= 7) return t("uvHigh", lang);
+  return t("uvVhigh", lang);
 }
 
 function validateConfig() {
