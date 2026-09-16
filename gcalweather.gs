@@ -110,8 +110,10 @@ let _nowOverrideGcal = null;
 const _now = () => _nowOverrideGcal !== null ? _nowOverrideGcal : Date.now();
 const _WIKI_CACHE_MAX = 50; // Cap in-memory Wikipedia cache per execution
 let _wikiCacheGcal = {}; // Deduplicate Wikipedia fetches per (month, day) per execution
+let _wikiCacheOrderGcal = []; // Track insertion order for spec-compliant FIFO eviction
 const _BREAKING_NEWS_CACHE_MAX = 50; // Cap in-memory breaking news cache per execution
 let _breakingNewsCacheGcal = {}; // Deduplicate breaking news fetches per date per execution
+let _breakingNewsCacheOrderGcal = []; // Track insertion order for spec-compliant FIFO eviction
 const _scriptProps = PropertiesService.getScriptProperties(); // Cached for execution
 
 // ============================================================
@@ -922,11 +924,13 @@ function fetchWikipediaOnThisDay(month, day) {
         const result = filtered.join("\n");
         // Store result first, then enforce cache size limit (FIFO eviction)
         // This ensures eviction only happens when we actually have a result to cache
-        _wikiCacheGcal[inMemKey] = result;
-        if (Object.keys(_wikiCacheGcal).length > _WIKI_CACHE_MAX) {
-          const firstKey = Object.keys(_wikiCacheGcal)[0];
+        // Use insertion-order queue for spec-compliant FIFO (Object.keys order not guaranteed)
+        if (_wikiCacheOrderGcal.length >= _WIKI_CACHE_MAX) {
+          const firstKey = _wikiCacheOrderGcal.shift();
           delete _wikiCacheGcal[firstKey];
         }
+        _wikiCacheGcal[inMemKey] = result;
+        _wikiCacheOrderGcal.push(inMemKey);
         return result;
       }
     } else {
@@ -1021,11 +1025,13 @@ function fetchBreakingNews(dateStr) {
           .join("\n");
       }
       // Cache the result (including null for no articles)
-      if (Object.keys(_breakingNewsCacheGcal).length >= _BREAKING_NEWS_CACHE_MAX) {
-        const firstKey = Object.keys(_breakingNewsCacheGcal)[0];
+      // Use insertion-order queue for spec-compliant FIFO (Object.keys order not guaranteed)
+      if (_breakingNewsCacheOrderGcal.length >= _BREAKING_NEWS_CACHE_MAX) {
+        const firstKey = _breakingNewsCacheOrderGcal.shift();
         delete _breakingNewsCacheGcal[firstKey];
       }
       _breakingNewsCacheGcal[dateStr] = result;
+      _breakingNewsCacheOrderGcal.push(dateStr);
       return result;
     } else {
       CB.recordFailure('newsapi');
