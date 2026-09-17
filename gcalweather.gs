@@ -1519,6 +1519,7 @@ function getWikipediaOnThisDayText(dateStr) {
 // BREAKING NEWS FETCHER (Historical "On This Day" Headlines)
 // ============================================================
 const NEWS_API_URL = "https://newsapi.org/v2/everything";
+const NEWS_FREE_TIER_DAYS = 30; // NewsAPI free tier serves only the most recent 30 days
 
 function fetchBreakingNews(dateStr) {
   // Circuit breaker: fail fast if circuit is open
@@ -1532,6 +1533,20 @@ function fetchBreakingNews(dateStr) {
   // Check in-memory cache first
   if (_breakingNewsCacheGcal[dateStr] !== undefined) {
     return _breakingNewsCacheGcal[dateStr];
+  }
+  // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days; requesting
+  // anything older draws an HTTP 400 and burns daily quota. Skip without calling.
+  const freeTierCutoff = new Date(Date.now() - NEWS_FREE_TIER_DAYS * 86400000)
+    .toISOString().slice(0, 10);
+  if (dateStr < freeTierCutoff) {
+    Logger.log(`Breaking news: ${dateStr} is outside NewsAPI free-tier coverage — skipping`);
+    if (_breakingNewsCacheOrderGcal.length >= _BREAKING_NEWS_CACHE_MAX) {
+      const firstKey = _breakingNewsCacheOrderGcal.shift();
+      delete _breakingNewsCacheGcal[firstKey];
+    }
+    _breakingNewsCacheGcal[dateStr] = null;
+    _breakingNewsCacheOrderGcal.push(dateStr);
+    return null;
   }
   try {
     const apiKey = _scriptProps.getProperty("NEWS_API_KEY");
@@ -1567,6 +1582,13 @@ function fetchBreakingNews(dateStr) {
       _breakingNewsCacheGcal[dateStr] = result;
       _breakingNewsCacheOrderGcal.push(dateStr);
       return result;
+    } else if (code >= 400 && code < 500) {
+      // 4xx = permanent request rejection (bad params/key): not a transient
+      // upstream failure, so don't trip the circuit breaker. Surface the API's
+      // own message for diagnosis.
+      let apiMsg = "";
+      try { apiMsg = JSON.parse(res.getContentText()).message || ""; } catch (e) {}
+      Logger.log(`Breaking news API ${code}${apiMsg ? ": " + apiMsg : ""}`);
     } else {
       CB.recordFailure('newsapi');
       Logger.log(`Breaking news fetch HTTP ${code} — circuit failure recorded`);
