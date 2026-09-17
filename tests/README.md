@@ -8,7 +8,22 @@ Run the Python test suite (requires Python 3.8+):
 python tests/run_tests.py
 ```
 
-Expected output: **172 passed, 0 failed**.
+Expected output: **322 passed, 0 failed**.
+
+### Deploy sanity (run before pasting into Apps Script)
+
+```bash
+python tests/deploy_sanity.py
+```
+
+Expected output: **`DEPLOY_SANITY_EXIT=0`** for both scripts.
+
+Verifies, per file, exactly the failure the battery cannot see because it
+operates on the deployed (pasted) copy rather than the repo file: the
+`const T_L = {` opener is intact, a `zh:` key exists inside T_L, the block is
+self-balanced, and the AQI render line carries the `(label) [${aqiTypeKey}]`
+glyph-tag. Any `=1` result means the assembly was truncated/renamed during
+import (e.g. entry file renamed to `Code.gs`), not a repo defect.
 
 The suite covers:
 - **URL parameter parsing**: `clamp`, `normalizeLang`, `parseBoolParam`, `parseAqProvider` (8 supported languages, defaults, coercion)
