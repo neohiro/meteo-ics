@@ -13,6 +13,20 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import esprima  # optional: enables the real JS syntax gate
+except ImportError:
+    esprima = None
+
+# Apps Script runs V8 (ES2020). The python esprima port stops at ES2019, so
+# optional chaining / nullish coalescing are reported as false syntax errors.
+# Shims map them onto equivalent ES2019 constructs for *syntax-gate* purposes
+# only; they never touch string or T_L/comma regions.
+_ES2020_SHIMS = [
+    (re.compile(r"\?\.([A-Za-z_$])"), r"\1"),
+    (re.compile(r"\?\?(\s*(?:[A-Za-z_$]|\d|\())"), r"||\1"),
+]
+
 
 def strip_non_code(src: str) -> str:
     """Remove comments and string literals from Apps Script source.
@@ -113,6 +127,30 @@ def lint_file(path: Path) -> tuple[bool, dict]:
         and counts["["] == counts["]"]
     )
     return ok, counts
+
+
+def lint_syntax(path: Path) -> tuple[bool, str]:
+    """Real JavaScript syntax gate via esprima (if installed).
+
+    The brace/quote linter and the regex battery never parse JS, so a syntax
+    error like `en:'...' zh:'...'` (missing comma between object members) can
+    sneak past every other check yet still crash Apps Script at deploy time.
+    When esprima is available, this is the authoritative parse.
+
+    Returns (ok, detail). ok=False means the file has a genuine syntax error.
+    """
+    if esprima is None:
+        return True, "esprima not installed; syntax gate skipped"
+    src = path.read_text(encoding="utf-8")
+    for pat, rep in _ES2020_SHIMS:
+        src = pat.sub(rep, src)
+    try:
+        esprima.parseScript(src)
+        return True, "JS syntax OK"
+    except Exception as e:
+        line = getattr(e, "lineNumber", "?")
+        col = getattr(e, "column", "?")
+        return False, f"JS syntax error at line {line}, col {col}: {str(e)[:90]}"
 
 
 _MODULE_LIT_RE = re.compile(
@@ -219,6 +257,10 @@ def main() -> int:
         ok, counts = lint_file(p)
         print(f"{p.name}: {counts} -> {'OK' if ok else 'FAIL'}")
         if not ok:
+            failed += 1
+        ok4, detail4 = lint_syntax(p)
+        print(f"{p.name}: {detail4}")
+        if not ok4:
             failed += 1
     # Cross-file collision check when multiple .gs files are provided
     gs_paths = [p for p in file_paths if p.suffix == ".gs"]

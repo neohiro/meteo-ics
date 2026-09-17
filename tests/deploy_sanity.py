@@ -6,7 +6,7 @@ of gcalweather.gs / icalweather.gs, but it can never see the human-pasted copy
 inside a Google Apps Script project. The classic deploy-assembly failure — a
 truncated import (entry file renamed to Code.gs, or a dropped line mid-paste)
 that spills `zh:` out of the `const T_L = {` literal — only exists in the
-deployed fileches, so no repo battery can catch it.
+deployed files, so no repo battery can catch it.
 
 Run this to prove the assembly is intact. With no arguments it checks the
 repository copies of gcalweather.gs / icalweather.gs; pass one or more file
@@ -28,6 +28,7 @@ no side effects, pure local validation.
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -69,18 +70,33 @@ def _t_l_block(body: str):
         elif c == "}":
             depth -= 1
             if depth == 0:
-                # include trailing `;` if present
                 end = i + 1
                 if end < n and body[end] == ";":
-                    return body[start : end + 1]
-                return body[start : end + 1]
+                    end += 1
+                return body[start:end]
         i += 1
     return None
 
 
-def check(path: Path, aqiTypeVar: str) -> list[str]:
+def _aqi_var_for(path: Path, body: str) -> str:
+    """Pick the AQI variable name for a file.
+
+    Known repo names map directly. A pasted copy is commonly renamed to
+    Code.gs, so sniff the body for the ical marker — otherwise an ical paste
+    would be validated against gcal's variable and false-positive on the
+    glyph-tag check.
+    """
+    known = PAIRS.get(path.name, {}).get("aqiVar")
+    if known:
+        return known
+    return "aqiTypeKey" if re.search(r"\baqiTypeKey\b", body) else "aqiType"
+
+
+def check(path: Path, aqiTypeVar: Optional[str] = None) -> list[str]:
     errs: list[str] = []
     body = path.read_text(encoding="utf-8")
+    if aqiTypeVar is None:
+        aqiTypeVar = _aqi_var_for(path, body)
 
     # 1. Opener present.
     if re.search(r'const\s+T_L\s*=\s*\{', body) is None:
@@ -113,8 +129,7 @@ def main(argv: list[str]) -> int:
             print(f"FAIL {name}: file not found")
             failed += 1
             continue
-        aqi_var = PAIRS.get(p.name, {}).get("aqiVar", "aqiType")
-        errs = check(p, aqi_var)
+        errs = check(p)
         if errs:
             failed += 1
             for e in errs:

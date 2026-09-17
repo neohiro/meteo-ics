@@ -2,7 +2,8 @@
 
 ## Automated Tests
 
-Run the Python test suite (requires Python 3.8+):
+Run the Python test suite (requires Python 3.9+ — the files use PEP 585
+builtin generics):
 
 ```bash
 python tests/run_tests.py
