@@ -21,10 +21,16 @@ except ImportError:
 # Apps Script runs V8 (ES2020). The python esprima port stops at ES2019, so
 # optional chaining / nullish coalescing are reported as false syntax errors.
 # Shims map them onto equivalent ES2019 constructs for *syntax-gate* purposes
-# only; they never touch string or T_L/comma regions.
+# only. They run on raw source, so they may match inside string/comment
+# content, but each rewrite maps a token shape onto an equivalent token shape
+# (never changing braces, parens, brackets, or commas), so they cannot inject
+# or mask a structure-level syntax error. Order matters: bracket and call
+# forms must be rewritten before the bare `?.` rewrite.
 _ES2020_SHIMS = [
-    (re.compile(r"\?\.([A-Za-z_$])"), r"\1"),
-    (re.compile(r"\?\?(\s*(?:[A-Za-z_$]|\d|\())"), r"||\1"),
+    (re.compile(r"\?\.\["), "["),                    # a?.[i] -> a[i]
+    (re.compile(r"\?\.\("), "("),                    # a?.(...) -> a(...)
+    (re.compile(r"\?\.([A-Za-z_$])"), r".\1"),       # a?.b -> a.b
+    (re.compile(r"\?\?"), r"||"),                    # a ?? b -> a || b
 ]
 
 

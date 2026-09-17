@@ -1610,12 +1610,16 @@ function fetchBreakingNews(dateStr) {
   if (_breakingNewsCacheIcal[dateStr] !== undefined) {
     return _breakingNewsCacheIcal[dateStr];
   }
-  // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days; requesting
-  // anything older draws an HTTP 400 and burns daily quota. Skip without calling.
-  const freeTierCutoff = new Date(Date.now() - NEWS_FREE_TIER_DAYS * 86400000)
+  // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days and
+  // rejects future dates; any out-of-window date draws an HTTP 400 and burns
+  // daily quota. Skip without calling. Compare on UTC day keys (same convention
+  // as _todayISO / grid date keys) so a 2 AM run doesn't misclassify today.
+  const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  const freeTierCutoff = new Date(todayUTC.getTime() - NEWS_FREE_TIER_DAYS * 86400000)
     .toISOString().slice(0, 10);
-  if (dateStr < freeTierCutoff) {
-    Logger.log(`Breaking news: ${dateStr} is outside NewsAPI free-tier coverage — skipping`);
+  const todayKey = todayUTC.toISOString().slice(0, 10);
+  if (dateStr > todayKey || dateStr < freeTierCutoff) {
+    Logger.log(`Breaking news: ${dateStr} is outside NewsAPI coverage (${freeTierCutoff}..${todayKey}) — skipping`);
     if (_breakingNewsCacheOrderIcal.length >= _BREAKING_NEWS_CACHE_MAX) {
       const firstKey = _breakingNewsCacheOrderIcal.shift();
       delete _breakingNewsCacheIcal[firstKey];
