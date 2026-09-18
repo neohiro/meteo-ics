@@ -1647,7 +1647,7 @@ function fetchBreakingNews(dateStr) {
       return null;
     }
     // Use /v2/everything with from/to for historical dates; free tier only has 30 days history
-    const url = `${NEWS_API_URL}?from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
+    const url = `${NEWS_API_URL}?q=weather&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     const code = res.getResponseCode();
     if (code === 200) {
