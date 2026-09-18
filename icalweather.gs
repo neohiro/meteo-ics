@@ -1646,8 +1646,10 @@ function fetchBreakingNews(dateStr) {
       Logger.log("Breaking news: invalid or missing NEWS_API_KEY");
       return null;
     }
-    // Use /v2/everything with from/to for historical dates; free tier only has 30 days history
-    const url = `${NEWS_API_URL}?q=weather&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
+    // Use /v2/everything with from/to for historical dates; free tier only has 30 days history.
+    // Use domains= for major news outlets (instead of q=weather) to get general popular news of the day.
+    const majorNewsDomains = "bbc.com,cnn.com,reuters.com,apnews.com,nytimes.com,washingtonpost.com,theguardian.com,wsj.com,bloomberg.com,ft.com";
+    const url = `${NEWS_API_URL}?domains=${encodeURIComponent(majorNewsDomains)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
     const code = res.getResponseCode();
     if (code === 200) {
