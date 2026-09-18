@@ -2078,7 +2078,13 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
     try {
       const parsed = JSON.parse(cached);
       if (parsed && Array.isArray(parsed.time) && parsed.time.length > 0) {
-        return parsed;
+        // Enforce TTL: only use cache if fresh.
+        const age = Date.now() - (parsed.cachedAt || 0);
+        if (age < AQI_CACHE_TTL_MS) {
+          return parsed;
+        }
+        // Expired — delete stale entry to avoid unbounded PropertiesService growth.
+        PropertiesService.getScriptProperties().deleteProperty(cacheKey);
       }
     } catch (e) {
       // Corrupt cache entry — fall through to live fetch.
