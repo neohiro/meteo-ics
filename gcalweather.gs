@@ -934,6 +934,9 @@ const _AQ_CAP_PROP = "AQ_CAP_PROBED_V1";
 // AQ_CAP_PROBE_LAT/AQ_CAP_PROBE_LON if a different location is preferred.
 const AQ_CAP_PROBE_LAT = 50.95;
 const AQ_CAP_PROBE_LON = 5.97;
+// AQI Cache Properties
+const AQI_CACHE_PREFIX = "aqi_cache_";
+const AQI_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 let _probedAqCapGcal = null;
 
@@ -2066,6 +2069,22 @@ function fetchAllAtmosphericDataParallel(locationPool) {
 }
 
 function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
+  if (!loc || !loc.lat || !loc.lon) return null;
+
+  // Check persistent cache first (prefetched by scheduled trigger).
+  const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
+  const cached = PropertiesService.getScriptProperties().getProperty(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed && Array.isArray(parsed.time) && parsed.time.length > 0) {
+        return parsed;
+      }
+    } catch (e) {
+      // Corrupt cache entry — fall through to live fetch.
+    }
+  }
+
   const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [], ozone: [], nitrogen_dioxide: [] };
   const radius = Number.isFinite(aqRadius) && aqRadius > 0 ? aqRadius : (CONFIG.aqRadius || 25);
   const today = new Date();
@@ -2208,6 +2227,24 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
   }
 
   return null;
+}
+
+function prefetchAqiCache(locationPool, aqProvider, aqRadius) {
+  // Prefetch AQI for all locations and cache in PropertiesService.
+  // Called by scheduled trigger before syncWeatherToCalendar to reduce live API calls.
+  if (!locationPool || locationPool.size === 0) return;
+  locationPool.forEach((loc, key) => {
+    try {
+      const aqi = gcalFetchGlobalAQI(loc, aqProvider, aqRadius);
+      if (aqi && aqi.time && aqi.time.length > 0) {
+        const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
+        const entry = { ...aqi, cachedAt: Date.now() };
+        PropertiesService.getScriptProperties().setProperty(cacheKey, JSON.stringify(entry));
+      }
+    } catch (e) {
+      Logger.log("prefetchAqiCache: " + loc.name + " failed: " + e);
+    }
+  });
 }
 
 // ==========================================================
@@ -3366,7 +3403,7 @@ function getThermalText(tempC, isC, lang) {
 }
 
 function getAqiGlyph(aqi, aqiType) {
-  if (aqi === null) return "🍃";
+  if (aqi == null || isNaN(aqi)) return "🍃";
   if (aqiType === "USAQI") {
     if (aqi <= 50) return "🟢";
     if (aqi <= 100) return "🟡";
@@ -3406,6 +3443,7 @@ function getAqiLabel(aqi, aqiType, lang) {
 }
 
 function getUvAdvice(uv, lang) {
+  if (uv == null || isNaN(uv)) return t("uvLow", lang);
   if (uv <= 2) return t("uvLow", lang);
   if (uv <= 5) return t("uvMod", lang);
   if (uv <= 7) return t("uvHigh", lang);

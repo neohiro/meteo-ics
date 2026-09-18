@@ -3410,6 +3410,7 @@ function getWeatherGlyph(code) {
 
 function getThermalText(tempC, isC, lang) {
   lang = lang || "en";
+  if (tempC == null || isNaN(tempC)) return t("tFreeze", lang);
   const c = isC ? tempC : (tempC - 32) * (5 / 9);
   if (c <= 0) return t("tFreeze", lang);
   if (c <= 10) return t("tChilly", lang);
@@ -3427,6 +3428,7 @@ function getHumidityGlyph(h) {
 
 function getHumidityComfort(h, lang) {
   lang = lang || "en";
+  if (h == null || isNaN(h)) return t("humComf", lang);
   if (h <= 30) return t("humDry", lang);
   if (h <= 60) return t("humComf", lang);
   if (h <= 75) return t("humHumid", lang);
@@ -3434,7 +3436,7 @@ function getHumidityComfort(h, lang) {
 }
 
 function getAqiGlyph(aqi, aqiType) {
-  if (aqi === null) return "🍃";
+  if (aqi == null || isNaN(aqi)) return "🍃";
   if (aqiType === "USAQI") {
     if (aqi <= 50) return "🟢";
     if (aqi <= 100) return "🟡";
@@ -3452,7 +3454,7 @@ function getAqiGlyph(aqi, aqiType) {
 
 function getAqiLabel(aqi, aqiType, lang) {
   lang = lang || "en";
-  if (aqi === null) return t("aqiUnk", lang);
+  if (aqi == null || isNaN(aqi)) return t("aqiUnk", lang);
   if (aqiType === "USAQI") {
     if (aqi <= 50) return t("aqiGood", lang);
     if (aqi <= 100) return t("aqiMod", lang);
@@ -3470,6 +3472,7 @@ function getAqiLabel(aqi, aqiType, lang) {
 
 function getUvAdvice(uv, lang) {
   lang = lang || "en";
+  if (uv == null || isNaN(uv)) return t("uvLow", lang);
   if (uv <= 2) return t("uvLow", lang);
   if (uv <= 5) return t("uvMod", lang);
   if (uv <= 7) return t("uvHigh", lang);
