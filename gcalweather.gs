@@ -429,7 +429,7 @@ const FALLBACK_CITY_COORDS = {
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
-  version: "2.3.0",
+  version: "2.4.0",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
@@ -987,7 +987,7 @@ function updateAqiHistory(locName, aqi) {
     }
   }
   // Add latest AQI entry (today's value)
-  const todayIdx = aqi.time.length - 1; // Most recent day
+  const todayIdx = 0; // aqi.time[0] is today (see gcalFetchGlobalAQI date generation)
   const latestAqi = aqi.european_aqi[todayIdx];
   if (latestAqi !== null && latestAqi !== undefined && !isNaN(latestAqi)) {
     history.push({ date: aqi.time[todayIdx], european_aqi: latestAqi });
