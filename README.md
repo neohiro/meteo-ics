@@ -338,3 +338,5 @@ Elke ochtend toont uw agenda wat er aankomt. Hoge-resolutie voorspellingen (D1â€
 
 - **Kustzone Zonder Gladheidswaarschuwingen (Den Haag & Vlissingen):**  
   `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=The%20Hague,Vlissingen&lang=nl&hazards=false`
+
+[![Visitors](https://api.visitorbadge.io/api/visitors?path=github.com/neohiro/meteo-ics&label=Visitors&countColor=%23263759)](https://visitorbadge.io/status?path=github.com/neohiro/meteo-ics)
