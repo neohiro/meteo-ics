@@ -2314,6 +2314,49 @@ function prefetchAqiCache(locationPool, aqProvider, aqRadius) {
   });
 }
 
+function predictiveAqiPrefetch(locationPool, aqProvider, aqRadius) {
+  // Event-driven prefetch: only warm cache for locations where AQI is missing or stale.
+  // Returns array of location names that were prefetched (for monitoring).
+  if (!locationPool || locationPool.size === 0) return [];
+  const prefetched = [];
+  const props = PropertiesService.getScriptProperties();
+  locationPool.forEach((loc, key) => {
+    try {
+      const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
+      const cached = props.getProperty(cacheKey);
+      let needsPrefetch = false;
+      if (!cached) {
+        needsPrefetch = true; // No cache at all
+      } else {
+        try {
+          const parsed = JSON.parse(cached);
+          if (!parsed || !Array.isArray(parsed.time) || parsed.time.length === 0) {
+            needsPrefetch = true; // Corrupt/empty cache
+          } else {
+            const age = Date.now() - (parsed.cachedAt || 0);
+            const adaptiveTtl = getAdaptiveAqiTtl(loc.name);
+            if (age >= adaptiveTtl) needsPrefetch = true; // Stale
+          }
+        } catch (e) {
+          needsPrefetch = true; // Parse error
+        }
+      }
+      if (needsPrefetch) {
+        const aqi = gcalFetchGlobalAQI(loc, aqProvider, aqRadius);
+        if (aqi && aqi.time && aqi.time.length > 0) {
+          const entry = { ...aqi, cachedAt: Date.now() };
+          props.setProperty(cacheKey, JSON.stringify(entry));
+          updateAqiHistory(loc.name, aqi);
+          prefetched.push(loc.name);
+        }
+      }
+    } catch (e) {
+      Logger.log("predictiveAqiPrefetch: " + loc.name + " failed: " + e);
+    }
+  });
+  return prefetched;
+}
+
 // ==========================================================
 // GROUND TRUTH RECONCILIATION & ACCURACY ENGINE
 // ==========================================================
