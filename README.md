@@ -3,7 +3,7 @@
 [![Protocol](https://img.shields.io/badge/RFC-5545%20(iCalendar)-blue.svg)](#)
 [![Data Sources](https://img.shields.io/badge/Data-Open--Meteo%20%7C%20NOAA%20GFS%20%7C%20Copernicus%20CAMS%20%7C%20OpenAQ%20%7C%20WAQI-orange.svg)](#)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
-[![Version](https://img.shields.io/badge/Version-2.3.0-brightgreen.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.4.0-brightgreen.svg)](./CHANGELOG.md)
 [![CI](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/Tests-264%20%2B%20CI-brightgreen.svg)](#)
 
