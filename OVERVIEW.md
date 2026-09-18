@@ -6,7 +6,7 @@
 |---|---|---|
 | `icalweather.gs` | ICS calendar feed generator (RFC 5545). Exposed as a Google Apps Script Web App URL; calendar clients subscribe to it. | `doGet(e)` |
 | `gcalweather.gs` | Google Calendar event syncer. Writes per-city, per-day all-day events to a configured Google Calendar. | `syncWeatherToCalendar()` |
-| `tests/run_tests.py` | 156-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
+| `tests/run_tests.py` | 328-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
 
 Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on:
 - **Open-Meteo API** (free, no key required) — deterministic forecast, ensemble forecast, air quality

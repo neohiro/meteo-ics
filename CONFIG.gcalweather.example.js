@@ -65,7 +65,7 @@ const PRODUCTION_CONFIG = {
   // ============================================================
   
   // Script version (auto-updated on deploy)
-  version: "2.4.0"
+  version: "2.4.1"
 };
 
 

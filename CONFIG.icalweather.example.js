@@ -105,7 +105,7 @@
  * 
  * const ICAL_CONFIG = {
  *   calendarName: "Weather & Celestial Feed",
- *   version: "2.4.0",
+ *   version: "2.4.1",
  *   temperatureUnit: "celsius",        // Default if unit not in URL
  *   forecastDays: 30,                  // Max if days not in URL
  *   deterministicDays: 14,             // Must be ≤16 (Open-Meteo limit)
