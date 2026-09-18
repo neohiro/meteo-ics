@@ -1585,7 +1585,7 @@ function getWikipediaOnThisDayText(dateStr) {
 const NEWS_API_URL = "https://newsapi.org/v2/everything";
 const NEWS_FREE_TIER_DAYS = 30; // NewsAPI free tier serves only the most recent 30 days
 
-function fetchBreakingNews(dateStr) {
+function fetchBreakingNews(dateStr, calTz) {
   // Circuit breaker: fail fast if circuit is open
   if (!CB.isCallAllowed('newsapi')) {
     Logger.log("Circuit [newsapi] OPEN — skipping fetch");
@@ -1600,12 +1600,12 @@ function fetchBreakingNews(dateStr) {
   }
   // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days and
   // rejects future dates; any out-of-window date draws an HTTP 400 and burns
-  // daily quota. Skip without calling. Compare on UTC day keys (same convention
-  // as _todayISO / grid date keys) so a 2 AM run doesn't misclassify today.
-  const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
-  const freeTierCutoff = new Date(todayUTC.getTime() - NEWS_FREE_TIER_DAYS * 86400000)
-    .toISOString().slice(0, 10);
-  const todayKey = todayUTC.toISOString().slice(0, 10);
+  // daily quota. Skip without calling. Use calendar timezone (same as todayStr)
+  // so date classification matches the calendar's day boundaries.
+  const now = new Date();
+  const todayKey = Utilities.formatDate(now, calTz, "yyyy-MM-dd");
+  const freeTierCutoff = Utilities.formatDate(
+    new Date(now.getTime() - NEWS_FREE_TIER_DAYS * 86400000), calTz, "yyyy-MM-dd");
   if (dateStr > todayKey || dateStr < freeTierCutoff) {
     Logger.log(`Breaking news: ${dateStr} is outside NewsAPI coverage (${freeTierCutoff}..${todayKey}) — skipping`);
     if (_breakingNewsCacheOrderGcal.length >= _BREAKING_NEWS_CACHE_MAX) {
@@ -1670,11 +1670,11 @@ function fetchBreakingNews(dateStr) {
   return null;
 }
 
-function getBreakingNewsText(dateStr) {
+function getBreakingNewsText(dateStr, calTz) {
   if (!dateStr || typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return null;
   }
-  return fetchBreakingNews(dateStr);
+  return fetchBreakingNews(dateStr, calTz);
 }
 
 // Initialize and validate CONFIG: geocode locations, check deterministicDays cap.
@@ -1889,7 +1889,7 @@ function syncWeatherToCalendar() {
 
       let payload;
       try {
-        payload = buildDashboardPayload(loc, data, offset, dStr, todayStr, globalStats, unitSymbol);
+        payload = buildDashboardPayload(loc, data, offset, dStr, todayStr, globalStats, unitSymbol, calTz);
       } catch (e) {
         Logger.log(`WARNING: buildDashboardPayload failed for ${loc.name} on ${dStr}: ${e}`);
         return;
@@ -2552,7 +2552,7 @@ function computeGlobalModelAccuracy(sym) {
 // DASHBOARD & EVENT FORMATTING ENGINE
 // ==========================================================
 
-function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globalStats, sym) {
+function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globalStats, sym, calTz) {
   // Defensive: guard against malformed inputs
   if (!loc || !loc.name || !data) return null;
   if (typeof targetDateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(targetDateStr)) return null;
@@ -2598,7 +2598,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const countryCode = loc.country || "US";
   const onThisDayText = getOnThisDayText(targetDateStr, countryCode);
   const wikiOnThisDay = getWikipediaOnThisDayText(targetDateStr);
-  const breakingNews = getBreakingNewsText(targetDateStr);
+  const breakingNews = getBreakingNewsText(targetDateStr, calTz);
 
   // A. Past Days (Verified Ground Truth)
   if (offset < 0) {

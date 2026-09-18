@@ -1217,15 +1217,14 @@ def test_ical_ics_header_no_duplicate_aqisource():
     assert_true(count == 1, f'X-META-AQISOURCE must appear exactly once (found {count})')
 
 
-def test_gcal_buildDashboardPayload_no_calTz_param():
-    """buildDashboardPayload must not accept a calTz parameter (it was unused).
-    Forwarded only to computeContinuousMultiDayAggregates which also does not
-    use it. Both signatures cleaned up to remove dead parameter."""
+def test_gcal_buildDashboardPayload_has_calTz_param():
+    """buildDashboardPayload must accept a calTz parameter for breaking news timezone.
+    Used by getBreakingNewsText to correctly classify 'today' in the calendar's timezone."""
     fn = re.search(r'function buildDashboardPayload\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
     header = fn.group(0).split('\n')[0]
-    assert_true(', calTz)' not in header and 'calTz' not in header,
-        'buildDashboardPayload must not have calTz parameter (unused)')
+    assert_true('calTz' in header,
+        'buildDashboardPayload must have calTz parameter for breaking news timezone')
 
     fn2 = re.search(r'function computeContinuousMultiDayAggregates\([\s\S]*?\n\}', GCAL)
     assert_true(fn2 is not None)
@@ -3550,8 +3549,8 @@ def test_breaking_news_historical_dates():
     body = fn.group(0)
     assert_true('dateStr !== today' not in body and 'dateStr != today' not in body,
         'getBreakingNewsText must NOT have today-only guard')
-    assert_true('fetchBreakingNews(dateStr)' in body,
-        'getBreakingNewsText must pass dateStr to fetchBreakingNews')
+    assert_true('fetchBreakingNews(dateStr, calTz)' in body,
+        'getBreakingNewsText must pass dateStr and calTz to fetchBreakingNews')
     # Verify fetchBreakingNews uses the date in the API URL
     fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
     assert_true(fn2 is not None)
@@ -3694,8 +3693,8 @@ def test_breaking_news_historical_dates_enforced():
     assert_true('dateStr !== today' not in body and 'dateStr != today' not in body,
         'Breaking news must NOT only appear for today')
     # Must pass dateStr to fetchBreakingNews
-    assert_true('fetchBreakingNews(dateStr)' in body,
-        'getBreakingNewsText must pass dateStr to fetchBreakingNews')
+    assert_true('fetchBreakingNews(dateStr, calTz)' in body,
+        'getBreakingNewsText must pass dateStr and calTz to fetchBreakingNews')
     # fetchBreakingNews must use the date in the API URL
     fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
     assert_true(fn2 is not None)
