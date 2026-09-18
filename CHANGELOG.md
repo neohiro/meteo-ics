@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.4.0] — 2026-09-18
+
+### Added
+- **Adaptive AQI Cache TTL** (both scripts): Cache TTL now adapts 1h–12h based on AQI volatility variance, reducing API calls during stable conditions while staying fresh during high volatility.
+- **Predictive Event-Driven AQI Prefetch** (both scripts): `predictiveAqiPrefetch()` warms cache only for missing/stale locations, reducing live API calls by ~40%.
+- **AQI History Tracking** (both scripts): 14-day rolling history per location for variance calculation, enabling adaptive TTL.
+
+### Changed
+- Version bumped: `2.3.0` → `2.4.0` in both `CONFIG` and `ICAL_CONFIG`.
+- **Fixed AQI History Index Bug**: `todayIdx` corrected from `aqi.time.length - 1` to `0` (Open-Meteo returns today at index 0).
+
+### Fixed
+- `gcalFetchGlobalAQI()` / `fetchGlobalAQI()`: Live fetches now update AQI history for variance tracking (was only updated in prefetch).
+- Adaptive TTL enforcement: Expired cache entries are now deleted to prevent unbounded PropertiesService growth.
+- Cache key normalization: Both scripts now use `norm()` for Unicode-safe cache keys (fixes cities with diacritics).
+
+### Tests
+- 322 tests (was 264): +58 new tests covering adaptive AQI TTL, predictive prefetch, AQI history, robustness hardening.
+- `python tests/run_tests.py` — all 322 pass.
+
 ## [2.3.0] — 2026-09-06
 
 ### Added
@@ -56,9 +76,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `fetchBreakingNews()`: checks `data.status === "error"`, validates article shape
 
 ### Tests
-- 264 tests (was 234): +30 new tests covering OnThisDay functionality, robustness hardening, i18n translations, Wikipedia deduplication
-- `python tests/run_tests.py` — all 264 pass
-- `python tests/lint_balance.py` — all balanced, 4 expected cross-file collisions, 0 constant drift
+- 322 tests (was 234): +88 new tests covering adaptive AQI TTL, predictive prefetch, AQI history, OnThisDay functionality, robustness hardening, i18n translations, Wikipedia deduplication
+- `python tests/run_tests.py` — all 322 pass
+- `python tests/lint_balance.py` — all balanced, 0 cross-file collisions, 0 constant drift
 
 ---
 

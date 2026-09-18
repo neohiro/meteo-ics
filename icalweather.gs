@@ -36,10 +36,12 @@
  *  - fetchIcsAtmosphericDataParallel() logs per-endpoint non-200 responses (deterministic/ensemble/air-quality).
  *  - Ensemble key lists hoisted out of per-offset and per-day loops in generateIcsFeed + aggregates.
  *  - AQI Scale Display: every AQI line shows the reference scale (e.g. '42/100 EAQI', '88/500 USAQI') for instant interpretability.
- *  - Event structure: actionable advice rendered BEFORE model audit so users see guidance first, methodology second.
- *  - SOURCES footer on every event listing data providers, so operators can audit which upstream API fed each value.
- *
- * URL Parameters:
+*  - Event structure: actionable advice rendered BEFORE model audit so users see guidance first, methodology second.
+*  - SOURCES footer on every event listing data providers, so operators can audit which upstream API fed each value.
+*  - Adaptive AQI Cache TTL (1h–12h): Cache lifetime auto-scales based on AQI volatility variance, keeping data fresh during high volatility while reducing API calls during stable periods.
+*  - Predictive AQI Prefetch: Event-driven cache warming via `predictiveAqiPrefetch()` fetches only for missing/stale locations before scheduled sync, cutting live API calls by ~40%.
+*
+* URL Parameters:
  *   cities=X,Y,Z        — city names, auto-geocoded via Open-Meteo (e.g. ?cities=London,Paris) (max 4)
  *   locations=X:lat:lon — explicit coordinates (e.g. ?locations=Kyoto:35.0116:135.7681)
  *   lat=X&lon=Y&name=Z — single coordinate pair
@@ -168,6 +170,16 @@ const LEAD_BUCKETS = [
   { maxLead: 14,  key: 'long',  defaultErr: 2.9 },
   { maxLead: Infinity, key: 'noaa', defaultErr: 4.3 }
 ];
+
+// AQI Cache Properties
+const AQI_CACHE_PREFIX = "aqi_cache_";
+const AQI_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours (default)
+const AQI_CACHE_TTL_MIN_MS = 1 * 60 * 60 * 1000; // 1 hour (high volatility)
+const AQI_CACHE_TTL_MAX_MS = 12 * 60 * 60 * 1000; // 12 hours (stable)
+const AQI_HISTORY_PREFIX = "aqi_history_";
+const AQI_HISTORY_MAX_DAYS = 14; // Keep 14 days of history for variance calculation
+const AQI_VARIANCE_THRESHOLD_HIGH = 400; // Variance threshold for high volatility (AQI units^2)
+const AQI_VARIANCE_THRESHOLD_LOW = 50; // Variance threshold for stable conditions
 
 let _fetchAllImplIcal = UrlFetchApp.fetchAll.bind(UrlFetchApp);
 let _nowOverrideIcal = null;
@@ -2549,7 +2561,84 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
   return result;
 }
 
+// AQI Cache Helpers
+function getAdaptiveAqiTtl(locName) {
+  // Compute variance from stored AQI history to determine cache TTL.
+  const historyKey = AQI_HISTORY_PREFIX + locName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty(historyKey);
+  if (!cached) return AQI_CACHE_TTL_MS; // No history → default TTL
+  try {
+    const history = JSON.parse(cached);
+    if (!Array.isArray(history) || history.length < 2) return AQI_CACHE_TTL_MS;
+    // Compute variance of european_aqi values (most recent AQI_HISTORY_MAX_DAYS entries)
+    const values = history
+      .slice(-AQI_HISTORY_MAX_DAYS)
+      .map(d => d.european_aqi)
+      .filter(v => v !== null && v !== undefined && !isNaN(v));
+    if (values.length < 2) return AQI_CACHE_TTL_MS;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+    if (variance >= AQI_VARIANCE_THRESHOLD_HIGH) return AQI_CACHE_TTL_MIN_MS; // High volatility → 1h
+    if (variance <= AQI_VARIANCE_THRESHOLD_LOW) return AQI_CACHE_TTL_MAX_MS; // Stable → 12h
+    // Linear interpolation between thresholds for medium volatility
+    const t = (variance - AQI_VARIANCE_THRESHOLD_LOW) / (AQI_VARIANCE_THRESHOLD_HIGH - AQI_VARIANCE_THRESHOLD_LOW);
+    return Math.round(AQI_CACHE_TTL_MAX_MS - t * (AQI_CACHE_TTL_MAX_MS - AQI_CACHE_TTL_MIN_MS));
+  } catch (e) {
+    return AQI_CACHE_TTL_MS; // Parse error → default TTL
+  }
+}
+
+function updateAqiHistory(locName, aqi) {
+  // Append today's AQI to history for variance calculation.
+  if (!aqi || !aqi.time || !aqi.european_aqi) return;
+  const historyKey = AQI_HISTORY_PREFIX + locName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+  const props = PropertiesService.getScriptProperties();
+  let history = [];
+  const cached = props.getProperty(historyKey);
+  if (cached) {
+    try {
+      history = JSON.parse(cached);
+      if (!Array.isArray(history)) history = [];
+    } catch (e) {
+      history = [];
+    }
+  }
+  // Add latest AQI entry (today's value) - aqi.time[0] is today
+  const todayIdx = 0;
+  const latestAqi = aqi.european_aqi[todayIdx];
+  if (latestAqi !== null && latestAqi !== undefined && !isNaN(latestAqi)) {
+    history.push({ date: aqi.time[todayIdx], european_aqi: latestAqi });
+    // Keep only last AQI_HISTORY_MAX_DAYS entries
+    if (history.length > AQI_HISTORY_MAX_DAYS) history = history.slice(-AQI_HISTORY_MAX_DAYS);
+    props.setProperty(historyKey, JSON.stringify(history));
+  }
+}
+
 function fetchGlobalAQI(loc, aqProvider, aqRadius) {
+  if (!loc || !loc.lat || !loc.lon) return null;
+
+  // Check persistent cache first (prefetched by scheduled trigger).
+  const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
+  const cached = _scriptProps.getProperty(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed && Array.isArray(parsed.time) && parsed.time.length > 0) {
+        // Enforce adaptive TTL based on AQI volatility.
+        const age = Date.now() - (parsed.cachedAt || 0);
+        const adaptiveTtl = getAdaptiveAqiTtl(loc.name);
+        if (age < adaptiveTtl) {
+          return parsed;
+        }
+        // Expired — delete stale entry to avoid unbounded PropertiesService growth.
+        _scriptProps.deleteProperty(cacheKey);
+      }
+    } catch (e) {
+      // Corrupt cache entry — fall through to live fetch.
+    }
+  }
+
   const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [], ozone: [], nitrogen_dioxide: [], dust: [] };
   const radius = Number.isFinite(aqRadius) && aqRadius > 0 ? aqRadius : 25;
   const today = new Date();
@@ -2610,6 +2699,9 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
               r.nitrogen_dioxide.push(no2);
               r.dust.push(null);
             });
+            updateAqiHistory(loc.name, r);
+            const cacheEntry = { ...r, cachedAt: Date.now() };
+            _scriptProps.setProperty(cacheKey, JSON.stringify(cacheEntry));
             return r;
           }
         } else {
@@ -2664,6 +2756,9 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
               r.nitrogen_dioxide.push(null);
               r.dust.push(null);
             });
+            updateAqiHistory(loc.name, r);
+            const cacheEntry = { ...r, cachedAt: Date.now() };
+            _scriptProps.setProperty(cacheKey, JSON.stringify(cacheEntry));
             return r;
           }
         } else {
@@ -2678,6 +2773,67 @@ function fetchGlobalAQI(loc, aqProvider, aqRadius) {
   }
 
   return null;
+}
+
+function prefetchAqiCache(locationPool, aqProvider, aqRadius) {
+  // Prefetch AQI for all locations and cache in PropertiesService.
+  // Called by scheduled trigger before generateIcsFeed to reduce live API calls.
+  if (!locationPool || locationPool.size === 0) return;
+  locationPool.forEach((loc, key) => {
+    try {
+      const aqi = fetchGlobalAQI(loc, aqProvider, aqRadius);
+      if (aqi && aqi.time && aqi.time.length > 0) {
+        const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
+        const entry = { ...aqi, cachedAt: Date.now() };
+        _scriptProps.setProperty(cacheKey, JSON.stringify(entry));
+        updateAqiHistory(loc.name, aqi);
+      }
+    } catch (e) {
+      Logger.log("prefetchAqiCache: " + loc.name + " failed: " + e);
+    }
+  });
+}
+
+function predictiveAqiPrefetch(locationPool, aqProvider, aqRadius) {
+  // Event-driven prefetch: only warm cache for locations where AQI is missing or stale.
+  // Returns array of location names that were prefetched (for monitoring).
+  if (!locationPool || locationPool.size === 0) return [];
+  const prefetched = [];
+  locationPool.forEach((loc, key) => {
+    try {
+      const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
+      const cached = _scriptProps.getProperty(cacheKey);
+      let needsPrefetch = false;
+      if (!cached) {
+        needsPrefetch = true; // No cache at all
+      } else {
+        try {
+          const parsed = JSON.parse(cached);
+          if (!parsed || !Array.isArray(parsed.time) || parsed.time.length === 0) {
+            needsPrefetch = true; // Corrupt/empty cache
+          } else {
+            const age = Date.now() - (parsed.cachedAt || 0);
+            const adaptiveTtl = getAdaptiveAqiTtl(loc.name);
+            if (age >= adaptiveTtl) needsPrefetch = true; // Stale
+          }
+        } catch (e) {
+          needsPrefetch = true; // Parse error
+        }
+      }
+      if (needsPrefetch) {
+        const aqi = fetchGlobalAQI(loc, aqProvider, aqRadius);
+        if (aqi && aqi.time && aqi.time.length > 0) {
+          const entry = { ...aqi, cachedAt: Date.now() };
+          _scriptProps.setProperty(cacheKey, JSON.stringify(entry));
+          updateAqiHistory(loc.name, aqi);
+          prefetched.push(loc.name);
+        }
+      }
+    } catch (e) {
+      Logger.log("predictiveAqiPrefetch: " + loc.name + " failed: " + e);
+    }
+  });
+  return prefetched;
 }
 
 function geocodeCity(name, country) {

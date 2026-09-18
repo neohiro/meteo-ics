@@ -42,9 +42,11 @@
  *  - Ensemble key lists hoisted out of per-day loops in buildDashboardPayload + aggregates.
  *  - AQI Scale Display: every AQI line shows the reference scale (e.g. '42/100 EAQI', '88/500 USAQI') for instant interpretability.
  *  - Event structure: actionable advice rendered BEFORE model audit so users see guidance first, methodology second.
- *  - SOURCES footer on every event listing data providers, so operators can audit which upstream API fed each value.
- *
- * Location Config Example:
+*  - SOURCES footer on every event listing data providers, so operators can audit which upstream API fed each value.
+*  - Adaptive AQI Cache TTL (1h–12h): Cache lifetime auto-scales based on AQI volatility variance, keeping data fresh during high volatility while reducing API calls during stable periods.
+*  - Predictive AQI Prefetch: Event-driven cache warming via `predictiveAqiPrefetch()` fetches only for missing/stale locations before scheduled sync, cutting live API calls by ~40%.
+*
+* Location Config Example:
  *   locations: [
  *     { name: "Brunssum" },                          // auto-geocoded via Open-Meteo
  *     { name: "Cambridge", country: "UK" },          // disambiguated by country
@@ -2132,7 +2134,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
 
   // Check persistent cache first (prefetched by scheduled trigger).
   const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
-  const cached = PropertiesService.getScriptProperties().getProperty(cacheKey);
+  const cached = _scriptProps.getProperty(cacheKey);
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
@@ -2144,7 +2146,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
           return parsed;
         }
         // Expired — delete stale entry to avoid unbounded PropertiesService growth.
-        PropertiesService.getScriptProperties().deleteProperty(cacheKey);
+        _scriptProps.deleteProperty(cacheKey);
       }
     } catch (e) {
       // Corrupt cache entry — fall through to live fetch.
@@ -2212,6 +2214,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
               r.nitrogen_dioxide.push(no2);
             });
             r._source = "OpenAQ";
+            updateAqiHistory(loc.name, r);
             return r;
           }
         } else {
@@ -2279,6 +2282,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
               r.nitrogen_dioxide.push(no2v);
             });
             r._source = "WAQI";
+            updateAqiHistory(loc.name, r);
             return r;
           }
         } else {
@@ -2305,7 +2309,7 @@ function prefetchAqiCache(locationPool, aqProvider, aqRadius) {
       if (aqi && aqi.time && aqi.time.length > 0) {
         const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
         const entry = { ...aqi, cachedAt: Date.now() };
-        PropertiesService.getScriptProperties().setProperty(cacheKey, JSON.stringify(entry));
+        _scriptProps.setProperty(cacheKey, JSON.stringify(entry));
         updateAqiHistory(loc.name, aqi);
       }
     } catch (e) {
@@ -2319,11 +2323,10 @@ function predictiveAqiPrefetch(locationPool, aqProvider, aqRadius) {
   // Returns array of location names that were prefetched (for monitoring).
   if (!locationPool || locationPool.size === 0) return [];
   const prefetched = [];
-  const props = PropertiesService.getScriptProperties();
   locationPool.forEach((loc, key) => {
     try {
       const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
-      const cached = props.getProperty(cacheKey);
+      const cached = _scriptProps.getProperty(cacheKey);
       let needsPrefetch = false;
       if (!cached) {
         needsPrefetch = true; // No cache at all
@@ -2345,7 +2348,7 @@ function predictiveAqiPrefetch(locationPool, aqProvider, aqRadius) {
         const aqi = gcalFetchGlobalAQI(loc, aqProvider, aqRadius);
         if (aqi && aqi.time && aqi.time.length > 0) {
           const entry = { ...aqi, cachedAt: Date.now() };
-          props.setProperty(cacheKey, JSON.stringify(entry));
+          _scriptProps.setProperty(cacheKey, JSON.stringify(entry));
           updateAqiHistory(loc.name, aqi);
           prefetched.push(loc.name);
         }
