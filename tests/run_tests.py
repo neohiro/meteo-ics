@@ -914,7 +914,50 @@ def test_gcal_t_l_key_parity_with_ical():
     ical_keys = keys_of(ICAL)
     assert_true(gcal_keys == ical_keys,
         f'T_L keys differ between files: gcal-only={sorted(gcal_keys - ical_keys)}, '
-        f'ical-only={sorted(ical_keys - gcal_keys)}')
+        f'ical-only={sorted(ical_keys - ical_keys)}')
+
+
+def test_gcal_ical_pollutant_context_keys_defined():
+    """getPollutantContext() classifies every pollutant reading against shared
+    WHO/EU reference buckets. The five bucket labels must exist in both T_L
+    tables so the air-quality section renders in every language, and both files
+    must define the helper so the gcal and ical feeds stay in sync."""
+    def bucket_keys(src):
+        m = re.search(r'const\s+T_L\s*=\s*\{[\s\S]*?^\};', src, re.M)
+        assert_true(m is not None, 'T_L must be defined')
+        return set(re.findall(r'(aqiGood|aqiFair|aqiMod|aqiPoor|aqiHzd)\s*:', m.group(0), re.M))
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        keys = bucket_keys(src)
+        assert_true(keys == {'aqiGood', 'aqiFair', 'aqiMod', 'aqiPoor', 'aqiHzd'},
+            f'{name}: missing pollutant bucket keys, got {sorted(keys)}')
+
+
+def test_gcal_ical_pollutant_context_helper():
+    """getPollutantContext(val, pollutant, lang) must be defined in both files
+    with an early null/NaN guard and a per-pollutant bucket chain."""
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        fn = re.search(r'function getPollutantContext\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(fn is not None, f'{name}: getPollutantContext must be defined')
+        body = fn.group(0)
+        assert_true(re.search(r'val\s*==\s*null\s*\|\|\s*isNaN\(val\)', body),
+            f'{name}: getPollutantContext must guard against null/NaN inputs')
+        for pollutant in ('pm25', 'pm10', 'o3', 'no2', 'dust'):
+            assert_true(f'pollutant === "{pollutant}"' in body,
+                f'{name}: getPollutantContext missing bucket chain for {pollutant!r}')
+
+
+def test_gcal_ical_air_section_renders_pollutant_context():
+    """The AIR QUALITY section must call getPollutantContext() for PM2.5, O3,
+    NO2 and dust so every reading carries compact, layman-friendly context."""
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        assert_true(re.search(r'getPollutantContext\(pm25Val, "pm25", lang\)', src),
+            f'{name}: PM2.5 line must render context')
+        assert_true(re.search(r'getPollutantContext\(o3Val, "o3", lang\)', src),
+            f'{name}: O3 line must render context')
+        assert_true(re.search(r'getPollutantContext\(no2Val, "no2", lang\)', src),
+            f'{name}: NO2 line must render context')
+        assert_true(re.search(r'getPollutantContext\(dustVal, "dust", lang\)', src),
+            f'{name}: dust line must render context')
 
 
 def test_gcal_build_dashboard_payload_uses_translations():

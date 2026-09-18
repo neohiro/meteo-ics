@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.4.1] — 2026-09-18
+
+### Added
+- **Full Pollutant Breakdown in Air Quality section** (both scripts): O₃ (ozone), NO₂ (nitrogen dioxide) and dust readings are now extracted from the AQI payload and displayed alongside AQI, PM2.5 and PM10.
+- **Compact Context for Every Reading** (both scripts): `getPollutantContext()` classifies each pollutant against WHO/EU reference buckets (Good / Fair / Moderate / Poor / Hazardous) using the existing multi-language labels, so a layman can understand every value at a glance.
+- **New translation keys** `o3`, `no2`, `dust` in `T_L` (all 8 languages) in both scripts.
+
+### Changed
+- Version bumped: `2.4.0` → `2.4.1` in both `CONFIG` and `ICAL_CONFIG`.
+- **README breaking-news wording**: "Top headlines from major outlets" (breaking news is general news from major outlets, not weather-only).
+
+### Fixed
+- README version badge synced to `2.4.1`; test-count badge updated to 325.
+
+### Tests
+- 325 tests (was 322): +3 new tests covering pollutant-context bucket keys, the `getPollutantContext()` guard + bucket chains, and AIR QUALITY section rendering of PM2.5/O₃/NO₂/dust context.
+- `python tests/run_tests.py` — all 325 pass.
+
 ## [2.4.0] — 2026-09-18
 
 ### Added

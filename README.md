@@ -3,9 +3,9 @@
 [![Protocol](https://img.shields.io/badge/RFC-5545%20(iCalendar)-blue.svg)](#)
 [![Data Sources](https://img.shields.io/badge/Data-Open--Meteo%20%7C%20NOAA%20GFS%20%7C%20Copernicus%20CAMS%20%7C%20OpenAQ%20%7C%20WAQI-orange.svg)](#)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
-[![Version](https://img.shields.io/badge/Version-2.4.0-brightgreen.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.4.1-brightgreen.svg)](./CHANGELOG.md)
 [![CI](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-322%20%2B%20CI-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-325%20%2B%20CI-brightgreen.svg)](#)
 
 **Your weather, astronomy & air-quality — automatically delivered to any calendar app.**  
 Subscribe once to a live `.ics` feed and your calendar does the rest. No new app, no new login, no new habit. Wake up to per-day events titled `☀️ 22°C Paris` with temperature, rain, UV, AQI, moon phase, pollen and road-hazard advice — all built from real forecast models with a live accuracy audit.
@@ -43,14 +43,14 @@ Each day becomes an all-day calendar event with a color-coded title and a multi-
 | 🌡️ **Temperature** | High/Low + Feels-Like + Comfort text | Open-Meteo Deterministic |
 | 🌧️ **Rain** | Volume (mm) + Probability (%) + Gusts | Open-Meteo + NOAA GFS Ensemble |
 | ☀️ **Sun & Sky** | Sunrise/sunset, Moon phase, UV index, Golden Hour | Open-Meteo |
-| 🧪 **Air Quality** | EAQI / USAQI + PM2.5 / PM10 + O₃ + NO₂ + Pollen | CAMS (EU) → OpenAQ / WAQI (global) |
+| 🧪 **Air Quality** | EAQI / USAQI + PM2.5 / PM10 + O₃ + NO₂ + Dust + Pollen | CAMS (EU) → OpenAQ / WAQI (global) |
 | 🌙 **Astronomy** | Meteor showers, Eclipses, Planet oppositions, Auroras | Computed locally |
 | 🌱 **Agriculture** | Growing Degree Days, ET₀ evapotranspiration | Open-Meteo |
 | 📊 **Accuracy Audit** | Temp & Rain MAE, Reliability grade, Lead curve | Self-measured |
 | 🚗 **Road Safety** | Black ice / frost / cold-spray warnings (T_min ≤ 7°C) | Open-Meteo |
 | 📜 **On This Day** | National holidays, International observances, Notable anniversaries, Religious events | Built-in data |
 | 📖 **Wikipedia On This Day** | Historical events from Wikipedia API (cached 24h) | Wikipedia REST API |
-| 📰 **Breaking News** | Weather headlines via NewsAPI (today only) | NewsAPI.org |
+| 📰 **Breaking News** | Top headlines from major outlets (today only) | NewsAPI.org |
 
 > **⚠️ Quota Protection:** Maximum **4 cities** per request to prevent timeouts.
 
@@ -118,7 +118,7 @@ The script works out of the box with zero configuration. Two optional API keys u
 
 ### 📰 Breaking News (optional)
 
-Shows today's weather headlines in calendar events for the current day only.
+Shows today's top headlines from major world news outlets in calendar events for the current day only.
 
 1. Get a free API key from [newsapi.org](https://newsapi.org/register)
 2. In Apps Script editor: **Project Settings** → **Script Properties**
@@ -136,7 +136,7 @@ Built-in data for national holidays, international observances, religious events
 ### 🧪 Running Tests Locally
 
 ```bash
-python tests/run_tests.py      # 322 source-structure + behavioral tests
+python tests/run_tests.py      # 325 source-structure + behavioral tests
 python tests/lint_balance.py   # brace/bracket balance + cross-file collision + constant drift
 ```
 
@@ -157,7 +157,7 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 - **D-5 to D-1:** Verified ground-truth logbook with D-countdown accuracy drift auditing.
 - **Air Quality & Sky:** CAMS AQI (Europe) / US EPA AQI (North America) / **OpenAQ + WAQI global fallback** (200+ countries) — PM2.5, PM10, pollen count, moon phases, meteor peaks, eclipses, aurora seasons.
 - **On This Day:** National holidays (US, GB, DE, FR, CA, AU, JP, CN, IN), international observances, notable anniversaries, religious events, and Wikipedia historical events fetched from the REST API (24h cached).
-- **Breaking News:** Today's weather headlines from NewsAPI.org (shown only on current day, requires `NEWS_API_KEY` in ScriptProperties).
+- **Breaking News:** Today's top headlines from major outlets via NewsAPI.org (shown only on current day, requires `NEWS_API_KEY` in ScriptProperties).
 - **Road Hazards:** Ice/frost advisories auto-rendered only when T_min ≤ 7°C.
 - **Global AQI Engine (v2.2.0+):** when the Open-Meteo CAMS/NOAA endpoints return no data for a region (most of Africa, South America, South & Southeast Asia, Pacific islands), the script transparently falls back to OpenAQ (free, no key) and then WAQI (token-optional). Override with `?aqProvider=openaq` or `?aqProvider=waqi` to force a specific source.
 

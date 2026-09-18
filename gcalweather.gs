@@ -431,7 +431,7 @@ const FALLBACK_CITY_COORDS = {
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
-  version: "2.4.0",
+  version: "2.4.1",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
@@ -492,6 +492,9 @@ const T_L = {
   pm25:      { en:"PM2.5",                       zh:"细颗粒物",               hi:"पीएम 2.5",                     es:"PM2.5",                      fr:"PM2.5",                       ar:"الجسيمات الدقيقة",              de:"PM2.5",                        nl:"PM2.5" },
   pm10:      { en:"PM10",                        zh:"可吸入颗粒",             hi:"पीएम 10",                      es:"PM10",                       fr:"PM10",                        ar:"الجسيمات الكبيرة",              de:"PM10",                         nl:"PM10" },
   pollen:    { en:"Pollen Load",                  zh:"花粉浓度",               hi:"पराग",                          es:"Polen",                      fr:"Pollens",                     ar:"حبوب اللقاح",                   de:"Pollenbelastung",              nl:"Pollenbelasting" },
+  o3:        { en:"O3",                          zh:"臭氧",                   hi:"ओजोन",                       es:"O3",                         fr:"O3",                          ar:"أوزون",                       de:"O3",                          nl:"O3" },
+  no2:       { en:"NO2",                         zh:"二氧化氮",              hi:"नाइट्रोजन डाइऑक्साइड",           es:"NO2",                        fr:"NO2",                         ar:"ثاني أكسيد النيتروجين",         de:"NO2",                        nl:"NO2" },
+  dust:      { en:"Dust",                        zh:"扬尘",                  hi:"धूल",                         es:"Polvo",                      fr:"Poussière",                   ar:"غبار",                         de:"Staub",                        nl:"Stof" },
   polLow:    { en:"Low",                         zh:"低",                    hi:"कम",                           es:"Bajo",                       fr:"Faible",                      ar:"منخفض",                       de:"Niedrig",                      nl:"Laag" },
   rainSum:   { en:"Rain Sum",                     zh:"累计降雨",               hi:"कुल वर्षा",                     es:"Lluvia total",                fr:"Cumul de pluie",              ar:"إجمالي المطر",                 de:"Regensumme",                   nl:"Regensom" },
   meanTemp:  { en:"Mean Temp",                   zh:"平均气温",               hi:"औसत तापमान",                    es:"Temp. media",                 fr:"Temp. moyenne",                ar:"متوسط الحرارة",                 de:"Mittlere Temp.",               nl:"Gem. temperatuur" },
@@ -2565,7 +2568,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   // Cache PropertiesService for this execution to avoid repeated calls
   const scriptProps = PropertiesService.getScriptProperties();
 
-  let aqiVal = null, aqiType = "AQI", aqiScale = null, pm25Val = null, pm10Val = null, pollenVal = null;
+  let aqiVal = null, aqiType = "AQI", aqiScale = null, pm25Val = null, pm10Val = null, pollenVal = null, o3Val = null, no2Val = null, dustVal = null;
   const aqSource = data.aq && data.aq._source ? data.aq._source : null;
   if (data.aq && data.aq.time) {
     const idx = data.aq.time.indexOf(targetDateStr);
@@ -2582,6 +2585,9 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
 
       pm25Val = data.aq.pm2_5 && data.aq.pm2_5[idx] !== null ? Number(data.aq.pm2_5[idx].toFixed(1)) : null;
       pm10Val = data.aq.pm10 && data.aq.pm10[idx] !== null ? Number(data.aq.pm10[idx].toFixed(1)) : null;
+      o3Val = data.aq.ozone && data.aq.ozone[idx] !== null ? Number(data.aq.ozone[idx].toFixed(1)) : null;
+      no2Val = data.aq.nitrogen_dioxide && data.aq.nitrogen_dioxide[idx] !== null ? Number(data.aq.nitrogen_dioxide[idx].toFixed(1)) : null;
+      dustVal = data.aq.dust && data.aq.dust[idx] !== null ? Number(data.aq.dust[idx].toFixed(1)) : null;
       const birch = data.aq.birch_pollen ? data.aq.birch_pollen[idx] || 0 : 0;
       const grass = data.aq.grass_pollen ? data.aq.grass_pollen[idx] || 0 : 0;
       const alder = data.aq.alder_pollen ? data.aq.alder_pollen[idx] || 0 : 0;
@@ -2883,7 +2889,10 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     [
       `🧪 ${tSection("secAir", lang)}`,
       aqiVal !== null ? `• ${t("aqi", lang)}: ${aqiVal}${aqiScale ? "/" + aqiScale : ""} ${getAqiGlyph(aqiVal, aqiType)} (${getAqiLabel(aqiVal, aqiType, lang)}) [${aqiType}]` : `• ${t("aqi", lang)}: ${t("mon", lang)}`,
-      pm25Val !== null ? `• ${t("pm25", lang)}: ${pm25Val} · ${t("pm10", lang)}: ${pm10Val || "--"} µg/m³` : ``,
+      pm25Val !== null ? `• ${t("pm25", lang)}: ${pm25Val} · ${t("pm10", lang)}: ${pm10Val || "--"} µg/m³ (${getPollutantContext(pm25Val, "pm25", lang)})` : ``,
+      o3Val !== null ? `• ${t("o3", lang)}: ${o3Val} µg/m³ (${getPollutantContext(o3Val, "o3", lang)})` : ``,
+      no2Val !== null ? `• ${t("no2", lang)}: ${no2Val} µg/m³ (${getPollutantContext(no2Val, "no2", lang)})` : ``,
+      dustVal !== null ? `• ${t("dust", lang)}: ${dustVal} µg/m³ (${getPollutantContext(dustVal, "dust", lang)})` : ``,
       pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³` : `• ${t("pollen", lang)}: ${t("polLow", lang)}`
     ].filter(Boolean).join("\n"),
 
@@ -3612,6 +3621,39 @@ function getUvAdvice(uv, lang) {
   if (uv <= 5) return t("uvMod", lang);
   if (uv <= 7) return t("uvHigh", lang);
   return t("uvVhigh", lang);
+}
+
+function getPollutantContext(val, pollutant, lang) {
+  if (val == null || isNaN(val)) return "";
+  if (pollutant === "pm25") {
+    if (val <= 10) return t("aqiGood", lang);
+    if (val <= 25) return t("aqiFair", lang);
+    if (val <= 50) return t("aqiMod", lang);
+    if (val <= 75) return t("aqiPoor", lang);
+    return t("aqiHzd", lang);
+  }
+  if (pollutant === "pm10" || pollutant === "dust") {
+    if (val <= 20) return t("aqiGood", lang);
+    if (val <= 50) return t("aqiFair", lang);
+    if (val <= 100) return t("aqiMod", lang);
+    if (val <= 200) return t("aqiPoor", lang);
+    return t("aqiHzd", lang);
+  }
+  if (pollutant === "o3") {
+    if (val <= 50) return t("aqiGood", lang);
+    if (val <= 100) return t("aqiFair", lang);
+    if (val <= 160) return t("aqiMod", lang);
+    if (val <= 200) return t("aqiPoor", lang);
+    return t("aqiHzd", lang);
+  }
+  if (pollutant === "no2") {
+    if (val <= 40) return t("aqiGood", lang);
+    if (val <= 90) return t("aqiFair", lang);
+    if (val <= 180) return t("aqiMod", lang);
+    if (val <= 350) return t("aqiPoor", lang);
+    return t("aqiHzd", lang);
+  }
+  return "";
 }
 
 function validateConfig() {
