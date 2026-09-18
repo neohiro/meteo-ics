@@ -2207,11 +2207,11 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
             aqiType = "USAQI";
           }
 
-          pm25Val = data.aq.pm2_5 && data.aq.pm2_5[aqIdx] !== null ? Number(data.aq.pm2_5[aqIdx].toFixed(1)) : null;
-          pm10Val = data.aq.pm10 && data.aq.pm10[aqIdx] !== null ? Number(data.aq.pm10[aqIdx].toFixed(1)) : null;
-          o3Val = data.aq.ozone && data.aq.ozone[aqIdx] !== null ? Number(data.aq.ozone[aqIdx].toFixed(1)) : null;
-          no2Val = data.aq.nitrogen_dioxide && data.aq.nitrogen_dioxide[aqIdx] !== null ? Number(data.aq.nitrogen_dioxide[aqIdx].toFixed(1)) : null;
-          dustVal = data.aq.dust && data.aq.dust[aqIdx] !== null ? Number(data.aq.dust[aqIdx].toFixed(1)) : null;
+          pm25Val = data.aq.pm2_5 && data.aq.pm2_5[aqIdx] != null ? Number(data.aq.pm2_5[aqIdx].toFixed(1)) : null;
+          pm10Val = data.aq.pm10 && data.aq.pm10[aqIdx] != null ? Number(data.aq.pm10[aqIdx].toFixed(1)) : null;
+          o3Val = data.aq.ozone && data.aq.ozone[aqIdx] != null ? Number(data.aq.ozone[aqIdx].toFixed(1)) : null;
+          no2Val = data.aq.nitrogen_dioxide && data.aq.nitrogen_dioxide[aqIdx] != null ? Number(data.aq.nitrogen_dioxide[aqIdx].toFixed(1)) : null;
+          dustVal = data.aq.dust && data.aq.dust[aqIdx] != null ? Number(data.aq.dust[aqIdx].toFixed(1)) : null;
           const birch = data.aq.birch_pollen ? data.aq.birch_pollen[aqIdx] || 0 : 0;
           const grass = data.aq.grass_pollen ? data.aq.grass_pollen[aqIdx] || 0 : 0;
           const alder = data.aq.alder_pollen ? data.aq.alder_pollen[aqIdx] || 0 : 0;
@@ -3647,33 +3647,34 @@ function getUvAdvice(uv, lang) {
 }
 
 function getPollutantContext(val, pollutant, lang) {
-  if (val == null || isNaN(val)) return "";
+  const num = Number(val);
+  if (val == null || isNaN(num)) return "";
   if (pollutant === "pm25") {
-    if (val <= 10) return t("aqiGood", lang);
-    if (val <= 25) return t("aqiFair", lang);
-    if (val <= 50) return t("aqiMod", lang);
-    if (val <= 75) return t("aqiPoor", lang);
+    if (num <= 10) return t("aqiGood", lang);
+    if (num <= 25) return t("aqiFair", lang);
+    if (num <= 50) return t("aqiMod", lang);
+    if (num <= 75) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   if (pollutant === "pm10" || pollutant === "dust") {
-    if (val <= 20) return t("aqiGood", lang);
-    if (val <= 50) return t("aqiFair", lang);
-    if (val <= 100) return t("aqiMod", lang);
-    if (val <= 200) return t("aqiPoor", lang);
+    if (num <= 20) return t("aqiGood", lang);
+    if (num <= 50) return t("aqiFair", lang);
+    if (num <= 100) return t("aqiMod", lang);
+    if (num <= 200) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   if (pollutant === "o3") {
-    if (val <= 50) return t("aqiGood", lang);
-    if (val <= 100) return t("aqiFair", lang);
-    if (val <= 160) return t("aqiMod", lang);
-    if (val <= 200) return t("aqiPoor", lang);
+    if (num <= 50) return t("aqiGood", lang);
+    if (num <= 100) return t("aqiFair", lang);
+    if (num <= 160) return t("aqiMod", lang);
+    if (num <= 200) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   if (pollutant === "no2") {
-    if (val <= 40) return t("aqiGood", lang);
-    if (val <= 90) return t("aqiFair", lang);
-    if (val <= 180) return t("aqiMod", lang);
-    if (val <= 350) return t("aqiPoor", lang);
+    if (num <= 40) return t("aqiGood", lang);
+    if (num <= 90) return t("aqiFair", lang);
+    if (num <= 180) return t("aqiMod", lang);
+    if (num <= 350) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   return "";

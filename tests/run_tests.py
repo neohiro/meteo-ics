@@ -939,7 +939,9 @@ def test_gcal_ical_pollutant_context_helper():
         fn = re.search(r'function getPollutantContext\([^)]*\)\s*\{[\s\S]*?\n\}', src)
         assert_true(fn is not None, f'{name}: getPollutantContext must be defined')
         body = fn.group(0)
-        assert_true(re.search(r'val\s*==\s*null\s*\|\|\s*isNaN\(val\)', body),
+        assert_true(re.search(r'const num\s*=\s*Number\(val\)', body),
+            f'{name}: getPollutantContext must normalize input via Number()')
+        assert_true(re.search(r'val\s*==\s*null\s*\|\|\s*isNaN\(num\)', body),
             f'{name}: getPollutantContext must guard against null/NaN inputs')
         for pollutant in ('pm25', 'pm10', 'o3', 'no2', 'dust'):
             assert_true(f'pollutant === "{pollutant}"' in body,
@@ -3010,6 +3012,20 @@ def test_gcal_aq_result_has_ozone_and_no2_keys():
         'gcalFetchGlobalAQI must initialize r with ozone and nitrogen_dioxide arrays')
 
 
+def test_gcal_aq_result_has_dust_key():
+    """gcalFetchGlobalAQI must include a dust array in the return object so the
+    merged result.aq keeps every parallel array aligned with data.aq.time (mirrors
+    icalweather.gs). Global OpenAQ/WAQI sources have no dust reading; the branches
+    push null per date to preserve length parity."""
+    fn = re.search(r'function gcalFetchGlobalAQI\([\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    assert_true(re.search(r"const r\s*=\s*\{[^}]*dust\s*:\s*\[\]", body),
+        'gcalFetchGlobalAQI must initialize r.dust as an empty array')
+    assert_true(body.count('r.dust.push(null)') >= 2,
+        'gcalFetchGlobalAQI OpenAQ and WAQI branches must both push null to r.dust')
+
+
 def test_readme_language_jump_above_feature_grid():
     """The language jump links must appear between the summary and the
     'What's in Every Calendar Event' feature grid, not after the URL params.
@@ -3099,6 +3115,40 @@ def test_gcal_merge_propagates_ozone_and_no2():
         'sort-rewrite block must reorder ozone to stay in sync')
     assert_true(re.search(r'cacheObj\.aq\.nitrogen_dioxide\s*=\s*sorted\.map', body),
         'sort-rewrite block must reorder nitrogen_dioxide to stay in sync')
+
+
+def test_gcal_global_aqi_merge_syncs_dust_and_pollen():
+    """gcal's global-AQI merge must push + sort dust and pollen arrays just like
+    ical's — otherwise merged fallback dates make those arrays diverge in length
+    from data.aq.time and the sort-rewrite mis-aligns them, which crashes the
+    dust/pollen extraction (undefined.read) or shows stale values."""
+    fn = re.search(r'function fetchAllAtmosphericDataParallel[\s\S]+?\n\}\n', GCAL)
+    assert_true(fn is not None)
+    body = fn.group(0)
+    # Push side: every parallel array (incl. dust + 3 pollen) gets a value for each new date.
+    for arr in ('dust', 'alder_pollen', 'birch_pollen', 'grass_pollen'):
+        assert_true(re.search(rf'cacheObj\.aq\.{arr}\s*=\s*cacheObj\.aq\.{arr}\s*\|\|\s*\[\]', body),
+            f'merge loop must lazily init cacheObj.aq.{arr}')
+        assert_true(re.search(rf'cacheObj\.aq\.{arr}\s*\.push', body),
+            f'merge loop must push to cacheObj.aq.{arr}')
+    # Sort side: every parallel array must be re-sorted via the same mapped pattern.
+    for arr in ('dust', 'alder_pollen', 'birch_pollen', 'grass_pollen'):
+        assert_true(re.search(rf'cacheObj\.aq\.{arr}\s*=\s*sorted\.map\s*\(x\s*=>\s*cacheObj\.aq\.{arr}\[x\.i\]\s*!==\s*undefined\s*\?\s*cacheObj\.aq\.{arr}\[x\.i\]\s*:\s*null\)', body),
+            f'sort-rewrite block must reorder {arr} to stay in sync')
+
+
+def test_gcal_ical_pollutant_extraction_uses_loose_null_guard():
+    """Pollutant extraction must use `!= null` semantics. `!== null` passes on
+    `undefined` (e.g. array one element short after a merge gap), which then
+    throws on .toFixed(). Both the gcal and ical warm paths read the same four
+    arrays, so the guard must be consistent in both files."""
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        var = 'aqIdx' if 'ical' in name else 'idx'
+        for field in ('pm2_5', 'pm10', 'ozone', 'nitrogen_dioxide', 'dust'):
+            assert_true(re.search(rf'data\.aq\.{field}\s*&&\s*data\.aq\.{field}\[{var}\]\s*!=\s*null', src),
+                f'{name}: {field} extraction must use loose != null guard (no undefined .toFixed crash)')
+            assert_true(not re.search(rf'data\.aq\.{field}\[{var}\]\s*!==\s*null', src),
+                f'{name}: {field} must not use strict !== null on array reads (undefined slips through)')
 
 
 def test_waqi_passphrase_strength_gate():

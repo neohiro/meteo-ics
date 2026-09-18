@@ -5,7 +5,7 @@
 [![Languages](https://img.shields.io/badge/Languages-EN%20%7C%20ZH%20%7C%20HI%20%7C%20ES%20%7C%20FR%20%7C%20AR%20%7C%20DE%20%7C%20NL-green.svg)](#)
 [![Version](https://img.shields.io/badge/Version-2.4.1-brightgreen.svg)](./CHANGELOG.md)
 [![CI](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meteo-ics/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-325%20%2B%20CI-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-328%20%2B%20CI-brightgreen.svg)](#)
 
 **Your weather, astronomy & air-quality — automatically delivered to any calendar app.**  
 Subscribe once to a live `.ics` feed and your calendar does the rest. No new app, no new login, no new habit. Wake up to per-day events titled `☀️ 22°C Paris` with temperature, rain, UV, AQI, moon phase, pollen and road-hazard advice — all built from real forecast models with a live accuracy audit.
@@ -136,7 +136,7 @@ Built-in data for national holidays, international observances, religious events
 ### 🧪 Running Tests Locally
 
 ```bash
-python tests/run_tests.py      # 325 source-structure + behavioral tests
+python tests/run_tests.py      # 328 source-structure + behavioral tests
 python tests/lint_balance.py   # brace/bracket balance + cross-file collision + constant drift
 ```
 

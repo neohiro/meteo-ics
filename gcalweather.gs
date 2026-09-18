@@ -2143,8 +2143,16 @@ function fetchAllAtmosphericDataParallel(locationPool) {
             cacheObj.aq.pm10.push(safe(globalAqi.pm10[i]));
             cacheObj.aq.ozone = cacheObj.aq.ozone || [];
             cacheObj.aq.nitrogen_dioxide = cacheObj.aq.nitrogen_dioxide || [];
+            cacheObj.aq.dust = cacheObj.aq.dust || [];
+            cacheObj.aq.alder_pollen = cacheObj.aq.alder_pollen || [];
+            cacheObj.aq.birch_pollen = cacheObj.aq.birch_pollen || [];
+            cacheObj.aq.grass_pollen = cacheObj.aq.grass_pollen || [];
             cacheObj.aq.ozone.push(safe(globalAqi.ozone ? globalAqi.ozone[i] : null));
             cacheObj.aq.nitrogen_dioxide.push(safe(globalAqi.nitrogen_dioxide ? globalAqi.nitrogen_dioxide[i] : null));
+            cacheObj.aq.dust.push(safe(globalAqi.dust ? globalAqi.dust[i] : null));
+            cacheObj.aq.alder_pollen.push(null);
+            cacheObj.aq.birch_pollen.push(null);
+            cacheObj.aq.grass_pollen.push(null);
             cacheObj.aq._source = globalAqi._source;
           }
         });
@@ -2157,6 +2165,10 @@ function fetchAllAtmosphericDataParallel(locationPool) {
           cacheObj.aq.pm10 = sorted.map(x => cacheObj.aq.pm10[x.i]);
           if (cacheObj.aq.ozone) cacheObj.aq.ozone = sorted.map(x => cacheObj.aq.ozone[x.i] !== undefined ? cacheObj.aq.ozone[x.i] : null);
           if (cacheObj.aq.nitrogen_dioxide) cacheObj.aq.nitrogen_dioxide = sorted.map(x => cacheObj.aq.nitrogen_dioxide[x.i] !== undefined ? cacheObj.aq.nitrogen_dioxide[x.i] : null);
+          if (cacheObj.aq.dust) cacheObj.aq.dust = sorted.map(x => cacheObj.aq.dust[x.i] !== undefined ? cacheObj.aq.dust[x.i] : null);
+          if (cacheObj.aq.alder_pollen) cacheObj.aq.alder_pollen = sorted.map(x => cacheObj.aq.alder_pollen[x.i] !== undefined ? cacheObj.aq.alder_pollen[x.i] : null);
+          if (cacheObj.aq.birch_pollen) cacheObj.aq.birch_pollen = sorted.map(x => cacheObj.aq.birch_pollen[x.i] !== undefined ? cacheObj.aq.birch_pollen[x.i] : null);
+          if (cacheObj.aq.grass_pollen) cacheObj.aq.grass_pollen = sorted.map(x => cacheObj.aq.grass_pollen[x.i] !== undefined ? cacheObj.aq.grass_pollen[x.i] : null);
         }
       } else {
         cacheObj.aq = globalAqi;
@@ -2207,7 +2219,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
     }
   }
 
-  const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [], ozone: [], nitrogen_dioxide: [] };
+  const r = { time: [], european_aqi: [], us_aqi: [], pm2_5: [], pm10: [], ozone: [], nitrogen_dioxide: [], dust: [] };
   const radius = Number.isFinite(aqRadius) && aqRadius > 0 ? aqRadius : (CONFIG.aqRadius || 25);
   const today = new Date();
   const dates = [];
@@ -2266,6 +2278,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
               r.pm10.push(pm10);
               r.ozone.push(o3);
               r.nitrogen_dioxide.push(no2);
+              r.dust.push(null);
             });
             r._source = "OpenAQ";
             updateAqiHistory(loc.name, r);
@@ -2334,6 +2347,7 @@ function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
               r.pm10.push(pm10v);
               r.ozone.push(o3v);
               r.nitrogen_dioxide.push(no2v);
+              r.dust.push(null);
             });
             r._source = "WAQI";
             updateAqiHistory(loc.name, r);
@@ -2583,11 +2597,11 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
         aqiScale = 500;
       }
 
-      pm25Val = data.aq.pm2_5 && data.aq.pm2_5[idx] !== null ? Number(data.aq.pm2_5[idx].toFixed(1)) : null;
-      pm10Val = data.aq.pm10 && data.aq.pm10[idx] !== null ? Number(data.aq.pm10[idx].toFixed(1)) : null;
-      o3Val = data.aq.ozone && data.aq.ozone[idx] !== null ? Number(data.aq.ozone[idx].toFixed(1)) : null;
-      no2Val = data.aq.nitrogen_dioxide && data.aq.nitrogen_dioxide[idx] !== null ? Number(data.aq.nitrogen_dioxide[idx].toFixed(1)) : null;
-      dustVal = data.aq.dust && data.aq.dust[idx] !== null ? Number(data.aq.dust[idx].toFixed(1)) : null;
+      pm25Val = data.aq.pm2_5 && data.aq.pm2_5[idx] != null ? Number(data.aq.pm2_5[idx].toFixed(1)) : null;
+      pm10Val = data.aq.pm10 && data.aq.pm10[idx] != null ? Number(data.aq.pm10[idx].toFixed(1)) : null;
+      o3Val = data.aq.ozone && data.aq.ozone[idx] != null ? Number(data.aq.ozone[idx].toFixed(1)) : null;
+      no2Val = data.aq.nitrogen_dioxide && data.aq.nitrogen_dioxide[idx] != null ? Number(data.aq.nitrogen_dioxide[idx].toFixed(1)) : null;
+      dustVal = data.aq.dust && data.aq.dust[idx] != null ? Number(data.aq.dust[idx].toFixed(1)) : null;
       const birch = data.aq.birch_pollen ? data.aq.birch_pollen[idx] || 0 : 0;
       const grass = data.aq.grass_pollen ? data.aq.grass_pollen[idx] || 0 : 0;
       const alder = data.aq.alder_pollen ? data.aq.alder_pollen[idx] || 0 : 0;
@@ -3624,33 +3638,34 @@ function getUvAdvice(uv, lang) {
 }
 
 function getPollutantContext(val, pollutant, lang) {
-  if (val == null || isNaN(val)) return "";
+  const num = Number(val);
+  if (val == null || isNaN(num)) return "";
   if (pollutant === "pm25") {
-    if (val <= 10) return t("aqiGood", lang);
-    if (val <= 25) return t("aqiFair", lang);
-    if (val <= 50) return t("aqiMod", lang);
-    if (val <= 75) return t("aqiPoor", lang);
+    if (num <= 10) return t("aqiGood", lang);
+    if (num <= 25) return t("aqiFair", lang);
+    if (num <= 50) return t("aqiMod", lang);
+    if (num <= 75) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   if (pollutant === "pm10" || pollutant === "dust") {
-    if (val <= 20) return t("aqiGood", lang);
-    if (val <= 50) return t("aqiFair", lang);
-    if (val <= 100) return t("aqiMod", lang);
-    if (val <= 200) return t("aqiPoor", lang);
+    if (num <= 20) return t("aqiGood", lang);
+    if (num <= 50) return t("aqiFair", lang);
+    if (num <= 100) return t("aqiMod", lang);
+    if (num <= 200) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   if (pollutant === "o3") {
-    if (val <= 50) return t("aqiGood", lang);
-    if (val <= 100) return t("aqiFair", lang);
-    if (val <= 160) return t("aqiMod", lang);
-    if (val <= 200) return t("aqiPoor", lang);
+    if (num <= 50) return t("aqiGood", lang);
+    if (num <= 100) return t("aqiFair", lang);
+    if (num <= 160) return t("aqiMod", lang);
+    if (num <= 200) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   if (pollutant === "no2") {
-    if (val <= 40) return t("aqiGood", lang);
-    if (val <= 90) return t("aqiFair", lang);
-    if (val <= 180) return t("aqiMod", lang);
-    if (val <= 350) return t("aqiPoor", lang);
+    if (num <= 40) return t("aqiGood", lang);
+    if (num <= 90) return t("aqiFair", lang);
+    if (num <= 180) return t("aqiMod", lang);
+    if (num <= 350) return t("aqiPoor", lang);
     return t("aqiHzd", lang);
   }
   return "";

@@ -14,13 +14,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Version bumped: `2.4.0` → `2.4.1` in both `CONFIG` and `ICAL_CONFIG`.
 - **README breaking-news wording**: "Top headlines from major outlets" (breaking news is general news from major outlets, not weather-only).
+- **Global AQI merge parity (gcalweather.gs)**: the Open-Meteo → OpenAQ/WAQI fallback merge now pushes + sorts `dust` and all three pollen arrays exactly like `icalweather.gs`, keeping every parallel AQI array synchronized with `data.aq.time` (was: length/order divergence on date gaps, which could crash the dust/pollen extraction).
+- **`gcalFetchGlobalAQI` parity**: return object now includes `dust: []` and both OpenAQ/WAQI branches push a `null` dust per date (mirrors `icalweather.gs`).
 
 ### Fixed
-- README version badge synced to `2.4.1`; test-count badge updated to 325.
+- README version badge synced to `2.4.1`.
+- **Pollutant extraction null-guard hardening** (both scripts): PM2.5/PM10/O₃/NO₂/dust array reads now use loose `!= null` instead of `!== null`, preventing `undefined.toFixed()` crashes if a parallel array is ever short by one element.
+- **`getPollutantContext()` input normalization**: value is coerced via `Number(val)` before classification so non-numeric inputs return an empty verdict instead of leaking into a bucket.
+- DEPLOYMENT_GUIDE version/test-count fields synced (2.4.1 / 328).
 
 ### Tests
-- 325 tests (was 322): +3 new tests covering pollutant-context bucket keys, the `getPollutantContext()` guard + bucket chains, and AIR QUALITY section rendering of PM2.5/O₃/NO₂/dust context.
-- `python tests/run_tests.py` — all 325 pass.
+- 328 tests (was 325): +3 covering GCal↔ICal merge parity for dust/pollen (`test_gcal_global_aqi_merge_syncs_dust_and_pollen`), the duplicate `!= null` extraction guard (`test_gcal_ical_pollutant_extraction_uses_loose_null_guard`), and `gcalFetchGlobalAQI` returning a `dust` array with per-branch null pushes.
+- `python tests/run_tests.py` — all 328 pass.
 
 ## [2.4.0] — 2026-09-18
 

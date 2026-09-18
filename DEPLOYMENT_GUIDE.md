@@ -1,7 +1,7 @@
 # meteo-ics — Production Deployment Guide
 
-**Version:** 2.4.0  
-**Test Status:** 322/322 passing | Structural balance: OK | Cross-file collisions: 0
+**Version:** 2.4.1  
+**Test Status:** 328/328 passing | Structural balance: OK | Cross-file collisions: 0
 
 ---
 
@@ -251,7 +251,7 @@ meteo-ics/
 ├── CONFIG.icalweather.example.js   # URL building guide
 ├── DEPLOYMENT_GUIDE.md         # This file
 ├── tests/
-│   ├── run_tests.py            # 322 tests (run: python tests/run_tests.py)
+│   ├── run_tests.py            # 328 tests (run: python tests/run_tests.py)
 │   └── lint_balance.py         # Structural balance check
 ├── CHANGELOG.md                # Full history
 ├── OVERVIEW.md                 # Engineering overview
@@ -263,9 +263,9 @@ meteo-ics/
 ## Verification Commands
 
 ```bash
-# Full test suite (322 tests)
+# Full test suite (328 tests)
 cd meteo-ics && python tests/run_tests.py
-# Expected: Passed: 322, Failed: 0
+# Expected: Passed: 328, Failed: 0
 
 # Structural balance (braces/parens/brackets)
 python tests/lint_balance.py
