@@ -20,15 +20,15 @@ Subscribe once to a live `.ics` feed and your calendar does the rest. No new app
 
 ## 🚀 Try It Now — Pick Your City
 
-<!-- DEPLOY-URL: https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec -->
+<!-- DEPLOY-URL: https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec -->
 > Copy any URL below and paste it into your calendar app's subscription field.
 
 | Region | Cities | URL |
 |---|---|---|
-| 🇬🇧 British Isles | London, Edinburgh · 30 days | `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=London,Edinburgh` |
-| 🇺🇸 United States | New York, Chicago, Seattle · °F · 14 days | `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14` |
-| 🇦🇺 Australia | Sydney, Melbourne · hazards off | `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Sydney,Melbourne&hazards=false` |
-| 🌐 JSON Telemetry | Live diagnostics | `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?action=status` |
+| 🇬🇧 British Isles | London, Edinburgh · 30 days | `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=London,Edinburgh` |
+| 🇺🇸 United States | New York, Chicago, Seattle · °F · 14 days | `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14` |
+| 🇦🇺 Australia | Sydney, Melbourne · hazards off | `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Sydney,Melbourne&hazards=false` |
+| 🌐 JSON Telemetry | Live diagnostics | `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?action=status` |
 
 *(Click any cell to copy. Replace `…` with your deployed script ID.)*
 
@@ -164,16 +164,16 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇬🇧 Quick Links
 
 - **British Isles (London & Edinburgh, 30 Days):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=London,Edinburgh`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=London,Edinburgh`
 
 - **US Metro in Fahrenheit (New York, Chicago, Seattle, 14 Days):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=New%20York,Chicago,Seattle&unit=fahrenheit&days=14`
 
 - **No Road Hazard Warnings (Sydney & Melbourne):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Sydney,Melbourne&hazards=false`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Sydney,Melbourne&hazards=false`
 
 - **AI Telemetry Endpoint (JSON):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?action=status`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?action=status`
 
 ---
 
@@ -193,10 +193,10 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇨🇳 快捷链接
 
 - **京津冀与长三角 (北京与上海, 30天周期):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Beijing,Shanghai&lang=zh`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Beijing,Shanghai&lang=zh`
 
 - **华南及大湾区核心城市 (广州、深圳、香港、台北, 14天):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Guangzhou,Shenzhen,Hong%20Kong,Taipei&lang=zh&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Guangzhou,Shenzhen,Hong%20Kong,Taipei&lang=zh&days=14`
 
 ---
 
@@ -216,10 +216,10 @@ Wake up to a calendar that shows you exactly what's coming. High-precision forec
 ### 🇮🇳 तैयार लिंक
 
 - **उत्तर भारत मेट्रो (दिल्ली और लखनऊ, 30 दिन):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Delhi,Lucknow&lang=hi`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Delhi,Lucknow&lang=hi`
 
 - **भारतीय प्रमुख आर्थिक केंद्र (मुंबई, बेंगलुरु, हैदराबाद, कोलकाता, 14 दिन):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Mumbai,Bengaluru,Hyderabad,Kolkata&lang=hi&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Mumbai,Bengaluru,Hyderabad,Kolkata&lang=hi&days=14`
 
 ---
 
@@ -239,10 +239,10 @@ Recibe cada mañana lo que viene: temperaturas, lluvia, viento, UV, calidad del 
 ### 🇪🇸 Enlaces Directos
 
 - **Península Ibérica (Madrid y Barcelona, 30 Días):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Madrid,Barcelona&lang=es`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Madrid,Barcelona&lang=es`
 
 - **Hispanoamérica (Ciudad de México, Bogotá, Buenos Aires, Santiago, 14 Días):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Mexico%20City,Bogota,Buenos%20Aires,Santiago&lang=es&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Mexico%20City,Bogota,Buenos%20Aires,Santiago&lang=es&days=14`
 
 ---
 
@@ -262,10 +262,10 @@ Chaque matin, votre calendrier vous montre ce qui arrive. Des prévisions haute 
 ### 🇫🇷 Liens Prêts à l'Emploi
 
 - **France Métropolitaine (Paris & Lyon, 30 Jours) :**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Paris,Lyon&lang=fr`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Paris,Lyon&lang=fr`
 
 - **Espace Francophone (Marseille, Bruxelles, Genève, Montréal, 14 Jours) :**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Marseille,Brussels,Geneva,Montreal&lang=fr&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Marseille,Brussels,Geneva,Montreal&lang=fr&days=14`
 
 ---
 
@@ -285,10 +285,10 @@ Chaque matin, votre calendrier vous montre ce qui arrive. Des prévisions haute 
 ### 🇸🇦 روابط مباشرة
 
 - **الخليج العربي (الرياض وأبوظبي, 30 يوماً):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Riyadh,Abu%20Dhabi&lang=ar`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Riyadh,Abu%20Dhabi&lang=ar`
 
 - **عواصم عربية كبرى (القاهرة، دبي، الدوحة، عمّان, 14 يوماً):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Cairo,Dubai,Doha,Amman&lang=ar&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Cairo,Dubai,Doha,Amman&lang=ar&days=14`
 
 ---
 
@@ -308,10 +308,10 @@ Jeden Morgen zeigt Ihnen Ihr Kalender, was kommt. Hochauflösende Vorhersagen (T
 ### 🇩🇪 Sofort-Links
 
 - **Deutschland Achse (Berlin & München, 30 Tage):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Berlin,Munich&lang=de`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Berlin,Munich&lang=de`
 
 - **DACH-Großstädte (Hamburg, Frankfurt, Wien, Zürich, 14 Tage):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Hamburg,Frankfurt,Vienna,Zurich&lang=de&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Hamburg,Frankfurt,Vienna,Zurich&lang=de&days=14`
 
 ---
 
@@ -331,12 +331,12 @@ Elke ochtend toont uw agenda wat er aankomt. Hoge-resolutie voorspellingen (D1�
 ### 🇳🇱 Directe Links
 
 - **Randstad Hart (Amsterdam & Rotterdam, 30 Dagen):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Amsterdam,Rotterdam&lang=nl`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Amsterdam,Rotterdam&lang=nl`
 
 - **Benelux Knooppunten (Utrecht, Eindhoven, Antwerpen, Gent, 14 Dagen):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=Utrecht,Eindhoven,Antwerp,Ghent&lang=nl&days=14`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=Utrecht,Eindhoven,Antwerp,Ghent&lang=nl&days=14`
 
 - **Kustzone Zonder Gladheidswaarschuwingen (Den Haag & Vlissingen):**  
-  `https://script.google.com/macros/s/AKfycbzhwH5_tbYwYLt4U5W5DT2w8TiauUuMqL484uIlDCnUXhc2cdZFlEsy79SwIsPbBGP4ZA/exec?cities=The%20Hague,Vlissingen&lang=nl&hazards=false`
+  `https://script.google.com/macros/s/AKfycbxLMlYpCuk_2j7oibteUaH_pCbYVU3b7Uomur6M59P5te1gc8JSyiYn2hcFyC19XaUQ/exec?cities=The%20Hague,Vlissingen&lang=nl&hazards=false`
 
 [![Visitors](https://api.visitorbadge.io/api/visitors?path=github.com/neohiro/meteo-ics&label=Visitors&countColor=%23263759)](https://visitorbadge.io/status?path=github.com/neohiro/meteo-ics)
