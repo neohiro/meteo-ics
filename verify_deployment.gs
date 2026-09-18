@@ -54,27 +54,44 @@ function verifyGcalDeployment() {
   
   // 5. Test calendar resolution
   console.log("\n4. Calendar resolution:");
+  let cal;
   try {
-    const cal = resolveCalendar();
-    console.log(`   ✓ Calendar: "${cal.getName()}" (ID: ${cal.getId()})`);
+    cal = resolveCalendar();
+    console.log(`   ✓ Calendar: "${cal.getName()}" (ID: ${cal.getId()}) | TZ: ${cal.getTimeZone()}`);
+    if (!CONFIG.calendarId) {
+      console.log("   ℹ️  calendarId is empty — auto-created calendar. To use existing shared calendar, set calendarId in CONFIG.");
+    }
   } catch (e) {
     console.log(`   ✗ Calendar error: ${e.message}`);
+    return;
   }
   
-  // 6. Test AQI cascade
-  console.log("\n5. AQI cascade test (dry run):");
+  // 6. Test calendar write permission
+  console.log("\n5. Calendar write permission test:");
+  try {
+    const testDate = new Date();
+    const testEvent = cal.createAllDayEvent("🧪 meteo-ics write test", testDate, { description: "Test write - safe to delete" });
+    testEvent.deleteEvent();
+    console.log("   ✓ Write permission confirmed (test event created & deleted)");
+  } catch (e) {
+    console.log(`   ✗ Write permission FAILED: ${e.message}`);
+    console.log("   → You need Edit access on this calendar. Check sharing settings.");
+  }
+  
+  // 7. Full pipeline test (dry run)
+  console.log("\n6. Full pipeline test (dry run):");
   const originalDryRun = CONFIG.dryRun;
   CONFIG.dryRun = true;
   try {
     syncWeatherToCalendar();
-    console.log("   ✓ Dry run completed — check Execution log for details");
+    console.log("   ✓ Pipeline dry run completed — check Execution log for details");
   } catch (e) {
-    console.log(`   ✗ Dry run failed: ${e.message}`);
+    console.log(`   ✗ Pipeline failed: ${e.message}`);
   }
   CONFIG.dryRun = originalDryRun;
   
-  // 7. Check circuit breakers
-  console.log("\n6. Circuit breakers:");
+  // 8. Check circuit breakers
+  console.log("\n7. Circuit breakers:");
   Object.keys(CB.cfg).forEach(name => {
     console.log(`   ${name}: ${CB.getState(name)}`);
   });

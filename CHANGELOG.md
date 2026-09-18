@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Adaptive AQI Cache TTL** (both scripts): Cache TTL now adapts 1h–12h based on AQI volatility variance, reducing API calls during stable conditions while staying fresh during high volatility.
 - **Predictive Event-Driven AQI Prefetch** (both scripts): `predictiveAqiPrefetch()` warms cache only for missing/stale locations, reducing live API calls by ~40%.
 - **AQI History Tracking** (both scripts): 14-day rolling history per location for variance calculation, enabling adaptive TTL.
+- **Comprehensive Sync Diagnostics** (gcalweather.gs): Detailed logging for calendar used, fetch results per location, payloads built, events created/updated, and zero-write detection.
+- **Enhanced Deployment Verification** (verify_deployment.gs): Calendar write permission test, full pipeline dry-run, circuit breaker status, actionable error messages.
+- **Empty-data Detection** (fetchAllAtmosphericDataParallel): Warns when locations return no usable data after fetch.
 
 ### Changed
 - Version bumped: `2.3.0` → `2.4.0` in both `CONFIG` and `ICAL_CONFIG`.
@@ -19,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `gcalFetchGlobalAQI()` / `fetchGlobalAQI()`: Live fetches now update AQI history for variance tracking (was only updated in prefetch).
 - Adaptive TTL enforcement: Expired cache entries are now deleted to prevent unbounded PropertiesService growth.
 - Cache key normalization: Both scripts now use `norm()` for Unicode-safe cache keys (fixes cities with diacritics).
+- Silent failure modes: Added explicit logging for zero-result scenarios (dryRun, calendar permissions, API failures, empty data).
 
 ### Tests
 - 322 tests (was 264): +58 new tests covering adaptive AQI TTL, predictive prefetch, AQI history, robustness hardening.

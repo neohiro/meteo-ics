@@ -1768,6 +1768,12 @@ function syncWeatherToCalendar() {
   const calTz = cal.getTimeZone();
   const unitSymbol = CONFIG.temperatureUnit === "celsius" ? "°" : "°F";
 
+  // Diagnostic: log which calendar we're writing to
+  Logger.log(`Target calendar: "${cal.getName()}" (ID: ${cal.getId()}) | Timezone: ${calTz}`);
+  if (CONFIG.dryRun) {
+    Logger.log("DRY-RUN MODE: No calendar writes will be performed. Set CONFIG.dryRun = false to enable writes.");
+  }
+
   const now = new Date();
   const todayStr = Utilities.formatDate(now, calTz, "yyyy-MM-dd");
   const todayDate = Utilities.parseDate(todayStr + " 12:00:00", calTz, "yyyy-MM-dd HH:mm:ss");
@@ -1810,6 +1816,23 @@ function syncWeatherToCalendar() {
     return; // Cannot proceed without any data
   }
 
+  // Diagnostic: log fetch results
+  let locationsWithData = 0;
+  let locationsWithDet = 0;
+  let locationsWithEns = 0;
+  let locationsWithAq = 0;
+  weatherCache.forEach((data, key) => {
+    if (data && (data.det || data.ens || data.aq)) locationsWithData++;
+    if (data && data.det) locationsWithDet++;
+    if (data && data.ens) locationsWithEns++;
+    if (data && data.aq) locationsWithAq++;
+  });
+  Logger.log(`Fetch results: ${locationsWithData}/${locationPool.size} locations have data (det:${locationsWithDet} ens:${locationsWithEns} aq:${locationsWithAq})`);
+  if (locationsWithData === 0) {
+    Logger.log("ERROR: No location has any weather data — check API connectivity, API keys, and circuit breakers");
+    return;
+  }
+
   // 3. Reconcile verified ground truth & compute scorecards
   reconcileGroundTruth(locationPool, weatherCache);
   const globalStats = computeGlobalModelAccuracy(unitSymbol);
@@ -1850,6 +1873,9 @@ function syncWeatherToCalendar() {
   // 5. Update, de-duplicate, or create events
   const touchedEventIds = new Set();
   const deletedEventIds = new Set();
+  let payloadsBuilt = 0;
+  let eventsCreated = 0;
+  let eventsUpdated = 0;
 
   daySchedule.forEach(({ date, offset, locKeys }) => {
     const dStr = Utilities.formatDate(date, calTz, "yyyy-MM-dd");
@@ -1867,6 +1893,7 @@ function syncWeatherToCalendar() {
         return;
       }
       if (!payload) return;
+      payloadsBuilt++;
 
       if (CONFIG.dryRun) {
         Logger.log(`DRY-RUN ${loc.name} ${dStr}: ${payload.title}`);
@@ -1884,6 +1911,7 @@ function syncWeatherToCalendar() {
           primary.setDescription(finalDesc);
           if (payload.eventColor) primary.setColor(payload.eventColor);
           touchedEventIds.add(primary.getId());
+          eventsUpdated++;
 
           for (let i = 1; i < matched.length; i++) {
             try {
@@ -1897,12 +1925,19 @@ function syncWeatherToCalendar() {
           const created = cal.createAllDayEvent(payload.title, date, { description: finalDesc });
           if (payload.eventColor) created.setColor(payload.eventColor);
           touchedEventIds.add(created.getId());
+          eventsCreated++;
         }
       } catch (e) {
         Logger.log(`WARNING: Calendar write failed for ${loc.name} ${dStr}: ${e}`);
       }
     });
   });
+
+  // Diagnostic summary
+  Logger.log(`Sync summary: ${payloadsBuilt} payloads built, ${eventsCreated} events created, ${eventsUpdated} events updated, ${deletedEventIds.size} duplicates removed`);
+  if (!CONFIG.dryRun && payloadsBuilt > 0 && eventsCreated === 0 && eventsUpdated === 0) {
+    Logger.log("WARNING: Payloads were built but NO events were written. Check calendar write permissions and CONFIG.calendarId.");
+  }
 
   // 6. Sweep orphaned weather events from older or removed locations.
   //    Preserve past events (verified ground truth). Only delete future
@@ -2125,6 +2160,20 @@ function fetchAllAtmosphericDataParallel(locationPool) {
       cacheObj.aq._source = "Open-Meteo";
     }
   });
+
+  // Diagnostic: log locations with no usable data
+  const emptyLocations = [];
+  weatherCache.forEach((data, key) => {
+    const hasDet = data && data.det && data.det.time && data.det.time.length > 0;
+    const hasEns = data && data.ens && data.ens.time && data.ens.time.length > 0;
+    const hasAq = data && data.aq && data.aq.time && data.aq.time.length > 0;
+    if (!hasDet && !hasEns && !hasAq) {
+      emptyLocations.push(key);
+    }
+  });
+  if (emptyLocations.length > 0) {
+    Logger.log(`WARNING: ${emptyLocations.length} location(s) have NO usable data after fetch: ${emptyLocations.join(", ")}`);
+  }
 
   return weatherCache;
 }
