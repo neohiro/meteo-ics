@@ -1947,11 +1947,28 @@ function syncWeatherToCalendar() {
   // 6. Sweep orphaned weather events from older or removed locations.
   //    Preserve past events (verified ground truth). Only delete future
   //    orphan events or events from removed locations.
+  //    A still-scheduled event whose refresh was skipped this run (e.g. a
+  //    transient deterministic-feed failure) must NOT be deleted — otherwise
+  //    repeated syncs would erase D0-D14 events whenever one API call fails.
+  const scheduledKeys = new Set();
+  daySchedule.forEach(({ date, locKeys }) => {
+    const dStr = Utilities.formatDate(date, calTz, "yyyy-MM-dd");
+    locKeys.forEach(key => scheduledKeys.add(`${dStr}_${key}`));
+  });
+
   allManagedEvents.forEach(ev => {
     const id = ev.getId();
     if (touchedEventIds.has(id) || deletedEventIds.has(id)) return;
     const evDateStr = Utilities.formatDate(ev.getStartTime(), calTz, "yyyy-MM-dd");
     if (evDateStr < todayStr) return; // preserve past events
+    const desc = ev.getDescription() || "";
+    const keyMatch = desc.match(KEY_REGEX);
+    if (keyMatch) {
+      if (scheduledKeys.has(keyMatch[1])) return; // still in sync plan — leave untouched
+    } else {
+      const cityKey = detectEventCity(`${ev.getTitle()} ${desc} ${ev.getLocation() || ""}`, locationPool);
+      if (cityKey && scheduledKeys.has(`${evDateStr}_${cityKey}`)) return; // still in sync plan
+    }
     try {
       ev.deleteEvent();
     } catch (e) {
