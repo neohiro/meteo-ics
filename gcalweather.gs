@@ -431,7 +431,7 @@ const FALLBACK_CITY_COORDS = {
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
-  version: "2.5.0",
+  version: "2.5.1",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
@@ -1586,24 +1586,41 @@ function getWikipediaOnThisDayText(dateStr) {
 }
 
 // ============================================================
-// BREAKING NEWS FETCHER (Current Top Headlines + Historical "On This Day")
+// BREAKING NEWS FETCHER (Current Day Only)
 // ============================================================
 const NEWS_API_URL = "https://newsapi.org/v2/everything";
 const NEWS_TOP_HEADLINES_URL = "https://newsapi.org/v2/top-headlines";
 const NEWS_MAJOR_DOMAINS = "bbc.com,cnn.com,reuters.com,apnews.com,nytimes.com,washingtonpost.com,theguardian.com,wsj.com,bloomberg.com,ft.com";
-const NEWS_FREE_TIER_DAYS = 30; // NewsAPI free tier serves only the most recent 30 days
 
 function redactSecretsForLog(value) {
   return String(value).replace(/(apiKey|token)=([^&\s"'<>]+)/gi, "$1=***");
 }
 
+// Returns the endpoints to try for a date, or an empty array when the date is
+// not the current day. Live headlines are only ever fetched for today: a
+// top-headlines call is a snapshot of *now*, so attaching it to a past or
+// future diary entry would state something untrue about that day.
 function buildBreakingNewsUrls(dateStr, todayKey, apiKey) {
-  const urls = [];
-  if (dateStr === todayKey) {
-    urls.push(`${NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey=${encodeURIComponent(apiKey)}`);
+  if (dateStr !== todayKey) return [];
+  return [
+    `${NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey=${encodeURIComponent(apiKey)}`,
+    `${NEWS_API_URL}?domains=${encodeURIComponent(NEWS_MAJOR_DOMAINS)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`
+  ];
+}
+
+// A headline block is only trusted when every line is an attributable
+// "• Source: Title" pair. Anything else (empty, truncated, placeholder or
+// error text) is rejected outright rather than partially rendered, so a
+// malformed API response can never reach the diary.
+function validateHeadlines(text) {
+  if (typeof text !== "string") return null;
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  for (const line of lines) {
+    if (!/^•\s+[^:]+:\s+\S/.test(line)) return null;
+    if (/\b(?:undefined|null|NaN)\b/.test(line)) return null;
   }
-  urls.push(`${NEWS_API_URL}?domains=${encodeURIComponent(NEWS_MAJOR_DOMAINS)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`);
-  return urls;
+  return lines.join("\n");
 }
 
 function fetchBreakingNews(dateStr, calTz) {
@@ -1619,22 +1636,14 @@ function fetchBreakingNews(dateStr, calTz) {
     Logger.log("Circuit [newsapi] OPEN — skipping fetch");
     return null;
   }
-  // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days and
-  // rejects future dates; any out-of-window date draws an HTTP 400 and burns
-  // daily quota. Skip without calling. Use calendar timezone (same as todayStr)
-  // so date classification matches the calendar's day boundaries.
-  const now = new Date();
-  const todayKey = Utilities.formatDate(now, calTz, "yyyy-MM-dd");
-  const freeTierCutoff = Utilities.formatDate(
-    new Date(now.getTime() - NEWS_FREE_TIER_DAYS * 86400000), calTz, "yyyy-MM-dd");
-  if (dateStr > todayKey || dateStr < freeTierCutoff) {
-    Logger.log(`Breaking news: ${dateStr} is outside NewsAPI coverage (${freeTierCutoff}..${todayKey}) — skipping`);
-    if (_breakingNewsCacheOrderGcal.length >= _BREAKING_NEWS_CACHE_MAX) {
-      const firstKey = _breakingNewsCacheOrderGcal.shift();
-      delete _breakingNewsCacheGcal[firstKey];
-    }
-    _breakingNewsCacheGcal[dateStr] = null;
-    _breakingNewsCacheOrderGcal.push(dateStr);
+  // Current day only. Live headlines are a snapshot of "now", so fetching for
+  // a past or future day would write a claim about that day that is not true.
+  // Past days replay headlines captured at the time instead (see
+  // buildDashboardPayload). Use calendar timezone (same as todayStr) so the
+  // date classification matches the calendar's day boundaries.
+  const todayKey = Utilities.formatDate(new Date(), calTz, "yyyy-MM-dd");
+  if (dateStr !== todayKey) {
+    Logger.log(`Breaking news: ${dateStr} is not the current day (${todayKey}) - no live fetch`);
     return null;
   }
   try {
@@ -1672,11 +1681,13 @@ function fetchBreakingNews(dateStr, calTz) {
         CB.recordSuccess('newsapi');
         receivedResponse = true;
         if (data.articles && Array.isArray(data.articles) && data.articles.length > 0) {
-          result = data.articles
-            .slice(0, 3)
-            .filter(a => a && a.title && a.source && a.source.name)
-            .map(a => `• ${a.source.name}: ${a.title}`)
-            .join("\n");
+          result = validateHeadlines(
+            data.articles
+              .slice(0, 3)
+              .filter(a => a && a.title && a.source && a.source.name)
+              .map(a => `• ${a.source.name}: ${a.title}`)
+              .join("\n")
+          );
         }
         if (result || urls.length === 1) break;
       } else if (code >= 400 && code < 500) {
@@ -2681,7 +2692,20 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
   const countryCode = loc.country || "US";
   const onThisDayText = getOnThisDayText(targetDateStr, countryCode);
   const wikiOnThisDay = getWikipediaOnThisDayText(targetDateStr);
-  const breakingNews = getBreakingNewsText(targetDateStr, calTz);
+  // Live headlines are only fetched for the current day. Today: capture the
+  // validated block once so the day keeps the headlines that were actually
+  // current when it was first synced. Past days: replay that capture,
+  // re-validating it on read. Future days: nothing, since no truthful
+  // headline exists for them yet.
+  let breakingNews = null;
+  if (offset === 0) {
+    const live = validateHeadlines(getBreakingNewsText(targetDateStr, calTz));
+    if (live && !record.headlines) {
+      record.headlines = live;
+      saveDayRecord(cityKey, targetDateStr, record);
+    }
+  }
+  breakingNews = validateHeadlines(record.headlines);
 
   // A. Past Days (Verified Ground Truth)
   if (offset < 0) {
@@ -2817,7 +2841,8 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       // 9. LOCATION & DATE
       [
         `📍 ${loc.name} · ${t("verifiedLog", lang)}`,
-        `📅 ${targetDateStr} (${Math.abs(offset)}${t("dAgo", lang)})`
+        `📅 ${targetDateStr} (${Math.abs(offset)}${t("dAgo", lang)})`,
+        `🔖 v${CONFIG.version}`
       ].join("\n")
     ];
 
@@ -2974,7 +2999,7 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
       o3Val !== null ? `• ${t("o3", lang)}: ${o3Val} µg/m³ (${getPollutantContext(o3Val, "o3", lang)})` : ``,
       no2Val !== null ? `• ${t("no2", lang)}: ${no2Val} µg/m³ (${getPollutantContext(no2Val, "no2", lang)})` : ``,
       dustVal !== null ? `• ${t("dust", lang)}: ${dustVal} µg/m³ (${getPollutantContext(dustVal, "dust", lang)})` : ``,
-      pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³${formatMetricContext(pollenVal, "pollen", isC, lang)}` : `• ${t("pollen", lang)}: ${t("polLow", lang)}${formatMetricContext(0, "pollen", isC, lang)}`
+      pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} grains/m³${formatMetricContext(pollenVal, "pollen", isC, lang)}` : `• ${t("pollen", lang)}: ${t("polLow", lang)}${formatMetricContext(0, "pollen", isC, lang)}`
     ].filter(Boolean).join("\n"),
 
     // 4. SUN & CELESTIAL
@@ -3036,7 +3061,8 @@ function buildDashboardPayload(loc, data, offset, targetDateStr, todayStr, globa
     // 9. LOCATION & DATE — at the bottom
     [
       `📍 ${loc.name}${loc.isDynamic ? " ✈️" : ""}`,
-      `📅 ${offset === 0 ? t("dDay", lang) : `D-${offset}`} · ${targetDateStr}`
+      `📅 ${offset === 0 ? t("dDay", lang) : `D-${offset}`} · ${targetDateStr}`,
+      `🔖 v${CONFIG.version}`
     ].join("\n")
   ];
 

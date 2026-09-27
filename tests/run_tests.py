@@ -138,15 +138,29 @@ def redact_secrets_for_log(value):
 
 def build_breaking_news_urls(date_str, today_key, api_key):
     encoded_key = quote(api_key, safe='')
-    urls = []
-    if date_str == today_key:
-        urls.append(f'{NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey={encoded_key}')
-    urls.append(
-        f'{NEWS_API_URL}?domains={quote(NEWS_MAJOR_DOMAINS, safe="")}'
-        f'&from={date_str}&to={date_str}&language=en&pageSize=3&sortBy=popularity'
-        f'&apiKey={encoded_key}'
-    )
-    return urls
+    if date_str != today_key:
+        return []
+    return [
+        f'{NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey={encoded_key}',
+        (f'{NEWS_API_URL}?domains={quote(NEWS_MAJOR_DOMAINS, safe="")}'
+         f'&from={date_str}&to={date_str}&language=en&pageSize=3&sortBy=popularity'
+         f'&apiKey={encoded_key}')
+    ]
+
+
+def validate_headlines(text):
+    """Mirror of gcal/ical validateHeadlines."""
+    if not isinstance(text, str):
+        return None
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    if not lines:
+        return None
+    for line in lines:
+        if not re.match(r'^\u2022\s+[^:]+:\s+\S', line):
+            return None
+        if re.search(r'\b(?:undefined|null|NaN)\b', line):
+            return None
+    return '\n'.join(lines)
 
 
 def get_moon_phase_details(date):
@@ -2386,6 +2400,21 @@ def test_readme_cities_default_is_required():
         'README cities param must indicate it is required, not show a fake default')
 
 
+def test_pollen_unit_label_is_grains_not_grams():
+    """Open-Meteo reports pollen in grains/m3; rendering it as gr/m3 overstates it by ~1e6."""
+    readme = open(os.path.join(REPO, 'README.md'), encoding='utf-8').read()
+    assert_true('grains/m' in readme, 'README pollen band table must state the unit')
+    assert_true('gr/m' not in readme.replace('grains/m', ''),
+        'README must not label pollen in grams per cubic metre')
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        line = re.search(r'pollenVal > 0 \?[^\n]*', src)
+        assert_true(line is not None, f'{name}: pollen render line not found')
+        assert_true('grains/m' in line.group(0),
+            f'{name}: pollen must be rendered in grains/m3')
+        assert_true(' gr/m' not in line.group(0),
+            f'{name}: pollen must not be rendered in grams per cubic metre')
+
+
 def test_ical_generatePrioritizedAdvices_wind_rain_pollen_moon_isfinite():
     """generatePrioritizedAdvices must use Number.isFinite for ctx.wind, ctx.rainVol,
     ctx.pollen, ctx.moonIllum comparisons. The old typeof === "number" pattern
@@ -3866,8 +3895,76 @@ def test_ical_breaking_news_exists():
     assert_true('NEWS_TOP_HEADLINES_URL' in ICAL, 'NEWS_TOP_HEADLINES_URL missing')
 
 
+def test_validate_headlines_rejects_untrustworthy_blocks():
+    """Only fully attributable "• Source: Title" blocks reach the diary."""
+    good = '• Reuters: Markets rally on rate cut'
+    assert_eq(validate_headlines(good), good)
+    assert_eq(validate_headlines('• Reuters: Rate cut\n• AP: Storm lands'),
+        '• Reuters: Rate cut\n• AP: Storm lands')
+    # Titles may contain colons; only the source separator is anchored.
+    assert_eq(validate_headlines('• BBC: Officials: talks resume'),
+        '• BBC: Officials: talks resume')
+    # Blank lines and padding are normalised away rather than rejected.
+    assert_eq(validate_headlines('  • Reuters: Rate cut  \n\n'), '• Reuters: Rate cut')
+    for bad, why in (
+        (None, 'non-string'),
+        (123, 'non-string'),
+        ('', 'empty'),
+        ('   \n  ', 'whitespace only'),
+        ('No breaking news today', 'placeholder without attribution'),
+        ('Error: rate limited', 'error text'),
+        ('• Reuters', 'missing title'),
+        ('• : title', 'missing source'),
+        (good + '\n• AP', 'one malformed line rejects the whole block'),
+        ('• Reuters: undefined', 'placeholder token leaked into a title'),
+        ('• Reuters: null values', 'placeholder token leaked into a title'),
+        ('• Reuters: NaN', 'placeholder token leaked into a title'),
+    ):
+        assert_eq(validate_headlines(bad), None, f'must reject {why}')
+
+
+def test_validate_headlines_is_wired_into_both_scripts():
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        helper = re.search(r'function validateHeadlines\(text\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: validateHeadlines missing')
+        assert_true(re.search(r'/\^\\u2022\\s\+', helper.group(0)) or '\u2022\\s+' in helper.group(0),
+            f'{name}: validateHeadlines must anchor on the bullet')
+        fetch = re.search(r'function fetchBreakingNews\([^)]*\)\s*\{[\s\S]*?\n\}', src).group(0)
+        assert_true('result = validateHeadlines(' in fetch,
+            f'{name}: API headlines must be validated before caching')
+        cache_name = '_breakingNewsCacheGcal' if name == 'gcalweather.gs' else '_breakingNewsCacheIcal'
+        assert_true(fetch.index('result = validateHeadlines(') < fetch.index(f'{cache_name}[dateStr] = result;'),
+            f'{name}: validation must happen before the value enters the cache')
+
+
+def test_gcal_past_days_replay_validated_capture_only():
+    """Past days never call NewsAPI; they replay what was captured, re-validated."""
+    builder = re.search(r'function buildDashboardPayload\([\s\S]*?\n\}\n', GCAL)
+    assert_true(builder is not None, 'buildDashboardPayload not found')
+    body = builder.group(0)
+    assert_true('if (offset === 0) {' in body, 'today branch must exist')
+    assert_true('validateHeadlines(getBreakingNewsText(' in body,
+        'today must fetch live headlines through the validator')
+    assert_true('record.headlines = live;' in body,
+        "today's validated headlines must be captured into the day record")
+    assert_true('if (live && !record.headlines)' in body,
+        'a day must keep the headlines that were current when it was first synced')
+    assert_true('breakingNews = validateHeadlines(record.headlines);' in body,
+        'replayed headlines must be re-validated on read')
+    assert_true('saveDayRecord(cityKey, targetDateStr, record);' in body,
+        'the capture must be persisted')
+    assert_true(body.index('const live = validateHeadlines(') < body.index('breakingNews = validateHeadlines(record.headlines);'),
+        'capture must happen before the replay read')
+    assert_true('saveDayRecord' in re.search(r'function saveDayRecord\([\s\S]*?\n\}', GCAL).group(0)
+        and 'JSON.stringify(record)' in re.search(r'function saveDayRecord\([\s\S]*?\n\}', GCAL).group(0),
+        'saveDayRecord must persist the whole record so headlines survive')
+    ical = re.search(r'generateIcsFeed\([\s\S]*?\n\}\n', ICAL)
+    assert_true('validateHeadlines(getBreakingNewsText(dateKey))' in ICAL,
+        'ICS must validate headlines at the render boundary')
+
+
 def test_breaking_news_url_routing():
-    """Current dates use top-headlines first; historical dates use everything only."""
+    """Only the current day reaches NewsAPI; past and future days build no URLs."""
     api_key = 'test key/123'
     today_urls = build_breaking_news_urls('2026-09-25', '2026-09-25', api_key)
     assert_eq(len(today_urls), 2)
@@ -3877,20 +3974,22 @@ def test_breaking_news_url_routing():
     assert_true('test%20key%2F123' in today_urls[0], 'API key must be URL encoded')
     assert_true(today_urls[1].startswith(NEWS_API_URL), 'today must retain everything fallback')
     assert_true('domains=' in today_urls[1] and 'from=2026-09-25&to=2026-09-25' in today_urls[1],
-        'everything fallback must use domains and date filters')
-    historical_urls = build_breaking_news_urls('2026-09-24', '2026-09-25', api_key)
-    assert_eq(len(historical_urls), 1)
-    assert_true(historical_urls[0].startswith(NEWS_API_URL), 'historical dates must use everything')
+        'same-day fallback must use domains and date filters')
+    for label, date_str in (('historical', '2026-09-24'), ('future', '2026-09-26')):
+        urls = build_breaking_news_urls(date_str, '2026-09-25', api_key)
+        assert_eq(len(urls), 0, f'{label} dates must not reach NewsAPI at all')
     for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
         helper = re.search(r'function buildBreakingNewsUrls\([^)]*\)\s*\{[\s\S]*?\n\}', src)
         assert_true(helper is not None, f'{name}: buildBreakingNewsUrls missing')
         helper_body = helper.group(0)
-        assert_true('dateStr === todayKey' in helper_body,
-            f'{name}: same-day routing condition missing')
+        assert_true('dateStr !== todayKey' in helper_body,
+            f'{name}: current-day routing condition missing')
         assert_true('NEWS_TOP_HEADLINES_URL' in helper_body and 'NEWS_API_URL' in helper_body,
             f'{name}: both NewsAPI endpoints must be wired')
         assert_true('from=${dateStr}&to=${dateStr}' in helper_body,
-            f'{name}: historical endpoint must retain date filters')
+            f'{name}: same-day fallback must retain date filters')
+        assert_true('if (dateStr !== todayKey) return [];' in helper_body,
+            f'{name}: router must return no URLs for any non-current day')
         fetch = re.search(r'function fetchBreakingNews\([^)]*\)\s*\{[\s\S]*?\n\}', src)
         assert_true(fetch is not None, f'{name}: fetchBreakingNews missing')
         assert_true('buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in fetch.group(0),
@@ -3898,6 +3997,10 @@ def test_breaking_news_url_routing():
         assert_true('if (result || urls.length === 1) break;' in fetch.group(0),
             f'{name}: current-day empty results must continue to the fallback')
         body = fetch.group(0)
+        assert_true('if (dateStr !== todayKey)' in body,
+            f'{name}: fetchBreakingNews must refuse to call NewsAPI for non-current days')
+        assert_true('validateHeadlines(' in body,
+            f'{name}: fetched headlines must be validated before they are cached')
         cache_name = '_breakingNewsCacheGcal' if name == 'gcalweather.gs' else '_breakingNewsCacheIcal'
         date_guard = body.index(r'/^\d{4}-\d{2}-\d{2}$/')
         cache_hit = body.index(f'{cache_name}[dateStr] !== undefined')
@@ -3961,25 +4064,34 @@ def test_breaking_news_returns_null_without_api_key():
 
 
 def test_breaking_news_historical_dates():
-    """Breaking news fetches historical headlines for any date (On This Day), not just today.
-    Uses /v2/everything endpoint with from/to date params and in-memory cache per date."""
+    """Live NewsAPI calls are restricted to the current day.
+
+    Supersedes the earlier "On This Day" behaviour, which attached a snapshot of
+    today's headlines to past entries. Past days now replay the block captured
+    while that day was current (GCal) or render no news (ICS); either way no
+    network call is made for a non-current day.
+    """
     fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', GCAL)
     assert_true(fn is not None)
-    body = fn.group(0)
-    assert_true('dateStr !== today' not in body and 'dateStr != today' not in body,
-        'getBreakingNewsText must NOT have today-only guard')
-    assert_true('fetchBreakingNews(dateStr, calTz)' in body,
+    assert_true('fetchBreakingNews(dateStr, calTz)' in fn.group(0),
         'getBreakingNewsText must pass dateStr and calTz to fetchBreakingNews')
-    # Verify fetchBreakingNews uses the date in the API URL
-    fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
-    assert_true(fn2 is not None)
-    body2 = fn2.group(0)
-    assert_true('from=${dateStr}&to=${dateStr}' in GCAL and 'buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in body2,
-        'fetchBreakingNews must use date in from/to params')
-    assert_true('buildBreakingNewsUrls' in body2 and 'https://newsapi.org/v2/everything' in GCAL,
-        'fetchBreakingNews must use /v2/everything endpoint for historical dates')
-    assert_true('_breakingNewsCacheGcal' in body2,
-        'fetchBreakingNews must use in-memory cache')
+    assert_true('return null' in fn.group(0),
+        'getBreakingNewsText must return null for an invalid dateStr')
+    for name, src, cache in (('gcalweather.gs', GCAL, '_breakingNewsCacheGcal'),
+                             ('icalweather.gs', ICAL, '_breakingNewsCacheIcal')):
+        body = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', src).group(0)
+        assert_true('buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in body,
+            f'{name}: fetchBreakingNews must use the shared URL router')
+        assert_true('if (dateStr !== todayKey)' in body,
+            f'{name}: the current-day guard must live in fetchBreakingNews')
+        guard = body.index('if (dateStr !== todayKey)')
+        api_key_read = body.index('getProperty("NEWS_API_KEY")')
+        network = body.index('UrlFetchApp.fetch(')
+        assert_true(guard < api_key_read < network,
+            f'{name}: the guard must run before the key is read and before any request')
+        assert_true(cache in body, f'{name}: fetchBreakingNews must keep its in-memory cache')
+        assert_true('NEWS_FREE_TIER_DAYS' not in src,
+            f'{name}: the 30-day free-tier window is obsolete once only today is fetched')
 
 
 def test_wikipedia_fetcher_has_cache():
@@ -4104,28 +4216,17 @@ def test_wikipedia_deduplication_setup():
 
 
 def test_breaking_news_historical_dates_enforced():
-    """Verify breaking news fetches historical headlines for any date (On This Day)."""
-    fn = re.search(r'function getBreakingNewsText\([\s\S]*?\n\}', GCAL)
-    assert_true(fn is not None)
-    body = fn.group(0)
-    # Must NOT have today-only guard
-    assert_true('dateStr !== today' not in body and 'dateStr != today' not in body,
-        'Breaking news must NOT only appear for today')
-    # Must pass dateStr to fetchBreakingNews
-    assert_true('fetchBreakingNews(dateStr, calTz)' in body,
-        'getBreakingNewsText must pass dateStr and calTz to fetchBreakingNews')
-    # fetchBreakingNews must use the date in the API URL
-    fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
-    assert_true(fn2 is not None)
-    body2 = fn2.group(0)
-    assert_true('from=${dateStr}&to=${dateStr}' in GCAL and 'buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in body2,
-        'fetchBreakingNews must use date in from/to params')
-    assert_true('buildBreakingNewsUrls' in body2 and 'https://newsapi.org/v2/everything' in GCAL,
-        'fetchBreakingNews must use /v2/everything endpoint for historical dates')
-    assert_true('_breakingNewsCacheGcal' in body2,
-        'fetchBreakingNews must use in-memory cache')
-    # Must return null for invalid dateStr
-    assert_true('return null' in body, 'Breaking news must return null for invalid dateStr')
+    """A non-current day must not reach the network, and the same-day fallback
+    must stay date-scoped so it can never widen back into a range query."""
+    body = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL).group(0)
+    assert_true('if (dateStr !== todayKey)' in body,
+        'breaking news must be restricted to the current day')
+    assert_true('from=${dateStr}&to=${dateStr}' in GCAL,
+        'the same-day fallback must keep from/to pinned to the requested date')
+    assert_true('https://newsapi.org/v2/everything' in GCAL,
+        'the fallback endpoint must remain wired')
+    assert_true('from=${dateStr -' not in GCAL and 'to=${todayKey}' not in GCAL,
+        'the fallback must never be widened into a multi-day range')
 
 
 def test_wikipedia_execution_dedup_cache():

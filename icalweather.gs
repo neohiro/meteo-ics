@@ -146,7 +146,7 @@ function _probeOpenMeteoAqCap() {
 
 const ICAL_CONFIG = {
   calendarName: "Weather & Celestial Feed",
-  version: "2.5.0",
+  version: "2.5.1",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
@@ -1610,24 +1610,41 @@ function getWikipediaOnThisDayText(dateStr) {
 }
 
 // ============================================================
-// BREAKING NEWS FETCHER (Current Top Headlines + Historical "On This Day")
+// BREAKING NEWS FETCHER (Current Day Only)
 // ============================================================
 const NEWS_API_URL = "https://newsapi.org/v2/everything";
 const NEWS_TOP_HEADLINES_URL = "https://newsapi.org/v2/top-headlines";
 const NEWS_MAJOR_DOMAINS = "bbc.com,cnn.com,reuters.com,apnews.com,nytimes.com,washingtonpost.com,theguardian.com,wsj.com,bloomberg.com,ft.com";
-const NEWS_FREE_TIER_DAYS = 30; // NewsAPI free tier serves only the most recent 30 days
 
 function redactSecretsForLog(value) {
   return String(value).replace(/(apiKey|token)=([^&\s"'<>]+)/gi, "$1=***");
 }
 
+// Returns the endpoints to try for a date, or an empty array when the date is
+// not the current day. Live headlines are only ever fetched for today: a
+// top-headlines call is a snapshot of *now*, so attaching it to a past or
+// future diary entry would state something untrue about that day.
 function buildBreakingNewsUrls(dateStr, todayKey, apiKey) {
-  const urls = [];
-  if (dateStr === todayKey) {
-    urls.push(`${NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey=${encodeURIComponent(apiKey)}`);
+  if (dateStr !== todayKey) return [];
+  return [
+    `${NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey=${encodeURIComponent(apiKey)}`,
+    `${NEWS_API_URL}?domains=${encodeURIComponent(NEWS_MAJOR_DOMAINS)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`
+  ];
+}
+
+// A headline block is only trusted when every line is an attributable
+// "• Source: Title" pair. Anything else (empty, truncated, placeholder or
+// error text) is rejected outright rather than partially rendered, so a
+// malformed API response can never reach the diary.
+function validateHeadlines(text) {
+  if (typeof text !== "string") return null;
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  for (const line of lines) {
+    if (!/^•\s+[^:]+:\s+\S/.test(line)) return null;
+    if (/\b(?:undefined|null|NaN)\b/.test(line)) return null;
   }
-  urls.push(`${NEWS_API_URL}?domains=${encodeURIComponent(NEWS_MAJOR_DOMAINS)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`);
-  return urls;
+  return lines.join("\n");
 }
 
 function fetchBreakingNews(dateStr) {
@@ -1643,22 +1660,14 @@ function fetchBreakingNews(dateStr) {
     Logger.log("Circuit [newsapi] OPEN — skipping fetch");
     return null;
   }
-  // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days and
-  // rejects future dates; any out-of-window date draws an HTTP 400 and burns
-  // daily quota. Skip without calling. Compare on UTC day keys (same convention
-  // as _todayISO / grid date keys) so a 2 AM run doesn't misclassify today.
-  const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
-  const freeTierCutoff = new Date(todayUTC.getTime() - NEWS_FREE_TIER_DAYS * 86400000)
+  // Current day only. Live headlines are a snapshot of "now", so fetching for
+  // a past or future day would write a claim about that day that is not true.
+  // Compare on UTC day keys (same convention as _todayISO / grid date keys) so
+  // a 2 AM run doesn't misclassify today.
+  const todayKey = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()))
     .toISOString().slice(0, 10);
-  const todayKey = todayUTC.toISOString().slice(0, 10);
-  if (dateStr > todayKey || dateStr < freeTierCutoff) {
-    Logger.log(`Breaking news: ${dateStr} is outside NewsAPI coverage (${freeTierCutoff}..${todayKey}) — skipping`);
-    if (_breakingNewsCacheOrderIcal.length >= _BREAKING_NEWS_CACHE_MAX) {
-      const firstKey = _breakingNewsCacheOrderIcal.shift();
-      delete _breakingNewsCacheIcal[firstKey];
-    }
-    _breakingNewsCacheIcal[dateStr] = null;
-    _breakingNewsCacheOrderIcal.push(dateStr);
+  if (dateStr !== todayKey) {
+    Logger.log(`Breaking news: ${dateStr} is not the current day (${todayKey}) - no live fetch`);
     return null;
   }
   try {
@@ -1696,11 +1705,13 @@ function fetchBreakingNews(dateStr) {
         CB.recordSuccess('newsapi');
         receivedResponse = true;
         if (data.articles && Array.isArray(data.articles) && data.articles.length > 0) {
-          result = data.articles
-            .slice(0, 3)
-            .filter(a => a && a.title && a.source && a.source.name)
-            .map(a => `• ${a.source.name}: ${a.title}`)
-            .join("\n");
+          result = validateHeadlines(
+            data.articles
+              .slice(0, 3)
+              .filter(a => a && a.title && a.source && a.source.name)
+              .map(a => `• ${a.source.name}: ${a.title}`)
+              .join("\n")
+          );
         }
         if (result || urls.length === 1) break;
       } else if (code >= 400 && code < 500) {
@@ -2313,7 +2324,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         o3Val !== null ? `• ${t("o3", lang)}: ${o3Val} µg/m³ (${getPollutantContext(o3Val, "o3", lang)})` : ``,
         no2Val !== null ? `• ${t("no2", lang)}: ${no2Val} µg/m³ (${getPollutantContext(no2Val, "no2", lang)})` : ``,
         dustVal !== null ? `• ${t("dust", lang)}: ${dustVal} µg/m³ (${getPollutantContext(dustVal, "dust", lang)})` : ``,
-        pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³${formatMetricContext(pollenVal, "pollen", isC, lang)}` : `• ${t("pollen", lang)}: ${t("polLow", lang)}${formatMetricContext(0, "pollen", isC, lang)}`
+        pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} grains/m³${formatMetricContext(pollenVal, "pollen", isC, lang)}` : `• ${t("pollen", lang)}: ${t("polLow", lang)}${formatMetricContext(0, "pollen", isC, lang)}`
       ].filter(Boolean).join("\n");
 
       const aggSec = [
@@ -2337,7 +2348,10 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       const countryCode = loc.country || "US";
       const onThisDayText = getOnThisDayText(dateKey, countryCode);
       const wikiOnThisDay = getWikipediaOnThisDayText(dateKey);
-      const breakingNews = getBreakingNewsText(dateKey);
+      // Re-validated at the render boundary. The ICS feed has no day-record
+      // store, so only the current day can carry headlines at all; past and
+      // future days render no news rather than a stale or fabricated one.
+      const breakingNews = validateHeadlines(getBreakingNewsText(dateKey));
       
       if (onThisDayText) {
         sections.push([

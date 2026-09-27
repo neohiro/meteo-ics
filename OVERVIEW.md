@@ -6,7 +6,7 @@
 |---|---|---|
 | `icalweather.gs` | ICS calendar feed generator (RFC 5545). Exposed as a Google Apps Script Web App URL; calendar clients subscribe to it. | `doGet(e)` |
 | `gcalweather.gs` | Google Calendar event syncer. Writes per-city, per-day all-day events to a configured Google Calendar. | `syncWeatherToCalendar()` |
-| `tests/run_tests.py` | 338-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
+| `tests/run_tests.py` | 342-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
 
 Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on:
 - **Open-Meteo API** (free, no key required) — deterministic forecast, ensemble forecast, air quality
@@ -147,8 +147,8 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 | Brace / paren / bracket structural balance + JS syntax | `tests/lint_balance.py` (strips comments, strings and regex literals, then counts delimiters) | 0/0/0 both files, syntax OK |
 | Cross-file module-let collisions + shared-constant drift | `tests/lint_balance.py` | 0 collisions, 0 drift |
 | Deployed-copy sanity (T_L integrity, glyph-tag parity) | `tests/deploy_sanity.py` | OK both files |
-| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (338 Python tests) | 338 passed, 0 failed |
-| Test count documented | `tests/README.md` | 338 |
+| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (342 Python tests) | 342 passed, 0 failed |
+| Test count documented | `tests/README.md` | 342 |
 
 **What was NOT verified** (no Apps Script runtime available; Node.js not installed):
 - Live `doGet` execution — all paths verified structurally but not end-to-end
@@ -171,7 +171,7 @@ python tests/lint_balance.py
 python tests/deploy_sanity.py
 ```
 
-Expected output: **338 passed, 0 failed** · both files 0/0/0 balanced.
+Expected output: **342 passed, 0 failed** · both files 0/0/0 balanced.
 
 ---
 

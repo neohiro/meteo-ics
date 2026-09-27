@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.5.1] — 2026-09-27
+
+### Fixed
+- **Pollen unit label**: Corrected `gr/m³` → `grains/m³` in GCal, ICS and README to match Open-Meteo's live `grains/m3` unit (was overstating by ~1e6).
+- **NewsAPI current-day only**: Live headlines now fetched exclusively for the current calendar day. Past/future dates replay the captured headline block (GCal) or render no news (ICS) — no network calls, no unverified content.
+- **Headline validation**: New `validateHeadlines()` guards both scripts; only fully attributable `• Source: Title` blocks reach the diary; placeholders, error text, and malformed lines are rejected outright.
+- **GCal headline capture/replay**: Today's validated headlines are captured once into the day record and replayed for past days, re-validated on read.
+
+### Added
+- **JS execution harness** (`tests/js_harness.js`): extracts and executes real Apps Script functions (`validateHeadlines`, `buildBreakingNewsUrls`, `fetchBreakingNews`, `redactSecretsForLog`, `getMetricContext`, `formatMetricContext`, `pushFiniteHourlyValue`, `METRIC_CONTEXT_BANDS`) with stubbed Apps Script globals. Runs on `bun` locally and `node` in CI.
+- **CI job `js`** executing the harness alongside existing Python test suite and lint.
+
+### Changed
+- Version bumped: `2.5.0` → `2.5.1` in both `CONFIG` / `ICAL_CONFIG` and example configs.
+- Test count updated: 342 (was 338).
+- GCal events now carry a version stamp (`🔖 v2.5.1`) in their description.
+- Breaking-news description updated to reflect current-day-only behavior.
+
 ## [2.5.0] — 2026-09-25
 
 ### Added

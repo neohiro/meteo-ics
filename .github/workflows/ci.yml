@@ -34,3 +34,20 @@ jobs:
 
       - name: Check balance
         run: python tests/lint_balance.py
+
+  js:
+    name: JS unit tests (real gcalweather.gs / icalweather.gs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The Python suite mirrors the Apps Script functions by hand, so a bug
+      # present only in the shipped .gs file would pass it. This job extracts
+      # and executes the real declarations instead.
+      - name: Run JS harness
+        run: node tests/js_harness.js
