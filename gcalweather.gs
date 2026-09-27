@@ -1627,15 +1627,6 @@ function fetchBreakingNews(dateStr, calTz) {
   if (!dateStr || typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return null;
   }
-  // Check in-memory cache first
-  if (_breakingNewsCacheGcal[dateStr] !== undefined) {
-    return _breakingNewsCacheGcal[dateStr];
-  }
-  // Circuit breaker: fail fast if circuit is open
-  if (!CB.isCallAllowed('newsapi')) {
-    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
-    return null;
-  }
   // Current day only. Live headlines are a snapshot of "now", so fetching for
   // a past or future day would write a claim about that day that is not true.
   // Past days replay headlines captured at the time instead (see
@@ -1644,6 +1635,15 @@ function fetchBreakingNews(dateStr, calTz) {
   const todayKey = Utilities.formatDate(new Date(), calTz, "yyyy-MM-dd");
   if (dateStr !== todayKey) {
     Logger.log(`Breaking news: ${dateStr} is not the current day (${todayKey}) - no live fetch`);
+    return null;
+  }
+  // Check in-memory cache first (only for today)
+  if (_breakingNewsCacheGcal[dateStr] !== undefined) {
+    return _breakingNewsCacheGcal[dateStr];
+  }
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('newsapi')) {
+    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
     return null;
   }
   try {

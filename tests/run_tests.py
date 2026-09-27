@@ -3963,6 +3963,20 @@ def test_gcal_past_days_replay_validated_capture_only():
         'ICS must validate headlines at the render boundary')
 
 
+def test_gcal_circuit_breaker_fallbacks_to_stored_headlines():
+    """When circuit is open, today's buildDashboardPayload falls back to stored headlines."""
+    builder = re.search(r'function buildDashboardPayload\([\s\S]*?\n\}\n', GCAL)
+    assert_true(builder is not None, 'buildDashboardPayload not found')
+    body = builder.group(0)
+    # The circuit breaker check is in fetchBreakingNews; if open, it returns null.
+    # Then validateHeadlines(null) -> null, so live is null.
+    # The code must NOT overwrite record.headlines with null, and must fall back to stored.
+    assert_true('if (live && !record.headlines)' in body,
+        'must only capture live headlines when they exist and no stored headlines')
+    assert_true('breakingNews = validateHeadlines(record.headlines);' in body,
+        'must read back stored headlines when live fetch fails')
+
+
 def test_breaking_news_url_routing():
     """Only the current day reaches NewsAPI; past and future days build no URLs."""
     api_key = 'test key/123'

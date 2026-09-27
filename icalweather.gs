@@ -1651,15 +1651,6 @@ function fetchBreakingNews(dateStr) {
   if (!dateStr || typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return null;
   }
-  // Check in-memory cache first
-  if (_breakingNewsCacheIcal[dateStr] !== undefined) {
-    return _breakingNewsCacheIcal[dateStr];
-  }
-  // Circuit breaker: fail fast if circuit is open
-  if (!CB.isCallAllowed('newsapi')) {
-    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
-    return null;
-  }
   // Current day only. Live headlines are a snapshot of "now", so fetching for
   // a past or future day would write a claim about that day that is not true.
   // Compare on UTC day keys (same convention as _todayISO / grid date keys) so
@@ -1668,6 +1659,15 @@ function fetchBreakingNews(dateStr) {
     .toISOString().slice(0, 10);
   if (dateStr !== todayKey) {
     Logger.log(`Breaking news: ${dateStr} is not the current day (${todayKey}) - no live fetch`);
+    return null;
+  }
+  // Check in-memory cache first (only for today)
+  if (_breakingNewsCacheIcal[dateStr] !== undefined) {
+    return _breakingNewsCacheIcal[dateStr];
+  }
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('newsapi')) {
+    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
     return null;
   }
   try {
