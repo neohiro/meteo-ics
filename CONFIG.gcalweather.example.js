@@ -65,7 +65,7 @@ const PRODUCTION_CONFIG = {
   // ============================================================
   
   // Script version (auto-updated on deploy)
-  version: "2.4.1"
+  version: "2.5.0"
 };
 
 
@@ -74,7 +74,7 @@ const PRODUCTION_CONFIG = {
  * 
  * Key                     | Value                          | Required?
  * ------------------------|--------------------------------|----------
- * NEWS_API_KEY            | your_newsapi_org_key           | No (breaking news)
+ * NEWS_API_KEY            | your_newsapi_org_key           | No (current + recent headlines)
  * WAQI_PASSPHRASE         | YourStrongPassphrase123!       | No (enables WAQI)
  * AQ_CAP_PROBE_LAT        | 50.95                          | No (custom AQ probe)
  * AQ_CAP_PROBE_LON        | 5.97                           | No (custom AQ probe)

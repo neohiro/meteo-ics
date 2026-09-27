@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.5.0] — 2026-09-25
+
+### Added
+- **Generic metric context (Good / Fair / Bad)** for 18 weather, agricultural, air-quality, and 7-day aggregate readings in both scripts.
+- **18 metric bands** with language-aware rendering (8 translations): temperature, feels-like, soil temperature, humidity, dew point, rain amount, rain probability, wind, pressure, cloud cover, UV index, pollen, solar radiation, ET₀, GDD, 7-day rain, 7-day mean temperature, 7-day AQI.
+- **GCal humidity, dew point, and cloud cover** hourly fetch and rendering to match ICal parity.
+- **NewsAPI current-day routing**: top-headlines endpoint used for today with automatic fallback to `/v2/everything` for same day; historical dates continue to use `/v2/everything` with domains filter.
+- **Shared URL builder `buildBreakingNewsUrls`** in both scripts for deterministic endpoint selection.
+- **8 new regression tests**: metric classification boundaries, Fahrenheit normalization, source parity, translation coverage, NewsAPI URL routing, exact source↔mirror band drift, non-finite hourly aggregation guard, and NewsAPI transport-error fallthrough.
+
+### Changed
+- Version bumped: `2.4.1` → `2.5.0` in both `CONFIG` / `ICAL_CONFIG` and example configs.
+- Breaking-news description updated: "Current top headlines with recent-date major-outlet fallback" (no longer "today only").
+- README feature table and setup text updated accordingly.
+- Deployment guide version/test counts synced to 2.5.0 / 338.
+- Hourly aggregation now uses a shared `pushFiniteHourlyValue()` guard in both scripts so null, `undefined`, and non-finite samples cannot poison daily averages.
+- Metric context bands table added to README.
+
+### Fixed
+- Same-day NewsAPI calls now succeed via top-headlines; empty top-headlines results trigger fallback to historical endpoint.
+- A transport-level NewsAPI failure (timeout/DNS) on one endpoint no longer aborts the loop, so the fallback endpoint is still attempted.
+- `getMetricContext()` no longer coerces blank/whitespace readings to `0`, which mislabelled missing data as "Fair"; blank values now render with no context, matching the Python test mirror. `pushFiniteHourlyValue()` hardened the same way.
+- Breaking-news cache is now read before the NewsAPI circuit breaker, so already-fetched headlines are still served when the breaker trips (matches `geocodeCity` / `fetchWikipediaOnThisDay`); date validation still runs first so the cache key stays constrained.
+- **Security:** the NewsAPI key is no longer written to execution logs. Apps Script embeds the request URL in transport errors (e.g. `Timed out fetching <url>`), and the key travels in the query string; both NewsAPI exception logs now pass through a new `redactSecretsForLog()` helper that masks `apiKey=` / `token=` values while keeping the diagnostic text.
+- `tests/lint_balance.py` now strips regex literals before counting delimiters. Previously a quote inside a regex body (e.g. `[^&"\s]+`) opened a phantom string that swallowed the remainder of the file and reported a bogus imbalance.
+- ICS temperature range now labels the daily low as well as the high, matching the GCal event body.
+- Documentation test-count mismatches (README 328→338, tests/README 322→338, DEPLOYMENT_GUIDE 328→338).
+
+### Tests
+- 338 tests (was 328): +10 covering metric context classification, Fahrenheit conversion & invalid inputs, GCal↔ICal metric context parity, metric translation keys, breaking-news URL routing, exact band drift, non-finite aggregation guards, NewsAPI transport-error fallthrough, NewsAPI key redaction, and regex-literal handling in the lint stripper.
+- `python tests/run_tests.py` — all 338 pass.
+
 ## [2.4.1] — 2026-09-18
 
 ### Added

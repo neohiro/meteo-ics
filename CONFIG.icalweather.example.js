@@ -82,7 +82,7 @@
  * 
  * Key                     | Value                          | Required?
  * ------------------------|--------------------------------|----------
- * NEWS_API_KEY            | your_newsapi_org_key           | No (today's weather headlines)
+ * NEWS_API_KEY            | your_newsapi_org_key           | No (current + recent headlines)
  * WAQI_PASSPHRASE         | YourStrongPassphrase123!       | No (enables WAQI global AQI)
  * AQ_CAP_PROBE_LAT        | 50.95                          | No (custom AQ probe location)
  * AQ_CAP_PROBE_LON        | 5.97                           | No (custom AQ probe location)
@@ -105,7 +105,7 @@
  * 
  * const ICAL_CONFIG = {
  *   calendarName: "Weather & Celestial Feed",
- *   version: "2.4.1",
+ *   version: "2.5.0",
  *   temperatureUnit: "celsius",        // Default if unit not in URL
  *   forecastDays: 30,                  // Max if days not in URL
  *   deterministicDays: 14,             // Must be ≤16 (Open-Meteo limit)

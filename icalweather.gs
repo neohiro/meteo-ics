@@ -146,7 +146,7 @@ function _probeOpenMeteoAqCap() {
 
 const ICAL_CONFIG = {
   calendarName: "Weather & Celestial Feed",
-  version: "2.4.1",
+  version: "2.5.0",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
@@ -837,6 +837,9 @@ const T_L = {
   no2:       { en:"NO2",                         zh:"二氧化氮",              hi:"नाइट्रोजन डाइऑक्साइड",           es:"NO2",                        fr:"NO2",                         ar:"ثاني أكسيد النيتروجين",         de:"NO2",                        nl:"NO2" },
   dust:      { en:"Dust",                        zh:"扬尘",                  hi:"धूल",                         es:"Polvo",                      fr:"Poussière",                   ar:"غبار",                         de:"Staub",                        nl:"Stof" },
   polLow:    { en:"Low",                         zh:"低",                    hi:"कम",                           es:"Bajo",                       fr:"Faible",                      ar:"منخفض",                       de:"Niedrig",                      nl:"Laag" },
+  ctxGood:   { en:"Good",                        zh:"良好",                  hi:"अच्छा",                        es:"Bueno",                      fr:"Bon",                         ar:"جيد",                        de:"Gut",                         nl:"Goed" },
+  ctxFair:   { en:"Fair",                        zh:"一般",                  hi:"सामान्य",                      es:"Aceptable",                   fr:"Acceptable",                  ar:"مقبول",                      de:"Mäßig",                       nl:"Redelijk" },
+  ctxBad:    { en:"Bad",                         zh:"较差",                  hi:"खराब",                        es:"Mala",                       fr:"Mauvais",                    ar:"سيئ",                        de:"Schlecht",                    nl:"Slecht" },
   rainSum:   { en:"Rain Sum",                     zh:"累计降雨",               hi:"कुल वर्षा",                     es:"Lluvia total",                fr:"Cumul de pluie",              ar:"إجمالي المطر",                 de:"Regensumme",                   nl:"Regensom" },
   meanTemp:  { en:"Mean Temp",                   zh:"平均气温",               hi:"औसत तापमान",                    es:"Temp. media",                 fr:"Temp. moyenne",                ar:"متوسط الحرارة",                 de:"Mittlere Temp.",               nl:"Gem. temperatuur" },
   gdd:       { en:"Growing Deg",                 zh:"有效积温",               hi:"ग्रोइंग डिग्री",                 es:"Grados-día",                  fr:"Degrés-jours",                 ar:"درجات النمو",                   de:"Wärmesumme",                  nl:"Groeigraden" },
@@ -1607,23 +1610,38 @@ function getWikipediaOnThisDayText(dateStr) {
 }
 
 // ============================================================
-// BREAKING NEWS FETCHER (Historical "On This Day" Headlines)
+// BREAKING NEWS FETCHER (Current Top Headlines + Historical "On This Day")
 // ============================================================
 const NEWS_API_URL = "https://newsapi.org/v2/everything";
+const NEWS_TOP_HEADLINES_URL = "https://newsapi.org/v2/top-headlines";
+const NEWS_MAJOR_DOMAINS = "bbc.com,cnn.com,reuters.com,apnews.com,nytimes.com,washingtonpost.com,theguardian.com,wsj.com,bloomberg.com,ft.com";
 const NEWS_FREE_TIER_DAYS = 30; // NewsAPI free tier serves only the most recent 30 days
 
-function fetchBreakingNews(dateStr) {
-  // Circuit breaker: fail fast if circuit is open
-  if (!CB.isCallAllowed('newsapi')) {
-    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
-    return null;
+function redactSecretsForLog(value) {
+  return String(value).replace(/(apiKey|token)=([^&\s"'<>]+)/gi, "$1=***");
+}
+
+function buildBreakingNewsUrls(dateStr, todayKey, apiKey) {
+  const urls = [];
+  if (dateStr === todayKey) {
+    urls.push(`${NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey=${encodeURIComponent(apiKey)}`);
   }
+  urls.push(`${NEWS_API_URL}?domains=${encodeURIComponent(NEWS_MAJOR_DOMAINS)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`);
+  return urls;
+}
+
+function fetchBreakingNews(dateStr) {
   if (!dateStr || typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return null;
   }
   // Check in-memory cache first
   if (_breakingNewsCacheIcal[dateStr] !== undefined) {
     return _breakingNewsCacheIcal[dateStr];
+  }
+  // Circuit breaker: fail fast if circuit is open
+  if (!CB.isCallAllowed('newsapi')) {
+    Logger.log("Circuit [newsapi] OPEN — skipping fetch");
+    return null;
   }
   // NewsAPI free tier only serves the last NEWS_FREE_TIER_DAYS days and
   // rejects future dates; any out-of-window date draws an HTTP 400 and burns
@@ -1649,50 +1667,63 @@ function fetchBreakingNews(dateStr) {
       Logger.log("Breaking news: invalid or missing NEWS_API_KEY");
       return null;
     }
-    // Use /v2/everything with from/to for historical dates; free tier only has 30 days history.
-    // Use domains= for major news outlets (instead of q=weather) to get general popular news of the day.
-    const majorNewsDomains = "bbc.com,cnn.com,reuters.com,apnews.com,nytimes.com,washingtonpost.com,theguardian.com,wsj.com,bloomberg.com,ft.com";
-    const url = `${NEWS_API_URL}?domains=${encodeURIComponent(majorNewsDomains)}&from=${dateStr}&to=${dateStr}&language=en&pageSize=3&sortBy=popularity&apiKey=${encodeURIComponent(apiKey)}`;
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
-    const code = res.getResponseCode();
-    if (code === 200) {
-      CB.recordSuccess('newsapi');
-      const data = JSON.parse(res.getContentText());
-      if (data.status === "error") {
-        Logger.log("Breaking news API error: " + (data.message || "unknown"));
-        return null;
+    const urls = buildBreakingNewsUrls(dateStr, todayKey, apiKey);
+    let result = null;
+    let receivedResponse = false;
+    for (let i = 0; i < urls.length; i++) {
+      let res;
+      try {
+        res = UrlFetchApp.fetch(urls[i], { muteHttpExceptions: true, timeout: FETCH_TIMEOUT_MS });
+      } catch (e) {
+        CB.recordFailure('newsapi');
+        Logger.log("Breaking news transport error: " + redactSecretsForLog(e));
+        continue;
       }
-      let result = null;
-      if (data.articles && Array.isArray(data.articles) && data.articles.length > 0) {
-        result = data.articles
-          .slice(0, 3)
-          .filter(a => a && a.title && a.source && a.source.name)
-          .map(a => `• ${a.source.name}: ${a.title}`)
-          .join("\n");
+      const code = res.getResponseCode();
+      if (code === 200) {
+        let data;
+        try {
+          data = JSON.parse(res.getContentText());
+        } catch (e) {
+          CB.recordFailure('newsapi');
+          Logger.log("Breaking news response was not valid JSON");
+          continue;
+        }
+        if (data.status === "error") {
+          Logger.log("Breaking news API error: " + (data.message || "unknown"));
+          continue;
+        }
+        CB.recordSuccess('newsapi');
+        receivedResponse = true;
+        if (data.articles && Array.isArray(data.articles) && data.articles.length > 0) {
+          result = data.articles
+            .slice(0, 3)
+            .filter(a => a && a.title && a.source && a.source.name)
+            .map(a => `• ${a.source.name}: ${a.title}`)
+            .join("\n");
+        }
+        if (result || urls.length === 1) break;
+      } else if (code >= 400 && code < 500) {
+        let apiMsg = "";
+        try { apiMsg = JSON.parse(res.getContentText()).message || ""; } catch (e) {}
+        Logger.log(`Breaking news API ${code}${apiMsg ? ": " + apiMsg : ""}`);
+      } else {
+        CB.recordFailure('newsapi');
+        Logger.log(`Breaking news fetch HTTP ${code} — circuit failure recorded`);
       }
-      // Cache the result (including null for no articles)
-      // Use insertion-order queue for spec-compliant FIFO (Object.keys order not guaranteed)
+    }
+    if (receivedResponse) {
       if (_breakingNewsCacheOrderIcal.length >= _BREAKING_NEWS_CACHE_MAX) {
         const firstKey = _breakingNewsCacheOrderIcal.shift();
         delete _breakingNewsCacheIcal[firstKey];
       }
       _breakingNewsCacheIcal[dateStr] = result;
       _breakingNewsCacheOrderIcal.push(dateStr);
-      return result;
-    } else if (code >= 400 && code < 500) {
-      // 4xx = permanent request rejection (bad params/key): not a transient
-      // upstream failure, so don't trip the circuit breaker. Surface the API's
-      // own message for diagnosis.
-      let apiMsg = "";
-      try { apiMsg = JSON.parse(res.getContentText()).message || ""; } catch (e) {}
-      Logger.log(`Breaking news API ${code}${apiMsg ? ": " + apiMsg : ""}`);
-    } else {
-      CB.recordFailure('newsapi');
-      Logger.log(`Breaking news fetch HTTP ${code} — circuit failure recorded`);
     }
+    return result;
   } catch (e) {
     CB.recordFailure('newsapi');
-    Logger.log("Breaking news fetch failed: " + e);
+    Logger.log("Breaking news fetch failed: " + redactSecretsForLog(e));
   }
   return null;
 }
@@ -2248,16 +2279,16 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
 
       const tempSec = [
         `🌡️ ${tSection("secTemp", lang)}`,
-        `• ${t("range", lang)}: ${currentMin}${unitSymbol} ➔ ${currentMax}${unitSymbol} (${getThermalText(currentMax, isC, lang)})`,
-        `• ${t("feels", lang)}: ~${apparentMax}${unitSymbol}${dewPoint !== null ? ` · ${t("dew", lang)}: ${dewPoint}${unitSymbol}` : ""}`,
-        humidity !== null ? `• ${t("humid", lang)}: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity, lang)})` : ``,
+        `• ${t("range", lang)}: ${currentMin}${unitSymbol}${formatMetricContext(currentMin, "temperature", isC, lang)} ➔ ${currentMax}${unitSymbol} (${getThermalText(currentMax, isC, lang)})${formatMetricContext(currentMax, "temperature", isC, lang)}`,
+        `• ${t("feels", lang)}: ~${apparentMax}${unitSymbol}${formatMetricContext(apparentMax, "apparentTemperature", isC, lang)}${dewPoint !== null ? ` · ${t("dew", lang)}: ${dewPoint}${unitSymbol}${formatMetricContext(dewPoint, "dewPoint", isC, lang)}` : ""}`,
+        humidity !== null ? `• ${t("humid", lang)}: ${humidity}% ${getHumidityGlyph(humidity)} (${getHumidityComfort(humidity, lang)})${formatMetricContext(humidity, "humidity", isC, lang)}` : ``,
         offset >= ICAL_CONFIG.deterministicDays
           ? `• ${t("consensus", lang)}: ±${spreadVal}${unitSymbol}`
-          : `• ${t("rain", lang)}: ${Number(currentRain).toFixed(1)} mm (${rainProb}%)`,
+          : `• ${t("rain", lang)}: ${Number(currentRain).toFixed(1)} mm${formatMetricContext(currentRain, "rain", isC, lang)} · ${rainProb}%${formatMetricContext(rainProb, "rainProbability", isC, lang)}`,
         offset < ICAL_CONFIG.deterministicDays && windGusts > 0
-          ? `• ${t("wind", lang)}: ${currentWind} km/h (${t("gusts", lang)} ${windGusts} km/h)`
-          : (offset < ICAL_CONFIG.deterministicDays ? `• ${t("wind", lang)}: ${currentWind} km/h` : ``),
-        offset < ICAL_CONFIG.deterministicDays ? `• ${t("baro", lang)}: ${pressureAtm} atm` : ``
+          ? `• ${t("wind", lang)}: ${currentWind} km/h (${t("gusts", lang)} ${windGusts} km/h)${formatMetricContext(Math.max(currentWind, windGusts), "wind", isC, lang)}`
+          : (offset < ICAL_CONFIG.deterministicDays ? `• ${t("wind", lang)}: ${currentWind} km/h${formatMetricContext(currentWind, "wind", isC, lang)}` : ``),
+        offset < ICAL_CONFIG.deterministicDays ? `• ${t("baro", lang)}: ${pressureAtm} atm${formatMetricContext(pressure, "pressure", isC, lang)}` : ``
       ].filter(Boolean).join("\n");
 
       const sunSec = [
@@ -2265,12 +2296,12 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         astroEvent ? `• ${astroEvent}` : ``,
         `• ${t("daylight", lang)}: 🌅${sunriseStr}–🌇${sunsetStr} (${daylightFormatted})`,
         `• ${t("goldenHr", lang)}: ~${getGoldenHourWindow(sunsetStr)}`,
-        cloudCover !== null ? `• ${t("cloud", lang)}: ${cloudCover}%` : ``,
+        cloudCover !== null ? `• ${t("cloud", lang)}: ${cloudCover}%${formatMetricContext(cloudCover, "cloudCover", isC, lang)}` : ``,
         `• ${t("moon", lang)}: ${moonInfo.glyph} ${moonInfo.name} (${moonInfo.illumination})`,
         `• ${t("star", lang)}: ${stargazing}`,
-        uvIndex > 0 ? `• ${t("uv", lang)}: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex, lang)})` : ``,
-        et0 > 0 ? `• ${t("et", lang)}: ${et0.toFixed(1)} mm` : ``,
-        radiation > 0 ? `• ${t("rad", lang)}: ${radiation.toFixed(1)} MJ/m²` : ``
+        uvIndex > 0 ? `• ${t("uv", lang)}: ${uvIndex.toFixed(1)} (${getUvAdvice(uvIndex, lang)})${formatMetricContext(uvIndex, "uv", isC, lang)}` : ``,
+        et0 > 0 ? `• ${t("et", lang)}: ${et0.toFixed(1)} mm${formatMetricContext(et0, "et0", isC, lang)}` : ``,
+        radiation > 0 ? `• ${t("rad", lang)}: ${radiation.toFixed(1)} MJ/m²${formatMetricContext(radiation, "radiation", isC, lang)}` : ``
       ].filter(Boolean).join("\n");
 
       const airSec = [
@@ -2282,15 +2313,15 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         o3Val !== null ? `• ${t("o3", lang)}: ${o3Val} µg/m³ (${getPollutantContext(o3Val, "o3", lang)})` : ``,
         no2Val !== null ? `• ${t("no2", lang)}: ${no2Val} µg/m³ (${getPollutantContext(no2Val, "no2", lang)})` : ``,
         dustVal !== null ? `• ${t("dust", lang)}: ${dustVal} µg/m³ (${getPollutantContext(dustVal, "dust", lang)})` : ``,
-        pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³` : `• ${t("pollen", lang)}: ${t("polLow", lang)}`
+        pollenVal > 0 ? `• ${t("pollen", lang)}: ${pollenVal} gr/m³${formatMetricContext(pollenVal, "pollen", isC, lang)}` : `• ${t("pollen", lang)}: ${t("polLow", lang)}${formatMetricContext(0, "pollen", isC, lang)}`
       ].filter(Boolean).join("\n");
 
       const aggSec = [
         `📅 ${tSection("secAgg", lang)}`,
-        `• ${t("rainSum", lang)}: ${aggregates.sevenDayRain} mm`,
-        `• ${t("meanTemp", lang)}: ${aggregates.sevenDayMeanTemp}${unitSymbol}`,
-        `• ${t("gdd", lang)}: ${aggregates.sevenDayGDD} (${gddNote})`,
-        `• ${t("aqi7", lang)}: ${aggregates.sevenDayAqi}`
+        `• ${t("rainSum", lang)}: ${aggregates.sevenDayRain} mm${formatMetricContext(aggregates.sevenDayRain, "aggregateRain", isC, lang)}`,
+        `• ${t("meanTemp", lang)}: ${aggregates.sevenDayMeanTemp}${unitSymbol}${formatMetricContext(aggregates.sevenDayMeanTemp, "aggregateTemperature", isC, lang)}`,
+        `• ${t("gdd", lang)}: ${aggregates.sevenDayGDD} (${gddNote})${formatMetricContext(aggregates.sevenDayGDD, "gdd", isC, lang)}`,
+        `• ${t("aqi7", lang)}: ${aggregates.sevenDayAqi}${formatMetricContext(aggregates.sevenDayAqi, "aggregateAqi", isC, lang)}`
       ].join("\n");
 
       const auditSec = [
@@ -2334,7 +2365,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
         sections.push([
           `🚗 ${tSection("secRoad", lang)} (<=7°C)`,
           `• ${t("status", lang)}: ${roadHazard.status}`,
-          `• ${t("ground", lang)}: ${Math.round(soilTempMin)}${unitSymbol} (${roadHazard.advisory})`
+          `• ${t("ground", lang)}: ${Math.round(soilTempMin)}${unitSymbol} (${roadHazard.advisory})${formatMetricContext(soilTempMin, "soilTemperature", isC, lang)}`
         ].join("\n"));
       }
 
@@ -2422,6 +2453,12 @@ function foldIcsLines(lines) {
   }).join("\r\n");
 }
 
+function pushFiniteHourlyValue(arr, value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return;
+  const num = Number(value);
+  if (Number.isFinite(num)) arr.push(num);
+}
+
 function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
   const result = { det: null, ens: null, aq: null, hourlyAgg: {} };
   const radius = Number.isFinite(aqRadius) ? aqRadius : 25;
@@ -2499,12 +2536,12 @@ function fetchIcsAtmosphericDataParallel(loc, unit, aqProvider, aqRadius) {
         const aggs = {};
         for (let i = 0; i < hData.time.length; i++) {
           const dStr = hData.time[i].slice(0, 10);
-          if (!aggs[dStr]) aggs[dStr] = { pressures: [], soilTemps: [] };
-          if (hData.pressure_msl && hData.pressure_msl[i] !== null) aggs[dStr].pressures.push(hData.pressure_msl[i]);
-          if (hData.soil_temperature_0cm && hData.soil_temperature_0cm[i] !== null) aggs[dStr].soilTemps.push(hData.soil_temperature_0cm[i]);
-          if (hData.relative_humidity_2m && hData.relative_humidity_2m[i] !== null) (aggs[dStr].hums = aggs[dStr].hums || []).push(hData.relative_humidity_2m[i]);
-          if (hData.dew_point_2m && hData.dew_point_2m[i] !== null) (aggs[dStr].dews = aggs[dStr].dews || []).push(hData.dew_point_2m[i]);
-          if (hData.cloud_cover && hData.cloud_cover[i] !== null) (aggs[dStr].clouds = aggs[dStr].clouds || []).push(hData.cloud_cover[i]);
+          if (!aggs[dStr]) aggs[dStr] = { pressures: [], soilTemps: [], hums: [], dews: [], clouds: [] };
+          pushFiniteHourlyValue(aggs[dStr].pressures, hData.pressure_msl && hData.pressure_msl[i]);
+          pushFiniteHourlyValue(aggs[dStr].soilTemps, hData.soil_temperature_0cm && hData.soil_temperature_0cm[i]);
+          pushFiniteHourlyValue(aggs[dStr].hums, hData.relative_humidity_2m && hData.relative_humidity_2m[i]);
+          pushFiniteHourlyValue(aggs[dStr].dews, hData.dew_point_2m && hData.dew_point_2m[i]);
+          pushFiniteHourlyValue(aggs[dStr].clouds, hData.cloud_cover && hData.cloud_cover[i]);
         }
         Object.keys(aggs).forEach(dateStr => {
           const pArr = aggs[dateStr].pressures;
@@ -3678,6 +3715,47 @@ function getPollutantContext(val, pollutant, lang) {
     return t("aqiHzd", lang);
   }
   return "";
+}
+
+const METRIC_CONTEXT_BANDS = {
+  temperature: { good: [10, 26], fair: [0, 32] },
+  apparentTemperature: { good: [10, 26], fair: [0, 32] },
+  humidity: { good: [30, 70], fair: [20, 80] },
+  dewPoint: { good: [-20, 15], fair: [-30, 18] },
+  rain: { good: [0, 5], fair: [0, 25] },
+  rainProbability: { good: [0, 30], fair: [0, 70] },
+  wind: { good: [0, 20], fair: [0, 40] },
+  pressure: { good: [1000, 1020], fair: [990, 1035] },
+  cloudCover: { good: [0, 30], fair: [0, 70] },
+  uv: { good: [0, 2], fair: [0, 5] },
+  pollen: { good: [0, 10], fair: [0, 35] },
+  radiation: { good: [0, 8], fair: [0, 15] },
+  et0: { good: [0, 2], fair: [0, 4.5] },
+  soilTemperature: { good: [8, 30], fair: [0, 32] },
+  gdd: { good: [100, Infinity], fair: [25, Infinity] },
+  aggregateRain: { good: [0, 50], fair: [0, 100] },
+  aggregateTemperature: { good: [10, 25], fair: [0, 30] },
+  aggregateAqi: { good: [0, 20], fair: [0, 40] }
+};
+
+function getMetricContext(value, metric, isC, lang) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return "";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "";
+  const bands = METRIC_CONTEXT_BANDS[metric];
+  if (!bands) return "";
+  let normalized = num;
+  if (isC === false && ["temperature", "apparentTemperature", "soilTemperature", "aggregateTemperature"].includes(metric)) {
+    normalized = (num - 32) * (5 / 9);
+  }
+  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return t("ctxGood", lang);
+  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return t("ctxFair", lang);
+  return t("ctxBad", lang);
+}
+
+function formatMetricContext(value, metric, isC, lang) {
+  const context = getMetricContext(value, metric, isC, lang);
+  return context ? ` (${context})` : "";
 }
 
 // ============================================================

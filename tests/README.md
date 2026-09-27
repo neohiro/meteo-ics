@@ -9,7 +9,7 @@ builtin generics):
 python tests/run_tests.py
 ```
 
-Expected output: **322 passed, 0 failed**.
+Expected output: **338 passed, 0 failed**.
 
 ### Deploy sanity (run before pasting into Apps Script)
 

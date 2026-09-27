@@ -12,6 +12,7 @@ import math
 import os
 import re
 import sys
+from urllib.parse import quote
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GCAL = open(os.path.join(REPO, 'gcalweather.gs'), 'r', encoding='utf-8').read()
@@ -77,6 +78,75 @@ def parse_bool_param(v):
         return v
     return str(v).lower() in ('1', 'true', 'yes')
 
+
+METRIC_CONTEXT_BANDS = {
+    'temperature': {'good': (10, 26), 'fair': (0, 32)},
+    'apparentTemperature': {'good': (10, 26), 'fair': (0, 32)},
+    'humidity': {'good': (30, 70), 'fair': (20, 80)},
+    'dewPoint': {'good': (-20, 15), 'fair': (-30, 18)},
+    'rain': {'good': (0, 5), 'fair': (0, 25)},
+    'rainProbability': {'good': (0, 30), 'fair': (0, 70)},
+    'wind': {'good': (0, 20), 'fair': (0, 40)},
+    'pressure': {'good': (1000, 1020), 'fair': (990, 1035)},
+    'cloudCover': {'good': (0, 30), 'fair': (0, 70)},
+    'uv': {'good': (0, 2), 'fair': (0, 5)},
+    'pollen': {'good': (0, 10), 'fair': (0, 35)},
+    'radiation': {'good': (0, 8), 'fair': (0, 15)},
+    'et0': {'good': (0, 2), 'fair': (0, 4.5)},
+    'soilTemperature': {'good': (8, 30), 'fair': (0, 32)},
+    'gdd': {'good': (100, float('inf')), 'fair': (25, float('inf'))},
+    'aggregateRain': {'good': (0, 50), 'fair': (0, 100)},
+    'aggregateTemperature': {'good': (10, 25), 'fair': (0, 30)},
+    'aggregateAqi': {'good': (0, 20), 'fair': (0, 40)},
+}
+
+TEMPERATURE_CONTEXT_METRICS = {
+    'temperature', 'apparentTemperature', 'soilTemperature', 'aggregateTemperature'
+}
+
+
+def get_metric_context(value, metric, is_c=True):
+    if value is None:
+        return ''
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if not math.isfinite(number):
+        return ''
+    bands = METRIC_CONTEXT_BANDS.get(metric)
+    if bands is None:
+        return ''
+    if not is_c and metric in TEMPERATURE_CONTEXT_METRICS:
+        number = (number - 32) * (5 / 9)
+    if bands['good'][0] <= number <= bands['good'][1]:
+        return 'good'
+    if bands['fair'][0] <= number <= bands['fair'][1]:
+        return 'fair'
+    return 'bad'
+
+
+NEWS_API_URL = 'https://newsapi.org/v2/everything'
+NEWS_TOP_HEADLINES_URL = 'https://newsapi.org/v2/top-headlines'
+NEWS_MAJOR_DOMAINS = 'bbc.com,cnn.com,reuters.com,apnews.com,nytimes.com,washingtonpost.com,theguardian.com,wsj.com,bloomberg.com,ft.com'
+
+
+def redact_secrets_for_log(value):
+    """Mirror of the renderers' redactSecretsForLog()."""
+    return re.sub(r'(apiKey|token)=([^&\s"\'<>]+)', r'\1=***', str(value), flags=re.IGNORECASE)
+
+
+def build_breaking_news_urls(date_str, today_key, api_key):
+    encoded_key = quote(api_key, safe='')
+    urls = []
+    if date_str == today_key:
+        urls.append(f'{NEWS_TOP_HEADLINES_URL}?language=en&pageSize=3&apiKey={encoded_key}')
+    urls.append(
+        f'{NEWS_API_URL}?domains={quote(NEWS_MAJOR_DOMAINS, safe="")}'
+        f'&from={date_str}&to={date_str}&language=en&pageSize=3&sortBy=popularity'
+        f'&apiKey={encoded_key}'
+    )
+    return urls
 
 
 def get_moon_phase_details(date):
@@ -946,6 +1016,152 @@ def test_gcal_ical_pollutant_context_helper():
         for pollutant in ('pm25', 'pm10', 'o3', 'no2', 'dust'):
             assert_true(f'pollutant === "{pollutant}"' in body,
                 f'{name}: getPollutantContext missing bucket chain for {pollutant!r}')
+
+
+def test_metric_context_classification():
+    """The generic metric bands classify every supported value as good, fair, or bad."""
+    cases = {
+        'temperature': (20, 5, 35),
+        'apparentTemperature': (20, 5, 35),
+        'humidity': (50, 75, 90),
+        'dewPoint': (0, -25, -40),
+        'rain': (0, 10, 30),
+        'rainProbability': (20, 50, 80),
+        'wind': (10, 30, 50),
+        'pressure': (1010, 995, 980),
+        'cloudCover': (20, 50, 80),
+        'uv': (1, 3, 6),
+        'pollen': (5, 20, 40),
+        'radiation': (5, 10, 20),
+        'et0': (1, 3, 5),
+        'soilTemperature': (20, 5, -1),
+        'gdd': (100, 50, 24),
+        'aggregateRain': (20, 75, 120),
+        'aggregateTemperature': (20, 5, 35),
+        'aggregateAqi': (10, 30, 50),
+    }
+    for metric, (good, fair, bad) in cases.items():
+        assert_eq(get_metric_context(good, metric), 'good', metric)
+        assert_eq(get_metric_context(fair, metric), 'fair', metric)
+        assert_eq(get_metric_context(bad, metric), 'bad', metric)
+    # Band edges are inclusive on both ends and good wins over the overlapping fair band.
+    assert_eq(get_metric_context(10, 'temperature'), 'good', 'good lower edge')
+    assert_eq(get_metric_context(26, 'temperature'), 'good', 'good upper edge')
+    assert_eq(get_metric_context(26.5, 'temperature'), 'fair', 'just above good')
+    assert_eq(get_metric_context(0, 'temperature'), 'fair', 'fair lower edge')
+    assert_eq(get_metric_context(32, 'temperature'), 'fair', 'fair upper edge')
+    assert_eq(get_metric_context(-0.5, 'temperature'), 'bad', 'just below fair')
+    assert_eq(get_metric_context(5, 'rain'), 'good', 'rain good upper edge')
+    assert_eq(get_metric_context(5.5, 'rain'), 'fair', 'rain just above good')
+    assert_eq(get_metric_context(25, 'rain'), 'fair', 'rain fair upper edge')
+    assert_eq(get_metric_context(25.5, 'rain'), 'bad', 'rain just above fair')
+    assert_eq(get_metric_context(70, 'humidity'), 'good', 'humidity good upper edge')
+    assert_eq(get_metric_context(80, 'humidity'), 'fair', 'humidity fair upper edge')
+    assert_eq(get_metric_context(100, 'gdd'), 'good', 'gdd lower edge')
+    assert_eq(get_metric_context(25, 'gdd'), 'fair', 'gdd fair lower edge')
+    assert_eq(get_metric_context(24.5, 'gdd'), 'bad', 'gdd below fair')
+
+
+def test_metric_context_fahrenheit_and_invalid_inputs():
+    """Fahrenheit temperatures are normalized before classification and invalid values stay blank."""
+    assert_eq(get_metric_context(68, 'temperature', is_c=False), 'good')
+    assert_eq(get_metric_context(40, 'temperature', is_c=False), 'fair')
+    assert_eq(get_metric_context(95, 'temperature', is_c=False), 'bad')
+    assert_eq(get_metric_context(50, 'temperature', is_c=False), 'good')
+    assert_eq(get_metric_context(None, 'temperature'), '')
+    assert_eq(get_metric_context('', 'temperature'), '', 'empty string must not classify as 0')
+    assert_eq(get_metric_context('   ', 'temperature'), '', 'blank string must not classify as 0')
+    assert_eq(get_metric_context('12.5', 'temperature'), 'good', 'numeric strings still classify')
+    assert_eq(get_metric_context(float('nan'), 'humidity'), '')
+    assert_eq(get_metric_context(float('inf'), 'wind'), '')
+    assert_eq(get_metric_context(20, 'unknown'), '')
+
+
+def parse_source_metric_bands(src):
+    """Extract the numeric good/fair bands from a renderer's METRIC_CONTEXT_BANDS literal."""
+    block = re.search(r'const METRIC_CONTEXT_BANDS\s*=\s*\{([\s\S]*?)\n\};', src)
+    assert_true(block is not None, 'METRIC_CONTEXT_BANDS missing')
+    bands = {}
+    for entry in re.finditer(
+            r'(\w+):\s*\{\s*good:\s*\[([^\]]*)\],\s*fair:\s*\[([^\]]*)\]\s*\}', block.group(1)):
+        def numbers(raw):
+            return tuple(float('inf') if v.strip() == 'Infinity' else float(v)
+                         for v in raw.split(','))
+        bands[entry.group(1)] = {'good': numbers(entry.group(2)), 'fair': numbers(entry.group(3))}
+    return bands
+
+
+def test_metric_context_source_bands_match_mirror():
+    """Both renderers must use exactly the numeric bands and conversion list mirrored by the tests."""
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        assert_eq(parse_source_metric_bands(src), METRIC_CONTEXT_BANDS, f'{name}: band drift')
+        conversion = re.search(r'if \(isC === false && \[([^\]]*)\]\.includes\(metric\)\)', src)
+        assert_true(conversion is not None, f'{name}: Fahrenheit conversion metric list missing')
+        assert_eq(set(re.findall(r'"(\w+)"', conversion.group(1))),
+            TEMPERATURE_CONTEXT_METRICS, f'{name}: Fahrenheit conversion metric drift')
+
+
+def test_hourly_aggregation_rejects_non_finite_values():
+    """Daily hourly aggregation must skip null, undefined, and non-finite samples in both scripts."""
+    fields = ('pressure_msl', 'soil_temperature_0cm', 'relative_humidity_2m',
+              'dew_point_2m', 'cloud_cover')
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        helper = re.search(r'function pushFiniteHourlyValue\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: pushFiniteHourlyValue missing')
+        assert_true('value == null' in helper.group(0),
+            f'{name}: pushFiniteHourlyValue must skip null and undefined')
+        assert_true('value.trim() === ""' in helper.group(0),
+            f'{name}: pushFiniteHourlyValue must skip blank strings instead of coercing them to 0')
+        assert_true('Number.isFinite(num)' in helper.group(0),
+            f'{name}: pushFiniteHourlyValue must reject non-finite values')
+        for field in fields:
+            assert_true(re.search(
+                rf'pushFiniteHourlyValue\(aggs\[dStr\]\.\w+, hData\.{field} && hData\.{field}\[[ij]\]\)',
+                src) is not None, f'{name}: {field} must be aggregated through the finite guard')
+        assert_true(re.search(r'if \(hData\.\w+ && hData\.\w+\[[ij]\] !== null\)', src) is None,
+            f'{name}: hourly aggregation must not push unguarded values')
+
+
+def test_gcal_ical_metric_context_source_parity():
+    """Both renderers define the same bands, guards, unit conversion, and formatted output."""
+    expected_metrics = set(METRIC_CONTEXT_BANDS)
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        bands = re.search(r'const METRIC_CONTEXT_BANDS\s*=\s*\{[\s\S]*?\n\};', src)
+        assert_true(bands is not None, f'{name}: METRIC_CONTEXT_BANDS missing')
+        for metric in expected_metrics:
+            assert_true(re.search(rf'\b{metric}:\s*\{{', bands.group(0)),
+                f'{name}: metric band missing for {metric}')
+            assert_true(re.search(rf'formatMetricContext\([^\n]*"{metric}"', src),
+                f'{name}: metric context not rendered for {metric}')
+        helper = re.search(r'function getMetricContext\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: getMetricContext missing')
+        assert_true('Number.isFinite(num)' in helper.group(0),
+            f'{name}: getMetricContext must reject non-finite values')
+        assert_true('value.trim() === ""' in helper.group(0),
+            f'{name}: getMetricContext must reject blank strings instead of coercing them to 0')
+        assert_true('(num - 32) * (5 / 9)' in helper.group(0),
+            f'{name}: getMetricContext must normalize Fahrenheit temperatures')
+        assert_true('function formatMetricContext' in src,
+            f'{name}: formatMetricContext missing')
+    for field in ('relative_humidity_2m', 'dew_point_2m', 'cloud_cover'):
+        assert_true(field in GCAL, f'gcalweather.gs hourly request missing {field}')
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        for temp_var in ('currentMax', 'currentMin'):
+            assert_true(re.search(rf'formatMetricContext\({temp_var}, "temperature"', src) is not None,
+                f'{name}: {temp_var} must carry a temperature context')
+
+
+def test_gcal_ical_metric_context_translations():
+    """Generic context labels are translated in all eight supported languages."""
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        table = re.search(r'const\s+T_L\s*=\s*\{[\s\S]*?^\};', src, re.M)
+        assert_true(table is not None, f'{name}: T_L missing')
+        for key in ('ctxGood', 'ctxFair', 'ctxBad'):
+            entry = re.search(rf'^\s*{key}:\s*\{{([^\n]*)\}},', table.group(0), re.M)
+            assert_true(entry is not None, f'{name}: {key} missing')
+            for lang in ('en', 'zh', 'hi', 'es', 'fr', 'ar', 'de', 'nl'):
+                assert_true(re.search(rf'\b{lang}\s*:\s*"[^"]+"', entry.group(1)),
+                    f'{name}: {key}.{lang} missing')
 
 
 def test_gcal_ical_air_section_renders_pollutant_context():
@@ -2755,6 +2971,29 @@ def test_lint_balance_helper_ok():
         assert_true(ok, f'{name} lint should pass but got {counts}')
 
 
+def test_lint_balance_strip_non_code_handles_regex_literals():
+    """The CI lint stripper must not let regex bodies (quotes, quantifier braces) corrupt counting."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'lint_balance_strip', os.path.join(REPO, 'tests', 'lint_balance.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    quoted = 'const RX = /apiKey=[^&"\\s]+/gi;\nlet keep = 1;\n'
+    stripped = mod.strip_non_code(quoted)
+    assert_true('let keep' in stripped,
+        'a quote inside a regex literal must not swallow the rest of the file')
+    assert_true('apiKey' not in stripped, 'regex literal body must be stripped')
+    quantified = 'const D = /^\\d{4}-\\d{2}-\\d{2}$/;\n'
+    assert_true('{' not in mod.strip_non_code(quantified),
+        'quantifier braces inside a regex must not count as code braces')
+    divided = 'const half = (total / 2).toFixed(1);\n'
+    assert_true('total / 2' in mod.strip_non_code(divided),
+        'division must not be mistaken for a regex literal')
+    assert_true('/x/' not in mod.strip_non_code('return /x/.test(s);\n'),
+        'regex after a keyword must be stripped')
+
+
 def test_gcal_fetchAllAtmosphericDataParallel_tags_aqSource():
     """The parallel fetcher must tag cacheObj.aq._source with the actual provider.
 
@@ -3616,6 +3855,7 @@ def test_gcal_breaking_news_exists():
     assert_true('function fetchBreakingNews' in GCAL, 'fetchBreakingNews missing')
     assert_true('function getBreakingNewsText' in GCAL, 'getBreakingNewsText missing')
     assert_true('NEWS_API_URL' in GCAL, 'NEWS_API_URL missing')
+    assert_true('NEWS_TOP_HEADLINES_URL' in GCAL, 'NEWS_TOP_HEADLINES_URL missing')
 
 
 def test_ical_breaking_news_exists():
@@ -3623,6 +3863,92 @@ def test_ical_breaking_news_exists():
     assert_true('function fetchBreakingNews' in ICAL, 'fetchBreakingNews missing')
     assert_true('function getBreakingNewsText' in ICAL, 'getBreakingNewsText missing')
     assert_true('NEWS_API_URL' in ICAL, 'NEWS_API_URL missing')
+    assert_true('NEWS_TOP_HEADLINES_URL' in ICAL, 'NEWS_TOP_HEADLINES_URL missing')
+
+
+def test_breaking_news_url_routing():
+    """Current dates use top-headlines first; historical dates use everything only."""
+    api_key = 'test key/123'
+    today_urls = build_breaking_news_urls('2026-09-25', '2026-09-25', api_key)
+    assert_eq(len(today_urls), 2)
+    assert_true(today_urls[0].startswith(NEWS_TOP_HEADLINES_URL), 'today must use top-headlines first')
+    assert_true('domains=' not in today_urls[0] and 'from=' not in today_urls[0],
+        'top-headlines request must not use historical filters')
+    assert_true('test%20key%2F123' in today_urls[0], 'API key must be URL encoded')
+    assert_true(today_urls[1].startswith(NEWS_API_URL), 'today must retain everything fallback')
+    assert_true('domains=' in today_urls[1] and 'from=2026-09-25&to=2026-09-25' in today_urls[1],
+        'everything fallback must use domains and date filters')
+    historical_urls = build_breaking_news_urls('2026-09-24', '2026-09-25', api_key)
+    assert_eq(len(historical_urls), 1)
+    assert_true(historical_urls[0].startswith(NEWS_API_URL), 'historical dates must use everything')
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        helper = re.search(r'function buildBreakingNewsUrls\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: buildBreakingNewsUrls missing')
+        helper_body = helper.group(0)
+        assert_true('dateStr === todayKey' in helper_body,
+            f'{name}: same-day routing condition missing')
+        assert_true('NEWS_TOP_HEADLINES_URL' in helper_body and 'NEWS_API_URL' in helper_body,
+            f'{name}: both NewsAPI endpoints must be wired')
+        assert_true('from=${dateStr}&to=${dateStr}' in helper_body,
+            f'{name}: historical endpoint must retain date filters')
+        fetch = re.search(r'function fetchBreakingNews\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(fetch is not None, f'{name}: fetchBreakingNews missing')
+        assert_true('buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in fetch.group(0),
+            f'{name}: fetchBreakingNews must use the shared URL router')
+        assert_true('if (result || urls.length === 1) break;' in fetch.group(0),
+            f'{name}: current-day empty results must continue to the fallback')
+        body = fetch.group(0)
+        cache_name = '_breakingNewsCacheGcal' if name == 'gcalweather.gs' else '_breakingNewsCacheIcal'
+        date_guard = body.index(r'/^\d{4}-\d{2}-\d{2}$/')
+        cache_hit = body.index(f'{cache_name}[dateStr] !== undefined')
+        breaker = body.index("CB.isCallAllowed('newsapi')")
+        assert_true(date_guard < cache_hit,
+            f'{name}: date validation must run before the cache lookup')
+        assert_true(cache_hit < breaker,
+            f'{name}: cached headlines must be served before the circuit breaker gates network calls')
+
+
+def test_breaking_news_api_key_never_reaches_logs():
+    """NewsAPI keys must be redacted from exception text, which Apps Script embeds the request URL in."""
+    timed_out = ('Exception: Timed out fetching '
+                 'https://newsapi.org/v2/top-headlines?language=en&pageSize=3&apiKey=SUPERSECRET')
+    redacted = redact_secrets_for_log(timed_out)
+    assert_true('SUPERSECRET' not in redacted, 'API key must be stripped from log text')
+    assert_true('apiKey=***' in redacted, 'API key must be replaced with a placeholder')
+    assert_true('Timed out fetching' in redacted and 'pageSize=3' in redacted,
+        'diagnostic detail must survive redaction')
+    assert_eq(redact_secrets_for_log('?a=1&token=abc&b=2'), '?a=1&token=***&b=2')
+    assert_eq(redact_secrets_for_log('APIKEY=xyz'), 'APIKEY=***', 'redaction must be case-insensitive')
+    assert_eq(redact_secrets_for_log('no secrets here'), 'no secrets here')
+    assert_eq(redact_secrets_for_log(None), 'None', 'non-string exceptions must not throw')
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        helper = re.search(r'function redactSecretsForLog\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: redactSecretsForLog missing')
+        assert_true('apiKey|token' in helper.group(0),
+            f'{name}: redactSecretsForLog must cover apiKey and token parameters')
+        fetch = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', src)
+        assert_true(fetch is not None, f'{name}: fetchBreakingNews missing')
+        body = fetch.group(0)
+        for label in ('Breaking news transport error: ', 'Breaking news fetch failed: '):
+            assert_true(f'Logger.log("{label}" + redactSecretsForLog(e))' in body,
+                f'{name}: "{label.strip()}" must redact the logged exception')
+        assert_true('Logger.log("Breaking news fetch failed: " + e)' not in body,
+            f'{name}: raw exception must never be logged unredacted')
+
+
+def test_breaking_news_transport_failure_falls_through():
+    """A transport error on one NewsAPI endpoint must still allow the fallback endpoint to run."""
+    pattern = (r'try\s*\{\s*res = UrlFetchApp\.fetch[\s\S]*?;\s*\}'
+               r'\s*catch \(e\) \{[\s\S]*?continue;')
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        fetch = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', src)
+        assert_true(fetch is not None, f'{name}: fetchBreakingNews missing')
+        body = fetch.group(0)
+        assert_true('let res;' in body, f'{name}: per-attempt response variable missing')
+        assert_true(re.search(pattern, body) is not None,
+            f'{name}: per-attempt transport errors must continue to the next endpoint')
+        assert_true("CB.recordFailure('newsapi')" in body,
+            f'{name}: transport errors must be recorded against the NewsAPI circuit')
 
 
 def test_breaking_news_returns_null_without_api_key():
@@ -3648,9 +3974,9 @@ def test_breaking_news_historical_dates():
     fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
     assert_true(fn2 is not None)
     body2 = fn2.group(0)
-    assert_true('from=${dateStr}&to=${dateStr}' in body2 or 'from=' in body2,
+    assert_true('from=${dateStr}&to=${dateStr}' in GCAL and 'buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in body2,
         'fetchBreakingNews must use date in from/to params')
-    assert_true('v2/everything' in body2,
+    assert_true('buildBreakingNewsUrls' in body2 and 'https://newsapi.org/v2/everything' in GCAL,
         'fetchBreakingNews must use /v2/everything endpoint for historical dates')
     assert_true('_breakingNewsCacheGcal' in body2,
         'fetchBreakingNews must use in-memory cache')
@@ -3792,9 +4118,9 @@ def test_breaking_news_historical_dates_enforced():
     fn2 = re.search(r'function fetchBreakingNews\([\s\S]*?\n\}', GCAL)
     assert_true(fn2 is not None)
     body2 = fn2.group(0)
-    assert_true('from=' in body2 and 'to=' in body2,
+    assert_true('from=${dateStr}&to=${dateStr}' in GCAL and 'buildBreakingNewsUrls(dateStr, todayKey, apiKey)' in body2,
         'fetchBreakingNews must use date in from/to params')
-    assert_true('v2/everything' in body2,
+    assert_true('buildBreakingNewsUrls' in body2 and 'https://newsapi.org/v2/everything' in GCAL,
         'fetchBreakingNews must use /v2/everything endpoint for historical dates')
     assert_true('_breakingNewsCacheGcal' in body2,
         'fetchBreakingNews must use in-memory cache')

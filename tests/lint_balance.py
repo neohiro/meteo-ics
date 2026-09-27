@@ -34,12 +34,42 @@ _ES2020_SHIMS = [
 ]
 
 
+_REGEX_PRECEDERS = set('(,=:[!&|?{};+-*%~^<>')
+_REGEX_KEYWORDS = frozenset({
+    'return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void', 'do',
+    'else', 'yield', 'await', 'instanceof',
+})
+
+
+def _regex_literal_allowed(out: list) -> bool:
+    """True when a '/' at this position starts a regex literal rather than a division.
+
+    Division can only follow a value, so a preceding operator, opening bracket or
+    regex-hosting keyword means the '/' must begin a literal.
+    """
+    k = len(out) - 1
+    while k >= 0 and out[k] in ' \t\r\n':
+        k -= 1
+    if k < 0:
+        return True
+    ch = out[k]
+    if ch in _REGEX_PRECEDERS:
+        return True
+    if ch.isalnum() or ch in '_$':
+        j = k
+        while j >= 0 and (out[j].isalnum() or out[j] in '_$'):
+            j -= 1
+        return ''.join(out[j + 1:k + 1]) in _REGEX_KEYWORDS
+    return False
+
+
 def strip_non_code(src: str) -> str:
-    """Remove comments and string literals from Apps Script source.
+    """Remove comments, string literals, and regex literals from Apps Script source.
 
     Hand-written state machine so it correctly handles escape sequences, template
-    literal interpolations (which may themselves contain strings), and a mix of
-    quote styles.
+    literal interpolations (which may themselves contain strings), a mix of quote
+    styles, and regex literals (whose bodies may contain quotes and braces that
+    would otherwise be miscounted as code).
     """
     out = []
     i = 0
@@ -61,6 +91,30 @@ def strip_non_code(src: str) -> str:
                 break
             i = j + 2
             continue
+        # Regex literal (must not span lines; otherwise treat as division)
+        if c == "/" and _regex_literal_allowed(out):
+            j = i + 1
+            in_class = False
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == "[":
+                    in_class = True
+                elif src[j] == "]":
+                    in_class = False
+                elif src[j] == "/" and not in_class:
+                    break
+                elif src[j] == "\n":
+                    break
+                j += 1
+            if j < n and src[j] == "/":
+                k = j + 1
+                while k < n and src[k].isalpha():
+                    k += 1
+                out.append("RE")
+                i = k
+                continue
         # String literals
         if c in ('"', "'"):
             quote = c

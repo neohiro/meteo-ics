@@ -1,7 +1,7 @@
 # meteo-ics — Production Deployment Guide
 
-**Version:** 2.4.1  
-**Test Status:** 328/328 passing | Structural balance: OK | Cross-file collisions: 0
+**Version:** 2.5.0  
+**Test Status:** 338/338 passing | Structural balance: OK | Cross-file collisions: 0
 
 ---
 
@@ -61,7 +61,7 @@ In Apps Script UI: **Project Settings (⚙) → Script Properties**
 
 | Property | Value | Purpose |
 |----------|-------|---------|
-| `NEWS_API_KEY` | Your NewsAPI.org key | Today's weather headlines |
+| `NEWS_API_KEY` | Your NewsAPI.org key | Current top headlines + recent-date headlines |
 | `WAQI_PASSPHRASE` | `YourStrongPassphrase123!` | Enables WAQI (global AQI) |
 
 **WAQI Setup (one-time):**
@@ -251,7 +251,7 @@ meteo-ics/
 ├── CONFIG.icalweather.example.js   # URL building guide
 ├── DEPLOYMENT_GUIDE.md         # This file
 ├── tests/
-│   ├── run_tests.py            # 328 tests (run: python tests/run_tests.py)
+│   ├── run_tests.py            # 338 tests (run: python tests/run_tests.py)
 │   └── lint_balance.py         # Structural balance check
 ├── CHANGELOG.md                # Full history
 ├── OVERVIEW.md                 # Engineering overview
@@ -263,9 +263,9 @@ meteo-ics/
 ## Verification Commands
 
 ```bash
-# Full test suite (328 tests)
+# Full test suite (338 tests)
 cd meteo-ics && python tests/run_tests.py
-# Expected: Passed: 328, Failed: 0
+# Expected: Passed: 338, Failed: 0
 
 # Structural balance (braces/parens/brackets)
 python tests/lint_balance.py

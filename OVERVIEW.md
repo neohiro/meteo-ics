@@ -6,7 +6,7 @@
 |---|---|---|
 | `icalweather.gs` | ICS calendar feed generator (RFC 5545). Exposed as a Google Apps Script Web App URL; calendar clients subscribe to it. | `doGet(e)` |
 | `gcalweather.gs` | Google Calendar event syncer. Writes per-city, per-day all-day events to a configured Google Calendar. | `syncWeatherToCalendar()` |
-| `tests/run_tests.py` | 328-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
+| `tests/run_tests.py` | 338-test Python suite; mirrors helper logic in Python and asserts equivalence against source text. | `python tests/run_tests.py` |
 
 Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on:
 - **Open-Meteo API** (free, no key required) — deterministic forecast, ensemble forecast, air quality
@@ -144,10 +144,11 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 
 | Check | Tool | Result |
 |---|---|---|
-| Brace / paren / bracket structural balance | `validate3.py` (custom, reads `.gs` as text, counts delimiters) | 0/0/0 both files |
-| Source-content fix verification (54 checks) | `verify_fixes.py` (custom, regex on source) | ALL PASS |
-| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (156 Python tests) | 156 passed, 0 failed |
-| Test count documented | `tests/README.md` | 156 |
+| Brace / paren / bracket structural balance + JS syntax | `tests/lint_balance.py` (strips comments, strings and regex literals, then counts delimiters) | 0/0/0 both files, syntax OK |
+| Cross-file module-let collisions + shared-constant drift | `tests/lint_balance.py` | 0 collisions, 0 drift |
+| Deployed-copy sanity (T_L integrity, glyph-tag parity) | `tests/deploy_sanity.py` | OK both files |
+| Unit + integration + source-signature + smoke tests | `tests/run_tests.py` (338 Python tests) | 338 passed, 0 failed |
+| Test count documented | `tests/README.md` | 338 |
 
 **What was NOT verified** (no Apps Script runtime available; Node.js not installed):
 - Live `doGet` execution — all paths verified structurally but not end-to-end
@@ -163,14 +164,14 @@ Both scripts are written in Google Apps Script (`.gs`, V8 runtime) and depend on
 # Full test suite
 python tests/run_tests.py
 
-# Structural balance check
-python C:\Users\skele\AppData\Local\Temp\opencode\validate3.py
+# Structural balance, JS syntax, cross-file collisions, constant drift
+python tests/lint_balance.py
 
-# Fix presence check
-python C:\Users\skele\AppData\Local\Temp\opencode\verify_fixes.py
+# Deployed-copy sanity check (run before pasting into Apps Script)
+python tests/deploy_sanity.py
 ```
 
-Expected output: **109 passed, 0 failed** · both files 0/0/0 balanced.
+Expected output: **338 passed, 0 failed** · both files 0/0/0 balanced.
 
 ---
 
@@ -207,8 +208,8 @@ Location → [geocoded]
     │   └── time[], temperature_2m_max[gfs_seamless]... (GRIB model variants)
     ├── Air quality (Open-Meteo /v1/air-quality) — D+0 to D+14
     │   └── time[], european_aqi[], us_aqi[], pm2_5[], pollen[]
-    └── Hourly aggregates (pressure, soil temp) — per day
-        └── time[] → pressure_msl[], soil_temperature_0cm[]
+    └── Hourly aggregates (pressure, soil temp, humidity, dew point, cloud cover) — per day
+        └── time[] → pressure_msl[], soil_temperature_0cm[], relative_humidity_2m[], dew_point_2m[], cloud_cover[]
 
 Calibration storage (PropertiesService):
     Key:   WTR_v10_<cityKey>_<yyyy-MM-dd>
