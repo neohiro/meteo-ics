@@ -22,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - GCal events now carry a version stamp (`🔖 v2.5.1`) in their description.
 - Breaking-news description updated to reflect current-day-only behavior.
 
+### Post-release improvements (commit 026afa8)
+- **Correctness**: Moved today-check before cache/circuit-breaker in `fetchBreakingNews` (both scripts). Non-today dates now return immediately without touching cache or circuit breaker — correct because non-today entries are never cached.
+- **Test coverage**: Added `test_gcal_circuit_breaker_fallbacks_to_stored_headlines` verifying that when the circuit is open, `buildDashboardPayload` falls back to stored headlines rather than overwriting with `null`.
+- **Test count**: 343 (was 342).
+
 ## [2.5.0] — 2026-09-25
 
 ### Added
