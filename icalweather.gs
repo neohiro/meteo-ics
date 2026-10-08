@@ -1664,8 +1664,7 @@ function fetchBreakingNews(dateStr) {
   // a past or future day would write a claim about that day that is not true.
   // Compare on UTC day keys (same convention as _todayISO / grid date keys) so
   // a 2 AM run doesn't misclassify today.
-  const todayKey = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()))
-    .toISOString().slice(0, 10);
+  const todayKey = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   if (dateStr !== todayKey) {
     Logger.log(`Breaking news: ${dateStr} is not the current day (${todayKey}) - no live fetch`);
     return null;
