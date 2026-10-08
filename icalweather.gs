@@ -740,6 +740,15 @@ const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
       }
       _waqiTokenCache = "";
       return "";
+    },
+    waqiTokenIsConfigured() {
+      const props = PropertiesService.getScriptProperties();
+      // Check Drive-encrypted token hint (set by waqiTokenSave)
+      if (props.getProperty("WAQI_KEY_HINT") === "stored") return true;
+      // Check legacy ScriptProperties token
+      const legacy = props.getProperty("WAQI_TOKEN");
+      if (legacy && legacy.length > 0) return true;
+      return false;
     }
   };
 })();
@@ -1788,6 +1797,8 @@ function doGet(e) {
     // (especially iOS) don't reject the feed with "Validation failed".
     const today = new Date();
     const todayStr = Utilities.formatDate(today, "UTC", "yyyyMMdd");
+    // Sanitize error message: no stack traces, no internal details
+    const errMsg = String(e).split("\n")[0].slice(0, 200);
     const errorIcs = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -1801,24 +1812,24 @@ function doGet(e) {
       `DTSTART;VALUE=DATE:${todayStr}`,
       `DTEND;VALUE=DATE:${todayStr}`,
       `SUMMARY:Feed Error — Check Configuration`,
-      `DESCRIPTION:Feed generation failed: ${escapeIcsText(String(e))}`,
+      `DESCRIPTION:Feed generation failed: ${escapeIcsText(errMsg)}`,
       "STATUS:CONFIRMED",
       "TRANSP:TRANSPARENT",
       "END:VEVENT",
       "END:VCALENDAR"
     ].join("\r\n");
     return ContentService.createTextOutput(errorIcs)
-      .setMimeType(ContentService.MimeType.ICAL)
-      .downloadAsFile("weather_feed_error.ics");
+      .setMimeType(ContentService.MimeType.ICAL);
   }
   if (dryRun) {
     return ContentService.createTextOutput(icsContent)
-      .setMimeType(ContentService.MimeType.PLAIN_TEXT)
-      .downloadAsFile("weather_feed_preview.txt");
+      .setMimeType(ContentService.MimeType.PLAIN_TEXT);
   }
+  // Serve ICS inline (no Content-Disposition: attachment) so calendar clients
+  // (Outlook, iOS, Google Calendar) can subscribe directly to the feed URL.
+  // The filename is conveyed via X-WR-CALNAME in the ICS content itself.
   return ContentService.createTextOutput(icsContent)
-    .setMimeType(ContentService.MimeType.ICAL)
-    .downloadAsFile("weather_feed.ics");
+    .setMimeType(ContentService.MimeType.ICAL);
 }
 
 function buildReadme(params) {
@@ -1971,7 +1982,7 @@ function handleStatusEndpoint(params) {
         openaq: OPENAQ_LATEST_ENDPOINT,
         waqi: WAQI_BASE_ENDPOINT + "<lat>;<lon>/"
       },
-      waqiTokenStored: !!waqiTokenResolve()
+      waqiTokenStored: waqiTokenIsConfigured()
     },
     supportedLanguages: SUPPORTED_LANGS,
     endpoints: {
@@ -3732,24 +3743,24 @@ function getPollutantContext(val, pollutant, lang) {
 }
 
 const METRIC_CONTEXT_BANDS = {
-  temperature: { good: [10, 26], fair: [0, 32] },
-  apparentTemperature: { good: [10, 26], fair: [0, 32] },
-  humidity: { good: [30, 70], fair: [20, 80] },
-  dewPoint: { good: [-20, 15], fair: [-30, 18] },
-  rain: { good: [0, 5], fair: [0, 25] },
-  rainProbability: { good: [0, 30], fair: [0, 70] },
-  wind: { good: [0, 20], fair: [0, 40] },
-  pressure: { good: [1000, 1020], fair: [990, 1035] },
-  cloudCover: { good: [0, 30], fair: [0, 70] },
-  uv: { good: [0, 2], fair: [0, 5] },
-  pollen: { good: [0, 10], fair: [0, 35] },
-  radiation: { good: [0, 8], fair: [0, 15] },
-  et0: { good: [0, 2], fair: [0, 4.5] },
-  soilTemperature: { good: [8, 30], fair: [0, 32] },
-  gdd: { good: [100, Infinity], fair: [25, Infinity] },
-  aggregateRain: { good: [0, 50], fair: [0, 100] },
-  aggregateTemperature: { good: [10, 25], fair: [0, 30] },
-  aggregateAqi: { good: [0, 20], fair: [0, 40] }
+  temperature: { good: [10, 26], fair: [0, 32], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
+  apparentTemperature: { good: [10, 26], fair: [0, 32], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
+  humidity: { good: [30, 70], fair: [20, 80], labels: { good: "Comfortable", fair: "Moderate", bad: "Muggy" } },
+  dewPoint: { good: [-20, 15], fair: [-30, 18], labels: { good: "Dry", fair: "Moderate", bad: "Humid" } },
+  rain: { good: [0, 5], fair: [0, 25], labels: { good: "Light", fair: "Moderate", bad: "Heavy" } },
+  rainProbability: { good: [0, 30], fair: [0, 70], labels: { good: "Low", fair: "Medium", bad: "High" } },
+  wind: { good: [0, 20], fair: [0, 40], labels: { good: "Calm", fair: "Breezy", bad: "Windy" } },
+  pressure: { good: [1000, 1020], fair: [990, 1035], labels: { good: "Normal", fair: "Variable", bad: "Extreme" } },
+  cloudCover: { good: [0, 30], fair: [0, 70], labels: { good: "Clear", fair: "Partly Cloudy", bad: "Overcast" } },
+  uv: { good: [0, 2], fair: [0, 5], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  pollen: { good: [0, 10], fair: [0, 35], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  radiation: { good: [0, 8], fair: [0, 15], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  et0: { good: [0, 2], fair: [0, 4.5], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  soilTemperature: { good: [8, 30], fair: [0, 32], labels: { good: "Optimal", fair: "Cool", bad: "Cold" } },
+  gdd: { good: [100, Infinity], fair: [25, Infinity], labels: { good: "High", fair: "Moderate", bad: "Low" } },
+  aggregateRain: { good: [0, 50], fair: [0, 100], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  aggregateTemperature: { good: [10, 25], fair: [0, 30], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
+  aggregateAqi: { good: [0, 20], fair: [0, 40], labels: { good: "Good", fair: "Fair", bad: "Poor" } }
 };
 
 function getMetricContext(value, metric, isC, lang) {
@@ -3762,9 +3773,10 @@ function getMetricContext(value, metric, isC, lang) {
   if (isC === false && ["temperature", "apparentTemperature", "soilTemperature", "aggregateTemperature"].includes(metric)) {
     normalized = (num - 32) * (5 / 9);
   }
-  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return t("ctxGood", lang);
-  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return t("ctxFair", lang);
-  return t("ctxBad", lang);
+  const labels = bands.labels || { good: "Good", fair: "Fair", bad: "Bad" };
+  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return labels.good;
+  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return labels.fair;
+  return labels.bad;
 }
 
 function formatMetricContext(value, metric, isC, lang) {

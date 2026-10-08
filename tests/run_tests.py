@@ -80,24 +80,24 @@ def parse_bool_param(v):
 
 
 METRIC_CONTEXT_BANDS = {
-    'temperature': {'good': (10, 26), 'fair': (0, 32)},
-    'apparentTemperature': {'good': (10, 26), 'fair': (0, 32)},
-    'humidity': {'good': (30, 70), 'fair': (20, 80)},
-    'dewPoint': {'good': (-20, 15), 'fair': (-30, 18)},
-    'rain': {'good': (0, 5), 'fair': (0, 25)},
-    'rainProbability': {'good': (0, 30), 'fair': (0, 70)},
-    'wind': {'good': (0, 20), 'fair': (0, 40)},
-    'pressure': {'good': (1000, 1020), 'fair': (990, 1035)},
-    'cloudCover': {'good': (0, 30), 'fair': (0, 70)},
-    'uv': {'good': (0, 2), 'fair': (0, 5)},
-    'pollen': {'good': (0, 10), 'fair': (0, 35)},
-    'radiation': {'good': (0, 8), 'fair': (0, 15)},
-    'et0': {'good': (0, 2), 'fair': (0, 4.5)},
-    'soilTemperature': {'good': (8, 30), 'fair': (0, 32)},
-    'gdd': {'good': (100, float('inf')), 'fair': (25, float('inf'))},
-    'aggregateRain': {'good': (0, 50), 'fair': (0, 100)},
-    'aggregateTemperature': {'good': (10, 25), 'fair': (0, 30)},
-    'aggregateAqi': {'good': (0, 20), 'fair': (0, 40)},
+    'temperature': {'good': (10, 26), 'fair': (0, 32), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
+    'apparentTemperature': {'good': (10, 26), 'fair': (0, 32), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
+    'humidity': {'good': (30, 70), 'fair': (20, 80), 'labels': {'good': 'Comfortable', 'fair': 'Moderate', 'bad': 'Muggy'}},
+    'dewPoint': {'good': (-20, 15), 'fair': (-30, 18), 'labels': {'good': 'Dry', 'fair': 'Moderate', 'bad': 'Humid'}},
+    'rain': {'good': (0, 5), 'fair': (0, 25), 'labels': {'good': 'Light', 'fair': 'Moderate', 'bad': 'Heavy'}},
+    'rainProbability': {'good': (0, 30), 'fair': (0, 70), 'labels': {'good': 'Low', 'fair': 'Medium', 'bad': 'High'}},
+    'wind': {'good': (0, 20), 'fair': (0, 40), 'labels': {'good': 'Calm', 'fair': 'Breezy', 'bad': 'Windy'}},
+    'pressure': {'good': (1000, 1020), 'fair': (990, 1035), 'labels': {'good': 'Normal', 'fair': 'Variable', 'bad': 'Extreme'}},
+    'cloudCover': {'good': (0, 30), 'fair': (0, 70), 'labels': {'good': 'Clear', 'fair': 'Partly Cloudy', 'bad': 'Overcast'}},
+    'uv': {'good': (0, 2), 'fair': (0, 5), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'pollen': {'good': (0, 10), 'fair': (0, 35), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'radiation': {'good': (0, 8), 'fair': (0, 15), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'et0': {'good': (0, 2), 'fair': (0, 4.5), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'soilTemperature': {'good': (8, 30), 'fair': (0, 32), 'labels': {'good': 'Optimal', 'fair': 'Cool', 'bad': 'Cold'}},
+    'gdd': {'good': (100, float('inf')), 'fair': (25, float('inf')), 'labels': {'good': 'High', 'fair': 'Moderate', 'bad': 'Low'}},
+    'aggregateRain': {'good': (0, 50), 'fair': (0, 100), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'aggregateTemperature': {'good': (10, 25), 'fair': (0, 30), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
+    'aggregateAqi': {'good': (0, 20), 'fair': (0, 40), 'labels': {'good': 'Good', 'fair': 'Fair', 'bad': 'Poor'}},
 }
 
 TEMPERATURE_CONTEXT_METRICS = {
@@ -250,6 +250,7 @@ def escape_ics_text(s):
         .replace('\\', '\\\\')
         .replace(';', '\\;')
         .replace(',', '\\,')
+        .replace('\n', '\\n')
         .replace('\r', ''))
 
 
@@ -458,9 +459,9 @@ def test_escape_special_chars():
     assert_eq(escape_ics_text('path\\to\\file'), 'path\\\\to\\\\file')
 
 
-def test_escape_preserves_lf():
-    assert_eq(escape_ics_text('line1\r\nline2'), 'line1\nline2')
-    assert_eq(escape_ics_text('line1\nline2'), 'line1\nline2')
+def test_escape_escapes_newlines():
+    assert_eq(escape_ics_text('line1\r\nline2'), 'line1\\nline2')
+    assert_eq(escape_ics_text('line1\nline2'), 'line1\\nline2')
 
 
 def test_escape_null():
@@ -1092,16 +1093,22 @@ def test_metric_context_fahrenheit_and_invalid_inputs():
 
 
 def parse_source_metric_bands(src):
-    """Extract the numeric good/fair bands from a renderer's METRIC_CONTEXT_BANDS literal."""
+    """Extract the numeric good/fair bands and labels from a renderer's METRIC_CONTEXT_BANDS literal."""
     block = re.search(r'const METRIC_CONTEXT_BANDS\s*=\s*\{([\s\S]*?)\n\};', src)
     assert_true(block is not None, 'METRIC_CONTEXT_BANDS missing')
     bands = {}
     for entry in re.finditer(
-            r'(\w+):\s*\{\s*good:\s*\[([^\]]*)\],\s*fair:\s*\[([^\]]*)\]\s*\}', block.group(1)):
+            r'(\w+):\s*\{\s*good:\s*\[([^\]]*)\],\s*fair:\s*\[([^\]]*)\](?:,\s*labels:\s*\{([^}]*)\})?\s*\}', block.group(1)):
         def numbers(raw):
             return tuple(float('inf') if v.strip() == 'Infinity' else float(v)
                          for v in raw.split(','))
-        bands[entry.group(1)] = {'good': numbers(entry.group(2)), 'fair': numbers(entry.group(3))}
+        metric_bands = {'good': numbers(entry.group(2)), 'fair': numbers(entry.group(3))}
+        if entry.group(4):
+            labels = {}
+            for label_entry in re.finditer(r'(\w+):\s*"([^"]*)"', entry.group(4)):
+                labels[label_entry.group(1)] = label_entry.group(2)
+            metric_bands['labels'] = labels
+        bands[entry.group(1)] = metric_bands
     return bands
 
 

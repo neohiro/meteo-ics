@@ -332,11 +332,11 @@ run("metric contexts (gcal)", () => {
   const m = loadMetrics(GCAL);
 
   test("band edges are inclusive at the top and exclusive at the bottom", () => {
-    eq(m.getMetricContext(0, "uv", true, "en"), "Good", "uv 0");
-    eq(m.getMetricContext(2, "uv", true, "en"), "Good", "uv 2 upper edge");
-    eq(m.getMetricContext(2.1, "uv", true, "en"), "Fair", "uv just above");
-    eq(m.getMetricContext(5, "uv", true, "en"), "Fair", "uv 5");
-    eq(m.getMetricContext(5.1, "uv", true, "en"), "Bad", "uv just above 5");
+    eq(m.getMetricContext(0, "uv", true, "en"), "Low", "uv 0");
+    eq(m.getMetricContext(2, "uv", true, "en"), "Low", "uv 2 upper edge");
+    eq(m.getMetricContext(2.1, "uv", true, "en"), "Moderate", "uv just above");
+    eq(m.getMetricContext(5, "uv", true, "en"), "Moderate", "uv 5");
+    eq(m.getMetricContext(5.1, "uv", true, "en"), "High", "uv just above 5");
   });
 
   test("a blank reading yields no context instead of a false Fair", () => {
@@ -359,18 +359,18 @@ run("metric contexts (gcal)", () => {
   test("Fahrenheit readings are converted before banding", () => {
     // 40 F is 4.4 C: Fair once converted, Bad if the raw value were compared
     // against the Celsius bands. Proves the conversion actually runs.
-    eq(m.getMetricContext(40, "temperature", false, "en"), "Fair", "40F converts to Fair");
-    eq(m.getMetricContext(40, "temperature", true, "en"), "Bad", "40C stays Bad");
+    eq(m.getMetricContext(40, "temperature", false, "en"), "Cool", "40F converts to Cool");
+    eq(m.getMetricContext(40, "temperature", true, "en"), "Extreme", "40C stays Extreme");
     // 68 F is 20 C, inside the Good band for both.
-    eq(m.getMetricContext(68, "temperature", false, "en"), "Good", "68F converts to Good");
-    eq(m.getMetricContext(20, "temperature", true, "en"), "Good", "20C stays Good");
+    eq(m.getMetricContext(68, "temperature", false, "en"), "Mild", "68F converts to Mild");
+    eq(m.getMetricContext(20, "temperature", true, "en"), "Mild", "20C stays Mild");
     // Non-temperature metrics are never converted: were 40 to be read as
     // Fahrenheit it would become 4.4, which is below the Fair band.
-    eq(m.getMetricContext(40, "humidity", false, "en"), "Good", "humidity is never converted");
+    eq(m.getMetricContext(40, "humidity", false, "en"), "Comfortable", "humidity is never converted");
   });
 
   test("formatMetricContext wraps the label in parentheses and hides blanks", () => {
-    eq(m.formatMetricContext(3, "uv", true, "en"), " (Fair)");
+    eq(m.formatMetricContext(3, "uv", true, "en"), " (Moderate)");
     eq(m.formatMetricContext("", "uv", true, "en"), "", "blank must contribute nothing");
   });
 });
