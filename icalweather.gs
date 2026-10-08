@@ -23,7 +23,12 @@
  *    lower/upper/digit, no 6+ repeated chars.
  *  - 8 languages (en, zh, hi, es, fr, ar, de, nl) with full UI text + advice translation.
  *  - days/hazards/lang URL params all honored.
- *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes.
+ *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes/newlines.
+ *  - Calendar-subscription friendly: the feed is served inline as text/calendar (no Content-Disposition
+ *    attachment), so Outlook and iOS can "Subscribe from web" instead of downloading a file.
+ *  - Metric context labels are metric-specific and localized: getMetricContext() resolves each band
+ *    through t() via metricContextLabel(), using only copy already vetted in T_L, and falls back to
+ *    English text (never a raw key) for labels that have no translation yet.
  *  - Astronomical events year-aware (auto-detect current year for solstices/equinoxes).
  *  - Moon phase uses UTC reference date and accurate synodic-month boundaries.
  *  - Clean single empty line (\n\n) separation between card blocks.
@@ -3744,7 +3749,7 @@ function getPollutantContext(val, pollutant, lang) {
 const METRIC_CONTEXT_BANDS = {
   temperature: { good: [10, 26], fair: [0, 32], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
   apparentTemperature: { good: [10, 26], fair: [0, 32], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
-  humidity: { good: [30, 70], fair: [20, 80], labels: { good: "Comfortable", fair: "Moderate", bad: "Muggy" } },
+  humidity: { good: [30, 70], fair: [20, 80], labels: { good: "Comfortable", fair: "Moderate", bad: "Dry / Humid" } },
   dewPoint: { good: [-20, 15], fair: [-30, 18], labels: { good: "Dry", fair: "Moderate", bad: "Humid" } },
   rain: { good: [0, 5], fair: [0, 25], labels: { good: "Light", fair: "Moderate", bad: "Heavy" } },
   rainProbability: { good: [0, 30], fair: [0, 70], labels: { good: "Low", fair: "Medium", bad: "High" } },
@@ -3755,12 +3760,30 @@ const METRIC_CONTEXT_BANDS = {
   pollen: { good: [0, 10], fair: [0, 35], labels: { good: "Low", fair: "Moderate", bad: "High" } },
   radiation: { good: [0, 8], fair: [0, 15], labels: { good: "Low", fair: "Moderate", bad: "High" } },
   et0: { good: [0, 2], fair: [0, 4.5], labels: { good: "Low", fair: "Moderate", bad: "High" } },
-  soilTemperature: { good: [8, 30], fair: [0, 32], labels: { good: "Optimal", fair: "Cool", bad: "Cold" } },
+  soilTemperature: { good: [8, 30], fair: [0, 32], labels: { good: "Optimal", fair: "Cool", bad: "Cold / Hot" } },
   gdd: { good: [100, Infinity], fair: [25, Infinity], labels: { good: "High", fair: "Moderate", bad: "Low" } },
   aggregateRain: { good: [0, 50], fair: [0, 100], labels: { good: "Low", fair: "Moderate", bad: "High" } },
   aggregateTemperature: { good: [10, 25], fair: [0, 30], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
   aggregateAqi: { good: [0, 20], fair: [0, 40], labels: { good: "Good", fair: "Fair", bad: "Poor" } }
 };
+
+// Maps a band label to its vetted T_L translation key. Only labels that
+// already have reviewed copy in all eight languages are listed; anything else
+// falls through to its English text rather than shipping a machine guess.
+const METRIC_CONTEXT_LABEL_KEYS = {
+  "Good": "ctxGood",
+  "Fair": "ctxFair",
+  "Bad": "ctxBad"
+};
+
+function metricContextLabel(label, lang) {
+  if (!label) return "";
+  const key = METRIC_CONTEXT_LABEL_KEYS[label];
+  if (!key) return label;
+  const localized = t(key, lang);
+  // t() echoes the key back when the entry is missing; never surface that.
+  return localized === key ? label : localized;
+}
 
 function getMetricContext(value, metric, isC, lang) {
   if (value == null || (typeof value === "string" && value.trim() === "")) return "";
@@ -3773,9 +3796,9 @@ function getMetricContext(value, metric, isC, lang) {
     normalized = (num - 32) * (5 / 9);
   }
   const labels = bands.labels || { good: "Good", fair: "Fair", bad: "Bad" };
-  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return labels.good;
-  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return labels.fair;
-  return labels.bad;
+  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return metricContextLabel(labels.good, lang);
+  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return metricContextLabel(labels.fair, lang);
+  return metricContextLabel(labels.bad, lang);
 }
 
 function formatMetricContext(value, metric, isC, lang) {

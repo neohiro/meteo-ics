@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- **Direction-neutral band labels**: `humidity` reported "Muggy" for arid readings (the `bad` bucket spans <20% *and* >80% RH) and `soilTemperature` reported "Cold" for soil above 32 °C. Both now render a two-sided label ("Dry / Humid", "Cold / Hot"); previously the generic "Bad" was vague but never actively false.
+- **Metric context localization**: `getMetricContext()` returned hardcoded English labels, silently ignoring its `lang` argument for all seven non-English locales. Labels are now resolved through `t()` via `metricContextLabel()`, using only copy already vetted in `T_L`; untranslated labels fall back to English text instead of leaking a lookup key.
+- **ICS calendar subscription**: the feed was served with `Content-Disposition: attachment`, which Outlook and iOS reject when subscribing from a URL. It is now served inline as `text/calendar`.
+- **`fetchBreakingNews()` testability (ICS)**: the UTC day key was derived with raw `Date.UTC()` calls instead of `Utilities.formatDate()`, so the JS harness mock could not control "today" and the case was permanently unexecutable. Now matches the GCal pattern; CI JS job is green for the first time on this path.
+
+### Changed
+- JS harness now executes the metric-context suite against **both** renderers (previously GCal only), so the ICS copy of `metricContextLabel()` is covered rather than assumed.
+- Test counts: 345 Python (was 343), 40 JS harness (was 28).
+
+### Security
+- **Token status without decryption**: `waqiTokenIsConfigured()` reports WAQI token presence from the Drive hint / legacy property without decrypting the blob, removing a decrypt attempt from the `?action=status` path.
+- **Error event sanitization**: the ICS error event no longer interpolates raw exception text (stack traces) into a calendar-visible description; it is truncated to the first line and 200 characters.
+
 ## [2.5.1] — 2026-09-27
 
 ### Fixed
@@ -13,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **GCal headline capture/replay**: Today's validated headlines are captured once into the day record and replayed for past days, re-validated on read.
 
 ### Added
-- **JS execution harness** (`tests/js_harness.js`): extracts and executes real Apps Script functions (`validateHeadlines`, `buildBreakingNewsUrls`, `fetchBreakingNews`, `redactSecretsForLog`, `getMetricContext`, `formatMetricContext`, `pushFiniteHourlyValue`, `METRIC_CONTEXT_BANDS`) with stubbed Apps Script globals. Runs on `bun` locally and `node` in CI.
+- **JS execution harness** (`tests/js_harness.js`): extracts and executes real Apps Script functions (`validateHeadlines`, `buildBreakingNewsUrls`, `fetchBreakingNews`, `redactSecretsForLog`, `getMetricContext`, `metricContextLabel`, `formatMetricContext`, `pushFiniteHourlyValue`, `METRIC_CONTEXT_BANDS`, `METRIC_CONTEXT_LABEL_KEYS`) with stubbed Apps Script globals. Runs on `bun` locally and `node` in CI.
 - **CI job `js`** executing the harness alongside existing Python test suite and lint.
 
 ### Changed

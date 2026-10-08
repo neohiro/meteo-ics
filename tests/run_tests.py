@@ -82,7 +82,7 @@ def parse_bool_param(v):
 METRIC_CONTEXT_BANDS = {
     'temperature': {'good': (10, 26), 'fair': (0, 32), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
     'apparentTemperature': {'good': (10, 26), 'fair': (0, 32), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
-    'humidity': {'good': (30, 70), 'fair': (20, 80), 'labels': {'good': 'Comfortable', 'fair': 'Moderate', 'bad': 'Muggy'}},
+    'humidity': {'good': (30, 70), 'fair': (20, 80), 'labels': {'good': 'Comfortable', 'fair': 'Moderate', 'bad': 'Dry / Humid'}},
     'dewPoint': {'good': (-20, 15), 'fair': (-30, 18), 'labels': {'good': 'Dry', 'fair': 'Moderate', 'bad': 'Humid'}},
     'rain': {'good': (0, 5), 'fair': (0, 25), 'labels': {'good': 'Light', 'fair': 'Moderate', 'bad': 'Heavy'}},
     'rainProbability': {'good': (0, 30), 'fair': (0, 70), 'labels': {'good': 'Low', 'fair': 'Medium', 'bad': 'High'}},
@@ -93,7 +93,7 @@ METRIC_CONTEXT_BANDS = {
     'pollen': {'good': (0, 10), 'fair': (0, 35), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
     'radiation': {'good': (0, 8), 'fair': (0, 15), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
     'et0': {'good': (0, 2), 'fair': (0, 4.5), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
-    'soilTemperature': {'good': (8, 30), 'fair': (0, 32), 'labels': {'good': 'Optimal', 'fair': 'Cool', 'bad': 'Cold'}},
+    'soilTemperature': {'good': (8, 30), 'fair': (0, 32), 'labels': {'good': 'Optimal', 'fair': 'Cool', 'bad': 'Cold / Hot'}},
     'gdd': {'good': (100, float('inf')), 'fair': (25, float('inf')), 'labels': {'good': 'High', 'fair': 'Moderate', 'bad': 'Low'}},
     'aggregateRain': {'good': (0, 50), 'fair': (0, 100), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
     'aggregateTemperature': {'good': (10, 25), 'fair': (0, 30), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
@@ -1183,6 +1183,46 @@ def test_gcal_ical_metric_context_translations():
             for lang in ('en', 'zh', 'hi', 'es', 'fr', 'ar', 'de', 'nl'):
                 assert_true(re.search(rf'\b{lang}\s*:\s*"[^"]+"', entry.group(1)),
                     f'{name}: {key}.{lang} missing')
+
+
+def test_metric_context_labels_route_through_translation_table():
+    """getMetricContext must resolve labels via t(), not return raw English.
+
+    Regression guard: bands carry English literals, so a renderer that returns
+    `labels.good` directly silently drops the `lang` argument for every locale.
+    """
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        helper = re.search(r'function metricContextLabel\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: metricContextLabel helper missing')
+        assert_true('t(' in helper.group(0),
+            f'{name}: metricContextLabel must consult the translation table')
+        assert_true('localized === key' in helper.group(0),
+            f'{name}: metricContextLabel must guard against t() echoing the key back')
+        for slot in ('good', 'fair', 'bad'):
+            assert_true(re.search(rf'metricContextLabel\(labels\.{slot}, lang\)', src) is not None,
+                f'{name}: {slot} band must route through metricContextLabel with lang')
+        # Every band must be reachable: three metricContextLabel call sites.
+        assert_eq(len(re.findall(r'metricContextLabel\(labels\.', src)), 3,
+            f'{name}: all three band slots must be translated')
+
+
+def test_metric_context_dual_direction_labels_are_neutral():
+    """A band whose tail spans both tails must not carry a one-sided label.
+
+    humidity's `bad` bucket covers arid (<20%) and saturated (>80%) readings, so
+    "Muggy" is false in a desert; soilTemperature's covers sub-zero and >32C soil,
+    so "Cold" is false for scalding soil.
+    """
+    neutral_expectations = {
+        'humidity': 'Dry / Humid',
+        'soilTemperature': 'Cold / Hot',
+    }
+    for metric, expected in neutral_expectations.items():
+        for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+            bands = parse_source_metric_bands(src)
+            assert_true(metric in bands, f'{name}: {metric} band missing')
+            labels = bands[metric].get('labels') or {}
+            assert_eq(labels.get('bad'), expected, f'{name}: {metric} bad label must be direction-neutral')
 
 
 def test_gcal_ical_air_section_renders_pollutant_context():
