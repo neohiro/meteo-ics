@@ -7,14 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **RFC 5545 stream termination**: the generated feed (and the ICS error fallback) ended at `END:VCALENDAR` with no trailing CRLF. §3.1 requires every content line to be CRLF-delimited including the last, and strict clients — notably iOS Calendar and Outlook — reject an unterminated final line. This was a second, independent cause of the subscription failure reported for those clients, independent of the `Content-Disposition` fix.
+- **Calendar-header injection**: `X-WR-TIMEZONE` interpolated `locations[0].tz` raw. That value originates from the Open-Meteo geocoding response, so a CRLF in it would inject calendar-level properties ahead of every event. Now escaped with `escapeIcsText()`, matching how `X-WR-CALNAME` and `SUMMARY` were already handled.
 - **Direction-neutral band labels**: `humidity` reported "Muggy" for arid readings (the `bad` bucket spans <20% *and* >80% RH) and `soilTemperature` reported "Cold" for soil above 32 °C. Both now render a two-sided label ("Dry / Humid", "Cold / Hot"); previously the generic "Bad" was vague but never actively false.
 - **Metric context localization**: `getMetricContext()` returned hardcoded English labels, silently ignoring its `lang` argument for all seven non-English locales. Labels are now resolved through `t()` via `metricContextLabel()`, using only copy already vetted in `T_L`; untranslated labels fall back to English text instead of leaking a lookup key.
 - **ICS calendar subscription**: the feed was served with `Content-Disposition: attachment`, which Outlook and iOS reject when subscribing from a URL. It is now served inline as `text/calendar`.
 - **`fetchBreakingNews()` testability (ICS)**: the UTC day key was derived with raw `Date.UTC()` calls instead of `Utilities.formatDate()`, so the JS harness mock could not control "today" and the case was permanently unexecutable. Now matches the GCal pattern; CI JS job is green for the first time on this path.
 
 ### Changed
+- **Refresh hint**: the feed now declares `REFRESH-INTERVAL`/`X-PUBLISHED-TTL` of `PT3H`. Clients left to their own default commonly refetch about once daily, which pinned a 30-day forecast feed to day-old numbers. Three hours keeps forecasts and hourly AQI current while bounding Apps Script execution cost; operators with quota headroom can shorten it to `PT1H`.
 - JS harness now executes the metric-context suite against **both** renderers (previously GCal only), so the ICS copy of `metricContextLabel()` is covered rather than assumed.
-- Test counts: 345 Python (was 343), 40 JS harness (was 28).
+- Test counts: 349 Python (was 343), 40 JS harness (was 28).
 
 ### Security
 - **Token status without decryption**: `waqiTokenIsConfigured()` reports WAQI token presence from the Drive hint / legacy property without decrypting the blob, removing a decrypt attempt from the `?action=status` path.

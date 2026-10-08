@@ -25,7 +25,9 @@
  *  - days/hazards/lang URL params all honored.
  *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes/newlines.
  *  - Calendar-subscription friendly: the feed is served inline as text/calendar (no Content-Disposition
- *    attachment), so Outlook and iOS can "Subscribe from web" instead of downloading a file.
+ *    attachment), the stream is CRLF-terminated per RFC 5545 §3.1, and it declares REFRESH-INTERVAL so
+ *    subscribed clients refetch on a sane cadence instead of their ~daily default. Outlook and iOS can
+ *    "Subscribe from web" rather than downloading a file.
  *  - Metric context labels are metric-specific and localized: getMetricContext() resolves each band
  *    through t() via metricContextLabel(), using only copy already vetted in T_L, and falls back to
  *    English text (never a raw key) for labels that have no translation yet.
@@ -1821,7 +1823,7 @@ function doGet(e) {
       "TRANSP:TRANSPARENT",
       "END:VEVENT",
       "END:VCALENDAR"
-    ].join("\r\n");
+    ].join("\r\n") + "\r\n";
     return ContentService.createTextOutput(errorIcs)
       .setMimeType(ContentService.MimeType.ICAL);
   }
@@ -2117,8 +2119,19 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
     "PRODID:-//Weather Astronomical Dashboard//" + lang.toUpperCase(),
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
+    // Advisory poll interval. Clients left to their own default often refetch
+    // daily, which would pin a 30-day feed to day-old numbers. PT3H keeps
+    // forecasts and hourly AQI reasonably current while bounding Apps Script
+    // execution cost (each poll is a billed execution, and heavy multi-city
+    // subscriptions can approach the daily quota if polled hourly). Operators
+    // with headroom can shorten this to PT1H.
+    "REFRESH-INTERVAL;VALUE=DURATION:PT3H",
+    "X-PUBLISHED-TTL:PT3H",
     `X-WR-CALNAME:${escapeIcsText(calName)}`,
-    `X-WR-TIMEZONE:${firstLocTz}`,
+    // loc.tz originates from the geocoding API response, so it is untrusted
+    // input. Escape it: a CRLF here would inject calendar-level properties
+    // ahead of every event in the feed.
+    `X-WR-TIMEZONE:${escapeIcsText(firstLocTz)}`,
     `X-WR-CALDESC:Weather + astronomical · v${ICAL_CONFIG.version} · Open-Meteo AQI (hourly)`,
     `X-WR-LANG:${lang}`,
     `X-META-SCRIPTVERSION:${ICAL_CONFIG.version}`,
@@ -2447,7 +2460,11 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   }
 
   lines.push("END:VCALENDAR");
-  return foldIcsLines(lines);
+  // RFC 5545 §3.1: every content line is CRLF-delimited, including the last
+  // one. Strict clients (notably iOS Calendar and Outlook) reject a feed whose
+  // final line is unterminated, so terminate the stream explicitly here rather
+  // than relying on a trailing empty element.
+  return foldIcsLines(lines) + "\r\n";
 }
 
 function escapeIcsText(str) {

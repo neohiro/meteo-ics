@@ -499,6 +499,65 @@ def test_fold_multi_line():
     assert_true('BEGIN:VEVENT' in out and 'END:VEVENT' in out)
 
 
+def test_fold_does_not_terminate_stream():
+    """foldIcsLines is a pure line folder; stream termination is the caller's job."""
+    out = fold_ics_lines(['SUMMARY:Short title'])
+    assert_true(not out.endswith('\r\n'),
+        'foldIcsLines must not append a trailing CRLF')
+
+
+def test_generated_feed_is_crlf_terminated():
+    """RFC 5545 §3.1: the last content line must be CRLF-delimited.
+
+    Regression guard for the Outlook/iOS subscription failure: an unterminated
+    final line makes strict clients reject the whole feed. Only icalweather.gs
+    emits ICS (gcalweather.gs targets the Google Calendar API instead).
+    """
+    call = re.search(r'return foldIcsLines\(lines\)([^;]*);', ICAL)
+    assert_true(call is not None, 'icalweather.gs: foldIcsLines call site missing')
+    assert_true('"\\r\\n"' in call.group(1),
+        'icalweather.gs: feed must be CRLF-terminated after folding')
+
+    err = re.search(r'"END:VCALENDAR"\s*\n\s*\]\.join\("\\r\\n"\)([^;]*);', ICAL)
+    assert_true(err is not None, 'icalweather.gs: error ICS assembly not found')
+    assert_true('"\\r\\n"' in err.group(1),
+        'icalweather.gs: error ICS must be CRLF-terminated')
+
+
+def test_ics_calendar_header_escapes_untrusted_timezone():
+    """loc.tz comes from the geocoding API, so it must be escaped.
+
+    X-WR-TIMEZONE sits at calendar level, ahead of every VEVENT, so an
+    unescaped CRLF there would let a hostile geocoding response inject
+    properties into the subscriber's calendar.
+    """
+    assert_true('X-WR-TIMEZONE:${escapeIcsText(firstLocTz)}' in ICAL,
+        'icalweather.gs: X-WR-TIMEZONE must escape the geocoder-supplied timezone')
+    # Guard the regression that motivated it: every calendar-level property
+    # interpolating a variable must pass through escapeIcsText.
+    header = re.search(r'const lines = \[\s*\n\s*"BEGIN:VCALENDAR"[\s\S]*?\n\s*\];', ICAL)
+    assert_true(header is not None, 'icalweather.gs: VCALENDAR header block missing')
+    for raw in re.findall(r'^\s*`?([A-Z0-9-]+:[^`"\n]*)\$\{([A-Za-z_][\w.]*)\}`?,?\s*$',
+                          header.group(0), re.M):
+        name, var = raw
+        if var in ('lang', 'ICAL_CONFIG.version', 'fetchedAt'):
+            continue  # enum/format-controlled, not free-form input
+        assert_true(f'escapeIcsText({var})' in header.group(0),
+            f'icalweather.gs: calendar property {name} interpolates {var} unescaped')
+
+
+def test_ics_declares_refresh_interval():
+    """Subscribed clients need a poll hint or they refetch on their own schedule.
+
+    Left to its own devices Outlook commonly refetches about once a day, which
+    would pin a 30-day forecast feed to day-old numbers.
+    """
+    header = re.search(r'const lines = \[\s*\n\s*"BEGIN:VCALENDAR"[\s\S]*?\n\s*\];', ICAL)
+    assert_true(header is not None, 'icalweather.gs: VCALENDAR header block missing')
+    assert_true(re.search(r'REFRESH-INTERVAL;VALUE=DURATION:PT\d+[HM]', header.group(0)) is not None,
+        'icalweather.gs: REFRESH-INTERVAL missing from VCALENDAR header')
+
+
 # =============================================================================
 # 6. Source-text tests — gcalweather.gs
 # =============================================================================
