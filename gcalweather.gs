@@ -2270,7 +2270,10 @@ function fetchAllAtmosphericDataParallel(locationPool) {
 }
 
 function gcalFetchGlobalAQI(loc, aqProvider, aqRadius) {
-  if (!loc || !loc.lat || !loc.lon) return null;
+  // isValidLatLon, not a truthiness check: lat 0 / lon 0 are valid coordinates
+  // (the equator and the prime meridian run through cities such as Quito and
+  // London), so `!loc.lat` would silently drop their air quality entirely.
+  if (!loc || !isValidLatLon(loc.lat, loc.lon)) return null;
 
   // Check persistent cache first (prefetched by scheduled trigger).
   const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");
@@ -3831,7 +3834,10 @@ function validateConfig() {
     if (!loc.name) {
       errors.push(`Location ${i}: missing 'name' field`);
     }
-    if (!loc.lat || !loc.lon) {
+    // isValidLatLon, not a truthiness check: a location legitimately sitting on
+    // the equator (lat 0) or the prime meridian (lon 0) must not be reported as
+    // missing coordinates.
+    if (!isValidLatLon(loc.lat, loc.lon)) {
       errors.push(`Location ${i} ('${loc.name || "unnamed"}'): no coordinates — geocoding required`);
       const geo = geocodeCity(loc.name || "", loc.country);
       if (!geo || !geo.lat || !geo.lon) {

@@ -2728,7 +2728,10 @@ function updateAqiHistory(locName, aqi) {
 }
 
 function fetchGlobalAQI(loc, aqProvider, aqRadius) {
-  if (!loc || !loc.lat || !loc.lon) return null;
+  // isValidLatLon, not a truthiness check: lat 0 / lon 0 are valid coordinates
+  // (the equator and the prime meridian run through cities such as Quito and
+  // London), so `!loc.lat` would silently drop their air quality entirely.
+  if (!loc || !isValidLatLon(loc.lat, loc.lon)) return null;
 
   // Check persistent cache first (prefetched by scheduled trigger).
   const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");

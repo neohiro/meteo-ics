@@ -64,6 +64,21 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def is_valid_lat_lon(lat, lon):
+    """Mirror of isValidLatLon() in both .gs scripts.
+
+    Note the deliberate absence of a truthiness test: lat 0 and lon 0 are valid
+    coordinates, and treating them as missing silently drops equatorial and
+    prime-meridian cities.
+    """
+    for v in (lat, lon):
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return False
+        if math.isnan(v) or math.isinf(v):
+            return False
+    return abs(lat) <= 90 and abs(lon) <= 180
+
+
 def normalize_lang(raw):
     if not raw:
         return 'en'
@@ -2865,6 +2880,43 @@ def test_gcal_fetchGlobalAQI_function_exists():
         'OpenAQ endpoint constant must be defined in gcalweather.gs')
     assert_true(re.search(r'WAQI_BASE_ENDPOINT', GCAL),
         'WAQI endpoint constant must be defined in gcalweather.gs')
+
+
+def test_equator_and_prime_meridian_coords_are_valid():
+    """lat 0 / lon 0 are real coordinates and must not read as missing.
+
+    A truthiness guard (`!loc.lat`) treats 0 as absent, so equatorial and
+    prime-meridian cities would silently lose their air quality data. Both
+    fetchers and validateConfig must range-check with isValidLatLon instead.
+    """
+    assert_true(is_valid_lat_lon(0, 0), 'origin must be a valid coordinate pair')
+    assert_true(is_valid_lat_lon(0, 51.5), 'equator + London longitude')
+    assert_true(is_valid_lat_lon(-0.0, -0.0), 'negative zero must stay valid')
+    assert_true(is_valid_lat_lon(-90, -180), 'south-west corner')
+    # Out-of-range and non-finite values must still be rejected.
+    assert_true(not is_valid_lat_lon(91, 0), 'lat over 90')
+    assert_true(not is_valid_lat_lon(0, 181), 'lon over 180')
+    assert_true(not is_valid_lat_lon(None, 0), 'missing lat')
+    assert_true(not is_valid_lat_lon(0, None), 'missing lon')
+    assert_true(not is_valid_lat_lon(float('nan'), 0), 'NaN lat')
+    assert_true(not is_valid_lat_lon(float('inf'), 0), 'infinite lat')
+
+    for name, src, fn_name in (
+        ('icalweather.gs', ICAL, 'fetchGlobalAQI'),
+        ('gcalweather.gs', GCAL, 'gcalFetchGlobalAQI'),
+    ):
+        fn = re.search(rf'function {fn_name}\([\s\S]*?\n\}}', src)
+        assert_true(fn is not None, f'{name}: {fn_name} not found')
+        body = fn.group(0)
+        assert_true('isValidLatLon(loc.lat, loc.lon)' in body,
+            f'{name}: {fn_name} must validate coordinates with isValidLatLon')
+        assert_true('!loc.lat || !loc.lon' not in body,
+            f'{name}: {fn_name} must not use a truthiness check that rejects lat/lon 0')
+
+    vc = re.search(r'function validateConfig\([\s\S]*?\n\}', GCAL)
+    assert_true(vc is not None)
+    assert_true('!loc.lat || !loc.lon' not in vc.group(0),
+        'gcalweather.gs: validateConfig must not report a zero coordinate as missing')
 
 
 def test_ical_openaq_fallback_in_fetch():
