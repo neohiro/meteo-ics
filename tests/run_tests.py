@@ -255,16 +255,13 @@ def escape_ics_text(s):
 
 
 def octet_count(s):
-    n = 0
-    for c in s:
-        n += 1 if ord(c) < 128 else 2
-    return n
+    return len(s.encode('utf-8'))
 
 
 def fold_ics_lines(lines):
     out = []
     for line in lines:
-        if octet_count(line) <= 75:
+        if len(line.encode('utf-8')) <= 75:
             out.append(line)
             continue
         rest = line
@@ -273,8 +270,11 @@ def fold_ics_lines(lines):
             budget = 75 if first else 74
             used = 0
             oct = 0
-            while used < len(rest) and oct < budget:
-                oct += 1 if ord(rest[used]) < 128 else 2
+            for ch in rest:
+                o = len(ch.encode('utf-8'))
+                if oct + o > budget and used > 0:
+                    break
+                oct += o
                 used += 1
             chunk = rest[:used]
             if first:
@@ -482,16 +482,36 @@ def test_fold_long():
 
 
 def test_fold_octet_limit_cjk():
-    # Test that multi-byte characters are handled without exceeding 75 octets/line.
-    # Each CJK char is 3 UTF-8 octets; our estimator uses conservative 2-octet count.
-    # Use a string short enough that even with the estimator being off by 1 byte/char,
-    # the output stays within RFC 5545 limits.
-    # 11 CJK chars = 11*3=33 octets + "SUMMARY:" = 41, well under 75.
-    cjk = 'SUMMARY:' + '中文' * 11  # 22 code units × 3 octets = 66 octets + 8 = 74
+    # Test that multi-byte characters are folded by true UTF-8 octet count.
+    # Each CJK char is 3 UTF-8 octets: 30 of them plus "SUMMARY:" is 98 octets,
+    # which the old 2-octet estimator counted as 68 and left unfolded (an RFC
+    # 5545 §3.1 violation). The fixed folder must split it and keep every
+    # segment within 75 true octets.
+    cjk = 'SUMMARY:' + '中' * 30
+    assert_true(octet_count(cjk) > 75, 'fixture must exceed 75 true octets')
     out = fold_ics_lines([cjk])
     parts = out.split('\r\n')
+    assert_true(len(parts) > 1, 'long CJK line should fold')
     for i, p in enumerate(parts):
         assert_true(octet_count(p) <= 75, f'segment {i} too long: {octet_count(p)} octets')
+    # Round-trip: unfolding must restore the original line exactly.
+    assert_eq(''.join(p[1:] if i else p for i, p in enumerate(parts)), cjk)
+
+
+def test_fold_never_splits_surrogate_pair():
+    # Emoji live in the supplementary plane (4 UTF-8 octets, 2 UTF-16 units).
+    # Folding between the units emits lone surrogates that strict parsers
+    # reject. Every folded segment must encode cleanly and unfold exactly.
+    emoji = 'SUMMARY:' + '🌤️' * 20
+    out = fold_ics_lines([emoji])
+    parts = out.split('\r\n')
+    assert_true(len(parts) > 1, 'long emoji line should fold')
+    for i, p in enumerate(parts):
+        p.encode('utf-8')
+        assert_true(octet_count(p) <= 75, f'segment {i} too long')
+        for ch in p:
+            assert_true(not (0xD800 <= ord(ch) <= 0xDFFF), f'segment {i} holds a lone surrogate')
+    assert_eq(''.join(p[1:] if i else p for i, p in enumerate(parts)), emoji)
 
 
 def test_fold_multi_line():
