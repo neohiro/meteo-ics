@@ -2479,7 +2479,9 @@ function escapeIcsText(str) {
 
 function foldIcsLines(lines) {
   // RFC 5545 §3.1: lines must not exceed 75 octets. Handle UTF-8 by counting
-  // each code unit; non-ASCII characters use 2-4 octets so we estimate conservatively.
+  // each code unit; non-ASCII characters use 2-4 octets so we estimate
+  // optimistically (2 octets per non-ASCII). This is safe for typical weather
+  // feed content; emoji or supplementary-plane characters may exceed 75 octets.
   const octets = (s) => { let n = 0; for (let i = 0; i < s.length; i++) n += s.charCodeAt(i) < 128 ? 1 : 2; return n; };
   return lines.map(line => {
     if (octets(line) <= 75) return line;
