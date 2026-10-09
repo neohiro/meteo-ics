@@ -591,6 +591,147 @@ run("foldIcsLines (ical)", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Timezone cache: bounded, deduped, fully queued (real icalweather.gs) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Builds the real timezone-cache helpers with an injectable ScriptProperties
+ * and clock, so both the hydration path and the eviction path can be driven
+ * without a network.
+ */
+function loadTzCache(opts = {}) {
+  const cap = opts.cap || 4;
+  const store = opts.store || {};
+  const now = opts.now || 1000;
+  const logs = [];
+
+  const decls = [
+    `const _tzCache = {};`,
+    `const _tzCacheOrder = [];`,
+    `const TZ_CACHE_MAX = ${cap};`,
+    `const TZ_CACHE_PROP_PREFIX = "TZ:";`,
+    `const TZ_CACHE_TTL_MS = 24 * 60 * 60 * 1000;`,
+    // The shipped helpers read the clock through Date.now(); shadow it inside
+    // the module so the TTL boundary is testable without a fake timer.
+    `const Date = { now: () => ${now} };`,
+    extractFunction(ICAL, "_tzCacheSet"),
+    extractFunction(ICAL, "_tzCacheRead"),
+    extractFunction(ICAL, "_tzCacheWrite"),
+  ].join("\n\n");
+
+  const _scriptProps = {
+    getProperty: (k) => (k in store ? store[k] : null),
+    setProperty: (k, v) => { store[k] = v; },
+    deleteProperty: (k) => { delete store[k]; },
+  };
+  const Logger = { log: (m) => logs.push(String(m)) };
+
+  const m = load(decls, { _scriptProps, Logger }, [
+    "_tzCache", "_tzCacheOrder", "_tzCacheSet", "_tzCacheRead", "_tzCacheWrite",
+  ]);
+  m.store = store;
+  m.logs = logs;
+  return m;
+}
+
+/** A fresh, unexpired ScriptProperties payload for `tz`. */
+function tzEntry(tz, ts = 1000) {
+  return JSON.stringify({ tz, ts });
+}
+
+run("timezone cache (ical)", () => {
+  test("write caches in memory and persists with a timestamp", () => {
+    const t = loadTzCache();
+    t._tzCacheWrite("a", "Europe/Berlin");
+    eq(t._tzCache["a"], "Europe/Berlin", "must be readable from memory");
+    eq(t.store["TZ:a"], tzEntry("Europe/Berlin"), "must persist with ts");
+  });
+
+  test("read hydrates from ScriptProperties without a live fetch", () => {
+    const t = loadTzCache({ store: { "TZ:a": tzEntry("Asia/Tokyo") } });
+    eq(t._tzCacheRead("a"), "Asia/Tokyo", "must hydrate the cached value");
+    eq(t._tzCache["a"], "Asia/Tokyo", "hydrated value must land in memory");
+  });
+
+  test("an expired entry is evicted rather than served", () => {
+    const t = loadTzCache({ store: { "TZ:a": tzEntry("Asia/Tokyo", 0) }, now: 2 * 24 * 3600 * 1000 });
+    eq(t._tzCacheRead("a"), undefined, "stale entry must not be returned");
+    eq("TZ:a" in t.store, false, "stale entry must be deleted from ScriptProperties");
+  });
+
+  test("a corrupt entry is discarded, not thrown", () => {
+    const t = loadTzCache({ store: { "TZ:a": "{not json" } });
+    eq(t._tzCacheRead("a"), undefined, "corrupt payload must yield undefined");
+  });
+
+  test("the cache never exceeds its cap", () => {
+    const t = loadTzCache({ cap: 4 });
+    for (let i = 0; i < 25; i++) t._tzCacheWrite(`k${i}`, `Zone/${i}`);
+    ok(Object.keys(t._tzCache).length <= 4,
+      `cache holds ${Object.keys(t._tzCache).length} entries, over the cap of 4`);
+    ok(t._tzCacheOrder.length <= 4,
+      `order queue holds ${t._tzCacheOrder.length} entries, over the cap of 4`);
+  });
+
+  test("the ScriptProperties hydration path is bounded too", () => {
+    // Regression guard: _tzCacheRead used to push onto the order queue with no
+    // bound check, so a run that only ever hydrated from persistence grew the
+    // cache without limit and evicts nothing.
+    const store = {};
+    for (let i = 0; i < 25; i++) store[`TZ:k${i}`] = tzEntry(`Zone/${i}`);
+    const t = loadTzCache({ cap: 4, store });
+    for (let i = 0; i < 25; i++) t._tzCacheRead(`k${i}`);
+    ok(Object.keys(t._tzCache).length <= 4,
+      `hydration grew the cache to ${Object.keys(t._tzCache).length} entries`);
+    ok(t._tzCacheOrder.length <= 4,
+      `hydration grew the order queue to ${t._tzCacheOrder.length} entries`);
+  });
+
+  test("a key is queued at most once", () => {
+    // Queueing a key twice lets shift() delete the live entry while a phantom
+    // copy remains, evicting a healthy entry to free nothing.
+    const t = loadTzCache({ cap: 4 });
+    t._tzCacheWrite("a", "Zone/A");
+    t._tzCacheWrite("a", "Zone/A2");
+    eq(t._tzCacheOrder.filter((k) => k === "a").length, 1, "key must appear once in the queue");
+    eq(t._tzCache["a"], "Zone/A2", "latest value must win");
+  });
+
+  test("rewriting a key does not evict a healthy neighbour", () => {
+    const t = loadTzCache({ cap: 3 });
+    t._tzCacheWrite("a", "Zone/A");
+    t._tzCacheWrite("b", "Zone/B");
+    t._tzCacheWrite("a", "Zone/A2");
+    eq(t._tzCache["b"], "Zone/B", "a neighbour must survive a duplicate write");
+    ok("b" in t._tzCache, "neighbour must not be evicted by rewriting another key");
+  });
+
+  test("eviction drops the oldest entry first", () => {
+    const t = loadTzCache({ cap: 3 });
+    t._tzCacheWrite("a", "Zone/A");
+    t._tzCacheWrite("b", "Zone/B");
+    t._tzCacheWrite("c", "Zone/C");
+    t._tzCacheWrite("d", "Zone/D");
+    eq("a" in t._tzCache, false, "oldest entry must be evicted");
+    ok("d" in t._tzCache, "newest entry must be present");
+    eq(Object.keys(t._tzCache).length, 3, "cache must stay at the cap");
+  });
+
+  test("the order queue and the cache never disagree on membership", () => {
+    // Every live key must be queued, or it can never be evicted.
+    const t = loadTzCache({ cap: 3 });
+    for (let i = 0; i < 12; i++) t._tzCacheWrite(`k${i}`, `Zone/${i}`);
+    const queued = new Set(t._tzCacheOrder);
+    for (const key of Object.keys(t._tzCache)) {
+      ok(queued.has(key), `live key ${key} is missing from the eviction queue`);
+    }
+    for (const key of t._tzCacheOrder) {
+      ok(key in t._tzCache, `queued key ${key} has no cache entry (phantom)`);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
 
 console.log("");
 if (failures.length > 0) {

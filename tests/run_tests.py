@@ -4864,6 +4864,39 @@ def test_ical_resolveLocationTimezone_fallbacks():
     assert_true('Number.isFinite(loc.lon)' in body, 'Must validate lon with Number.isFinite')
 
 
+def test_tz_cache_every_writer_is_bounded_and_queued():
+    """Every write to the in-memory timezone cache must go through _tzCacheSet.
+
+    The cache is bounded by an insertion-order queue rather than by key count.
+    A writer that assigns `_tzCache[key]` directly leaves the entry out of the
+    queue, so it can never be evicted and the effective cap silently exceeds
+    TZ_CACHE_MAX. Queueing the same key twice is the mirror-image bug: shift()
+    then deletes a live entry while a phantom copy remains.
+    """
+    setter = re.search(r'function _tzCacheSet\([\s\S]*?\n\}', ICAL, re.M)
+    assert_true(setter is not None, '_tzCacheSet must exist as the single write path')
+    body = setter.group(0)
+    assert_true('_tzCacheOrder.indexOf' in body and 'splice' in body,
+        '_tzCacheSet must drop a duplicate key before queueing it')
+    assert_true('while (_tzCacheOrder.length >= TZ_CACHE_MAX)' in body,
+        '_tzCacheSet must evict until there is room for the new entry')
+    assert_true('delete _tzCache[_tzCacheOrder.shift()]' in body,
+        '_tzCacheSet must delete the evicted entry from the map')
+
+    # Nothing outside the setter may touch the map or the queue.
+    elsewhere = ICAL[:setter.start()] + ICAL[setter.end():]
+    direct_map = re.findall(r'_tzCache\[[^\]]+\]\s*=(?!=)', elsewhere)
+    assert_true(not direct_map,
+        f'timezone cache map must only be written by _tzCacheSet, found {len(direct_map)} direct write(s)')
+    for fn in ('_tzCacheRead', '_tzCacheWrite', 'resolveLocationTimezone'):
+        m = re.search(rf'function {fn}\([\s\S]*?\n\}}', ICAL, re.M)
+        assert_true(m is not None, f'{fn} not found')
+        assert_true('_tzCacheOrder.push' not in m.group(0),
+            f'{fn} must queue via _tzCacheSet, not push onto the order array directly')
+        assert_true(re.search(r'_tzCache\[[^\]]+\]\s*=(?!=)', m.group(0)) is None,
+            f'{fn} must not assign the cache map directly')
+
+
 def test_ical_resolveLocationTimezone_api_format():
     """resolveLocationTimezone must call Open-Meteo /v1/timezone endpoint correctly."""
     fn_body = re.search(r'function resolveLocationTimezone\(loc\)[\s\S]*?\n\}', ICAL, re.M)
