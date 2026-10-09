@@ -2478,11 +2478,21 @@ function escapeIcsText(str) {
 }
 
 function foldIcsLines(lines) {
-  // RFC 5545 §3.1: lines must not exceed 75 octets. Handle UTF-8 by counting
-  // each code unit; non-ASCII characters use 2-4 octets so we estimate
-  // optimistically (2 octets per non-ASCII). This is safe for typical weather
-  // feed content; emoji or supplementary-plane characters may exceed 75 octets.
-  const octets = (s) => { let n = 0; for (let i = 0; i < s.length; i++) n += s.charCodeAt(i) < 128 ? 1 : 2; return n; };
+  // RFC 5545 §3.1: lines must not exceed 75 octets. Count true UTF-8 octets
+  // per code point (1/2/3/4) and never split a UTF-16 surrogate pair across
+  // a fold: slicing between a high and low surrogate emits lone surrogates,
+  // which strict parsers reject. ASCII output is unchanged (same 75/74 budgets).
+  const unitOctets = (s, i) => {
+    const cu = s.charCodeAt(i);
+    if (cu < 0x80) return 1;
+    if (cu < 0x800) return 2;
+    if (cu >= 0xD800 && cu <= 0xDBFF && i + 1 < s.length) {
+      const lo = s.charCodeAt(i + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) return 4;
+    }
+    return 3;
+  };
+  const octets = (s) => { let n = 0; for (let i = 0; i < s.length; i++) { const o = unitOctets(s, i); n += o; if (o === 4) i++; } return n; };
   return lines.map(line => {
     if (octets(line) <= 75) return line;
     let out = "";
@@ -2492,7 +2502,13 @@ function foldIcsLines(lines) {
       let budget = first ? 75 : 74;
       let used = 0;
       let oct = 0;
-      while (used < rest.length && oct < budget) { oct += rest.charCodeAt(used) < 128 ? 1 : 2; used++; }
+      while (used < rest.length) {
+        const o = unitOctets(rest, used);
+        const step = o === 4 ? 2 : 1;
+        if (oct + o > budget && used > 0) break;
+        oct += o;
+        used += step;
+      }
       out += (first ? "" : "\r\n ") + rest.slice(0, used);
       rest = rest.slice(used);
       first = false;
@@ -2712,7 +2728,10 @@ function updateAqiHistory(locName, aqi) {
 }
 
 function fetchGlobalAQI(loc, aqProvider, aqRadius) {
-  if (!loc || !loc.lat || !loc.lon) return null;
+  // isValidLatLon, not a truthiness check: lat 0 / lon 0 are valid coordinates
+  // (the equator and the prime meridian run through cities such as Quito and
+  // London), so `!loc.lat` would silently drop their air quality entirely.
+  if (!loc || !isValidLatLon(loc.lat, loc.lon)) return null;
 
   // Check persistent cache first (prefetched by scheduled trigger).
   const cacheKey = AQI_CACHE_PREFIX + norm(loc.name).toLowerCase().replace(/[^a-z0-9]/g, "_");

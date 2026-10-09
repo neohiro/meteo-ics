@@ -441,6 +441,156 @@ run("pushFiniteHourlyValue", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* ICS escape + folding: executed against the real icalweather.gs code  */
+/* ------------------------------------------------------------------ */
+
+/** Both helpers live only in icalweather.gs; gcal targets the Calendar API. */
+function loadIcsText() {
+  const decls = [
+    extractFunction(ICAL, "escapeIcsText"),
+    extractFunction(ICAL, "foldIcsLines"),
+  ].join("\n\n");
+  return load(decls, {}, ["escapeIcsText", "foldIcsLines"]);
+}
+
+/** True UTF-8 octet length, independent of the implementation under test. */
+function utf8Len(s) {
+  return Buffer.byteLength(s, "utf8");
+}
+
+/** Undoes RFC 5545 folding so a folded line can be compared to its original. */
+function unfold(text) {
+  return text.split("\r\n").map((seg, i) => (i ? seg.slice(1) : seg)).join("");
+}
+
+function assertNoLoneSurrogates(s, where) {
+  for (let i = 0; i < s.length; i++) {
+    const cu = s.charCodeAt(i);
+    if (cu < 0xd800 || cu > 0xdfff) continue;
+    const isHigh = cu <= 0xdbff;
+    const next = i + 1 < s.length ? s.charCodeAt(i + 1) : NaN;
+    const prev = i > 0 ? s.charCodeAt(i - 1) : NaN;
+    const paired =
+      (isHigh && next >= 0xdc00 && next <= 0xdfff) ||
+      (!isHigh && prev >= 0xd800 && prev <= 0xdbff);
+    if (!paired) throw new Error(`${where}: lone surrogate U+${cu.toString(16)} at ${i}`);
+  }
+}
+
+const ics = loadIcsText();
+
+run("escapeIcsText (ical)", () => {
+  test("escapes the characters RFC 5545 reserves in TEXT values", () => {
+    eq(ics.escapeIcsText("a,b;c\\d"), "a\\,b\\;c\\\\d", "comma, semicolon, backslash");
+  });
+
+  test("turns a newline into a literal escape and drops carriage returns", () => {
+    // A raw CR or LF inside a value would terminate the content line and let
+    // the remainder be parsed as arbitrary calendar properties.
+    eq(ics.escapeIcsText("line1\nline2"), "line1\\nline2", "newline becomes literal \\n");
+    eq(ics.escapeIcsText("line1\r\nline2"), "line1\\nline2", "CRLF collapses to one \\n");
+  });
+
+  test("escapes before folding so injected newlines cannot survive", () => {
+    const folded = ics.foldIcsLines([ics.escapeIcsText("a\nBEGIN:VEVENT")]);
+    eq(folded.includes("\r\nBEGIN:VEVENT"), false, "must not forge a new content line");
+  });
+
+  test("null and empty input produce an empty string", () => {
+    eq(ics.escapeIcsText(null), "", "null");
+    eq(ics.escapeIcsText(undefined), "", "undefined");
+    eq(ics.escapeIcsText(""), "", "empty string");
+  });
+});
+
+run("foldIcsLines (ical)", () => {
+  test("leaves a short line untouched and does not terminate the stream", () => {
+    eq(ics.foldIcsLines(["SUMMARY:Short title"]), "SUMMARY:Short title", "short line");
+    eq(ics.foldIcsLines(["SUMMARY:x"]).endsWith("\r\n"), false, "caller owns stream termination");
+  });
+
+  test("folds a long ASCII line and marks each continuation with a space", () => {
+    const line = "DESCRIPTION:" + "x".repeat(200);
+    const parts = ics.foldIcsLines([line]).split("\r\n");
+    ok(parts.length > 1, "long line must fold");
+    for (let i = 1; i < parts.length; i++) {
+      ok(parts[i].startsWith(" "), `continuation ${i} must start with a space`);
+    }
+    eq(unfold(ics.foldIcsLines([line])), line, "unfolding must restore the original");
+  });
+
+  test("every folded segment stays within 75 octets of true UTF-8 length", () => {
+    // 3-byte CJK. Counting two octets per non-ASCII char (the old estimator)
+    // reported 68 octets here and left the line unfolded at 98 real octets,
+    // which strict clients reject.
+    const cjk = "SUMMARY:" + "\u4e2d".repeat(30);
+    ok(utf8Len(cjk) > 75, "fixture must genuinely exceed 75 octets");
+    const parts = ics.foldIcsLines([cjk]).split("\r\n");
+    ok(parts.length > 1, "a 98-octet CJK line must fold");
+    parts.forEach((p, i) => {
+      ok(utf8Len(p) <= 75, `segment ${i} is ${utf8Len(p)} octets, over the 75 limit`);
+    });
+    eq(unfold(ics.foldIcsLines([cjk])), cjk, "unfolding must restore the original");
+  });
+
+  test("two-byte characters are counted at their real width", () => {
+    // "é" is 2 octets; 34 of them plus SUMMARY: is 76, so it must fold.
+    const latin = "SUMMARY:" + "\u00e9".repeat(34);
+    ok(utf8Len(latin) > 75, "fixture must genuinely exceed 75 octets");
+    const parts = ics.foldIcsLines([latin]).split("\r\n");
+    ok(parts.length > 1, "must fold");
+    parts.forEach((p, i) => ok(utf8Len(p) <= 75, `segment ${i} is ${utf8Len(p)} octets`));
+  });
+
+  test("four-byte characters are counted at 4 octets and never split", () => {
+    // Emoji are supplementary-plane: 4 UTF-8 octets across two UTF-16 units.
+    // Slicing between the units emits lone surrogates, which strict parsers
+    // reject outright.
+    const emoji = "SUMMARY:" + "\u{1F324}\uFE0F".repeat(20);
+    const out = ics.foldIcsLines([emoji]);
+    const parts = out.split("\r\n");
+    ok(parts.length > 1, "long emoji line must fold");
+    parts.forEach((p, i) => {
+      ok(utf8Len(p) <= 75, `segment ${i} is ${utf8Len(p)} octets`);
+      assertNoLoneSurrogates(p, `segment ${i}`);
+    });
+    eq(unfold(out), emoji, "emoji must round-trip exactly");
+  });
+
+  test("a single oversize character still terminates the loop", () => {
+    // Guards against a budget check that only breaks when used > 0: a leading
+    // 4-octet character must be emitted even when it cannot fit the budget.
+    const mixed = "SUMMARY:" + "\u{1F324}".repeat(3) + "x";
+    const out = ics.foldIcsLines([mixed]);
+    assertNoLoneSurrogates(out, "folded output");
+    ok(out.length > 0, "must emit output");
+  });
+
+  test("folding is content-preserving across mixed scripts", () => {
+    const mixed = "SUMMARY:" + "\u00e9".repeat(20) + "\u4e2d".repeat(10) + "\u{1F324}".repeat(5);
+    const out = ics.foldIcsLines([mixed]);
+    out.split("\r\n").forEach((p, i) => {
+      ok(utf8Len(p) <= 75, `segment ${i} is ${utf8Len(p)} octets`);
+      assertNoLoneSurrogates(p, `segment ${i}`);
+    });
+    eq(unfold(out), mixed, "mixed-script line must round-trip exactly");
+  });
+
+  test("multi-line input folds each line independently and joins with CRLF", () => {
+    const out = ics.foldIcsLines(["BEGIN:VEVENT", "DESCRIPTION:" + "y".repeat(120), "END:VEVENT"]);
+    ok(out.startsWith("BEGIN:VEVENT\r\n"), "first line preserved");
+    ok(out.endsWith("\r\nEND:VEVENT"), "last line preserved");
+    for (const part of out.split("\r\n")) ok(utf8Len(part) <= 75, `segment over 75: ${part}`);
+  });
+
+  test("exactly 75 octets is left unfolded (boundary is inclusive)", () => {
+    const exact = "SUMMARY:" + "z".repeat(67); // 8 + 67 = 75 octets
+    eq(utf8Len(exact), 75, "fixture must be exactly 75 octets");
+    eq(ics.foldIcsLines([exact]), exact, "a 75-octet line needs no folding");
+  });
+});
+
+/* ------------------------------------------------------------------ */
 
 console.log("");
 if (failures.length > 0) {

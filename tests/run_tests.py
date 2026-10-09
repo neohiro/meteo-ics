@@ -64,6 +64,21 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def is_valid_lat_lon(lat, lon):
+    """Mirror of isValidLatLon() in both .gs scripts.
+
+    Note the deliberate absence of a truthiness test: lat 0 and lon 0 are valid
+    coordinates, and treating them as missing silently drops equatorial and
+    prime-meridian cities.
+    """
+    for v in (lat, lon):
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return False
+        if math.isnan(v) or math.isinf(v):
+            return False
+    return abs(lat) <= 90 and abs(lon) <= 180
+
+
 def normalize_lang(raw):
     if not raw:
         return 'en'
@@ -255,16 +270,13 @@ def escape_ics_text(s):
 
 
 def octet_count(s):
-    n = 0
-    for c in s:
-        n += 1 if ord(c) < 128 else 2
-    return n
+    return len(s.encode('utf-8'))
 
 
 def fold_ics_lines(lines):
     out = []
     for line in lines:
-        if octet_count(line) <= 75:
+        if len(line.encode('utf-8')) <= 75:
             out.append(line)
             continue
         rest = line
@@ -273,8 +285,11 @@ def fold_ics_lines(lines):
             budget = 75 if first else 74
             used = 0
             oct = 0
-            while used < len(rest) and oct < budget:
-                oct += 1 if ord(rest[used]) < 128 else 2
+            for ch in rest:
+                o = len(ch.encode('utf-8'))
+                if oct + o > budget and used > 0:
+                    break
+                oct += o
                 used += 1
             chunk = rest[:used]
             if first:
@@ -482,16 +497,36 @@ def test_fold_long():
 
 
 def test_fold_octet_limit_cjk():
-    # Test that multi-byte characters are handled without exceeding 75 octets/line.
-    # Each CJK char is 3 UTF-8 octets; our estimator uses conservative 2-octet count.
-    # Use a string short enough that even with the estimator being off by 1 byte/char,
-    # the output stays within RFC 5545 limits.
-    # 11 CJK chars = 11*3=33 octets + "SUMMARY:" = 41, well under 75.
-    cjk = 'SUMMARY:' + '中文' * 11  # 22 code units × 3 octets = 66 octets + 8 = 74
+    # Test that multi-byte characters are folded by true UTF-8 octet count.
+    # Each CJK char is 3 UTF-8 octets: 30 of them plus "SUMMARY:" is 98 octets,
+    # which the old 2-octet estimator counted as 68 and left unfolded (an RFC
+    # 5545 §3.1 violation). The fixed folder must split it and keep every
+    # segment within 75 true octets.
+    cjk = 'SUMMARY:' + '中' * 30
+    assert_true(octet_count(cjk) > 75, 'fixture must exceed 75 true octets')
     out = fold_ics_lines([cjk])
     parts = out.split('\r\n')
+    assert_true(len(parts) > 1, 'long CJK line should fold')
     for i, p in enumerate(parts):
         assert_true(octet_count(p) <= 75, f'segment {i} too long: {octet_count(p)} octets')
+    # Round-trip: unfolding must restore the original line exactly.
+    assert_eq(''.join(p[1:] if i else p for i, p in enumerate(parts)), cjk)
+
+
+def test_fold_never_splits_surrogate_pair():
+    # Emoji live in the supplementary plane (4 UTF-8 octets, 2 UTF-16 units).
+    # Folding between the units emits lone surrogates that strict parsers
+    # reject. Every folded segment must encode cleanly and unfold exactly.
+    emoji = 'SUMMARY:' + '🌤️' * 20
+    out = fold_ics_lines([emoji])
+    parts = out.split('\r\n')
+    assert_true(len(parts) > 1, 'long emoji line should fold')
+    for i, p in enumerate(parts):
+        p.encode('utf-8')
+        assert_true(octet_count(p) <= 75, f'segment {i} too long')
+        for ch in p:
+            assert_true(not (0xD800 <= ord(ch) <= 0xDFFF), f'segment {i} holds a lone surrogate')
+    assert_eq(''.join(p[1:] if i else p for i, p in enumerate(parts)), emoji)
 
 
 def test_fold_multi_line():
@@ -2845,6 +2880,43 @@ def test_gcal_fetchGlobalAQI_function_exists():
         'OpenAQ endpoint constant must be defined in gcalweather.gs')
     assert_true(re.search(r'WAQI_BASE_ENDPOINT', GCAL),
         'WAQI endpoint constant must be defined in gcalweather.gs')
+
+
+def test_equator_and_prime_meridian_coords_are_valid():
+    """lat 0 / lon 0 are real coordinates and must not read as missing.
+
+    A truthiness guard (`!loc.lat`) treats 0 as absent, so equatorial and
+    prime-meridian cities would silently lose their air quality data. Both
+    fetchers and validateConfig must range-check with isValidLatLon instead.
+    """
+    assert_true(is_valid_lat_lon(0, 0), 'origin must be a valid coordinate pair')
+    assert_true(is_valid_lat_lon(0, 51.5), 'equator + London longitude')
+    assert_true(is_valid_lat_lon(-0.0, -0.0), 'negative zero must stay valid')
+    assert_true(is_valid_lat_lon(-90, -180), 'south-west corner')
+    # Out-of-range and non-finite values must still be rejected.
+    assert_true(not is_valid_lat_lon(91, 0), 'lat over 90')
+    assert_true(not is_valid_lat_lon(0, 181), 'lon over 180')
+    assert_true(not is_valid_lat_lon(None, 0), 'missing lat')
+    assert_true(not is_valid_lat_lon(0, None), 'missing lon')
+    assert_true(not is_valid_lat_lon(float('nan'), 0), 'NaN lat')
+    assert_true(not is_valid_lat_lon(float('inf'), 0), 'infinite lat')
+
+    for name, src, fn_name in (
+        ('icalweather.gs', ICAL, 'fetchGlobalAQI'),
+        ('gcalweather.gs', GCAL, 'gcalFetchGlobalAQI'),
+    ):
+        fn = re.search(rf'function {fn_name}\([\s\S]*?\n\}}', src)
+        assert_true(fn is not None, f'{name}: {fn_name} not found')
+        body = fn.group(0)
+        assert_true('isValidLatLon(loc.lat, loc.lon)' in body,
+            f'{name}: {fn_name} must validate coordinates with isValidLatLon')
+        assert_true('!loc.lat || !loc.lon' not in body,
+            f'{name}: {fn_name} must not use a truthiness check that rejects lat/lon 0')
+
+    vc = re.search(r'function validateConfig\([\s\S]*?\n\}', GCAL)
+    assert_true(vc is not None)
+    assert_true('!loc.lat || !loc.lon' not in vc.group(0),
+        'gcalweather.gs: validateConfig must not report a zero coordinate as missing')
 
 
 def test_ical_openaq_fallback_in_fetch():
