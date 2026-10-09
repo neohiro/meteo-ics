@@ -80,24 +80,24 @@ def parse_bool_param(v):
 
 
 METRIC_CONTEXT_BANDS = {
-    'temperature': {'good': (10, 26), 'fair': (0, 32)},
-    'apparentTemperature': {'good': (10, 26), 'fair': (0, 32)},
-    'humidity': {'good': (30, 70), 'fair': (20, 80)},
-    'dewPoint': {'good': (-20, 15), 'fair': (-30, 18)},
-    'rain': {'good': (0, 5), 'fair': (0, 25)},
-    'rainProbability': {'good': (0, 30), 'fair': (0, 70)},
-    'wind': {'good': (0, 20), 'fair': (0, 40)},
-    'pressure': {'good': (1000, 1020), 'fair': (990, 1035)},
-    'cloudCover': {'good': (0, 30), 'fair': (0, 70)},
-    'uv': {'good': (0, 2), 'fair': (0, 5)},
-    'pollen': {'good': (0, 10), 'fair': (0, 35)},
-    'radiation': {'good': (0, 8), 'fair': (0, 15)},
-    'et0': {'good': (0, 2), 'fair': (0, 4.5)},
-    'soilTemperature': {'good': (8, 30), 'fair': (0, 32)},
-    'gdd': {'good': (100, float('inf')), 'fair': (25, float('inf'))},
-    'aggregateRain': {'good': (0, 50), 'fair': (0, 100)},
-    'aggregateTemperature': {'good': (10, 25), 'fair': (0, 30)},
-    'aggregateAqi': {'good': (0, 20), 'fair': (0, 40)},
+    'temperature': {'good': (10, 26), 'fair': (0, 32), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
+    'apparentTemperature': {'good': (10, 26), 'fair': (0, 32), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
+    'humidity': {'good': (30, 70), 'fair': (20, 80), 'labels': {'good': 'Comfortable', 'fair': 'Moderate', 'bad': 'Dry / Humid'}},
+    'dewPoint': {'good': (-20, 15), 'fair': (-30, 18), 'labels': {'good': 'Dry', 'fair': 'Moderate', 'bad': 'Humid'}},
+    'rain': {'good': (0, 5), 'fair': (0, 25), 'labels': {'good': 'Light', 'fair': 'Moderate', 'bad': 'Heavy'}},
+    'rainProbability': {'good': (0, 30), 'fair': (0, 70), 'labels': {'good': 'Low', 'fair': 'Medium', 'bad': 'High'}},
+    'wind': {'good': (0, 20), 'fair': (0, 40), 'labels': {'good': 'Calm', 'fair': 'Breezy', 'bad': 'Windy'}},
+    'pressure': {'good': (1000, 1020), 'fair': (990, 1035), 'labels': {'good': 'Normal', 'fair': 'Variable', 'bad': 'Extreme'}},
+    'cloudCover': {'good': (0, 30), 'fair': (0, 70), 'labels': {'good': 'Clear', 'fair': 'Partly Cloudy', 'bad': 'Overcast'}},
+    'uv': {'good': (0, 2), 'fair': (0, 5), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'pollen': {'good': (0, 10), 'fair': (0, 35), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'radiation': {'good': (0, 8), 'fair': (0, 15), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'et0': {'good': (0, 2), 'fair': (0, 4.5), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'soilTemperature': {'good': (8, 30), 'fair': (0, 32), 'labels': {'good': 'Optimal', 'fair': 'Cool', 'bad': 'Cold / Hot'}},
+    'gdd': {'good': (100, float('inf')), 'fair': (25, float('inf')), 'labels': {'good': 'High', 'fair': 'Moderate', 'bad': 'Low'}},
+    'aggregateRain': {'good': (0, 50), 'fair': (0, 100), 'labels': {'good': 'Low', 'fair': 'Moderate', 'bad': 'High'}},
+    'aggregateTemperature': {'good': (10, 25), 'fair': (0, 30), 'labels': {'good': 'Mild', 'fair': 'Cool', 'bad': 'Extreme'}},
+    'aggregateAqi': {'good': (0, 20), 'fair': (0, 40), 'labels': {'good': 'Good', 'fair': 'Fair', 'bad': 'Poor'}},
 }
 
 TEMPERATURE_CONTEXT_METRICS = {
@@ -250,6 +250,7 @@ def escape_ics_text(s):
         .replace('\\', '\\\\')
         .replace(';', '\\;')
         .replace(',', '\\,')
+        .replace('\n', '\\n')
         .replace('\r', ''))
 
 
@@ -458,9 +459,9 @@ def test_escape_special_chars():
     assert_eq(escape_ics_text('path\\to\\file'), 'path\\\\to\\\\file')
 
 
-def test_escape_preserves_lf():
-    assert_eq(escape_ics_text('line1\r\nline2'), 'line1\nline2')
-    assert_eq(escape_ics_text('line1\nline2'), 'line1\nline2')
+def test_escape_escapes_newlines():
+    assert_eq(escape_ics_text('line1\r\nline2'), 'line1\\nline2')
+    assert_eq(escape_ics_text('line1\nline2'), 'line1\\nline2')
 
 
 def test_escape_null():
@@ -496,6 +497,65 @@ def test_fold_octet_limit_cjk():
 def test_fold_multi_line():
     out = fold_ics_lines(['BEGIN:VEVENT', 'SUMMARY:short', 'END:VEVENT'])
     assert_true('BEGIN:VEVENT' in out and 'END:VEVENT' in out)
+
+
+def test_fold_does_not_terminate_stream():
+    """foldIcsLines is a pure line folder; stream termination is the caller's job."""
+    out = fold_ics_lines(['SUMMARY:Short title'])
+    assert_true(not out.endswith('\r\n'),
+        'foldIcsLines must not append a trailing CRLF')
+
+
+def test_generated_feed_is_crlf_terminated():
+    """RFC 5545 §3.1: the last content line must be CRLF-delimited.
+
+    Regression guard for the Outlook/iOS subscription failure: an unterminated
+    final line makes strict clients reject the whole feed. Only icalweather.gs
+    emits ICS (gcalweather.gs targets the Google Calendar API instead).
+    """
+    call = re.search(r'return foldIcsLines\(lines\)([^;]*);', ICAL)
+    assert_true(call is not None, 'icalweather.gs: foldIcsLines call site missing')
+    assert_true('"\\r\\n"' in call.group(1),
+        'icalweather.gs: feed must be CRLF-terminated after folding')
+
+    err = re.search(r'"END:VCALENDAR"\s*\n\s*\]\.join\("\\r\\n"\)([^;]*);', ICAL)
+    assert_true(err is not None, 'icalweather.gs: error ICS assembly not found')
+    assert_true('"\\r\\n"' in err.group(1),
+        'icalweather.gs: error ICS must be CRLF-terminated')
+
+
+def test_ics_calendar_header_escapes_untrusted_timezone():
+    """loc.tz comes from the geocoding API, so it must be escaped.
+
+    X-WR-TIMEZONE sits at calendar level, ahead of every VEVENT, so an
+    unescaped CRLF there would let a hostile geocoding response inject
+    properties into the subscriber's calendar.
+    """
+    assert_true('X-WR-TIMEZONE:${escapeIcsText(firstLocTz)}' in ICAL,
+        'icalweather.gs: X-WR-TIMEZONE must escape the geocoder-supplied timezone')
+    # Guard the regression that motivated it: every calendar-level property
+    # interpolating a variable must pass through escapeIcsText.
+    header = re.search(r'const lines = \[\s*\n\s*"BEGIN:VCALENDAR"[\s\S]*?\n\s*\];', ICAL)
+    assert_true(header is not None, 'icalweather.gs: VCALENDAR header block missing')
+    for raw in re.findall(r'^\s*`?([A-Z0-9-]+:[^`"\n]*)\$\{([A-Za-z_][\w.]*)\}`?,?\s*$',
+                          header.group(0), re.M):
+        name, var = raw
+        if var in ('lang', 'ICAL_CONFIG.version', 'fetchedAt'):
+            continue  # enum/format-controlled, not free-form input
+        assert_true(f'escapeIcsText({var})' in header.group(0),
+            f'icalweather.gs: calendar property {name} interpolates {var} unescaped')
+
+
+def test_ics_declares_refresh_interval():
+    """Subscribed clients need a poll hint or they refetch on their own schedule.
+
+    Left to its own devices Outlook commonly refetches about once a day, which
+    would pin a 30-day forecast feed to day-old numbers.
+    """
+    header = re.search(r'const lines = \[\s*\n\s*"BEGIN:VCALENDAR"[\s\S]*?\n\s*\];', ICAL)
+    assert_true(header is not None, 'icalweather.gs: VCALENDAR header block missing')
+    assert_true(re.search(r'REFRESH-INTERVAL;VALUE=DURATION:PT\d+[HM]', header.group(0)) is not None,
+        'icalweather.gs: REFRESH-INTERVAL missing from VCALENDAR header')
 
 
 # =============================================================================
@@ -1092,16 +1152,22 @@ def test_metric_context_fahrenheit_and_invalid_inputs():
 
 
 def parse_source_metric_bands(src):
-    """Extract the numeric good/fair bands from a renderer's METRIC_CONTEXT_BANDS literal."""
+    """Extract the numeric good/fair bands and labels from a renderer's METRIC_CONTEXT_BANDS literal."""
     block = re.search(r'const METRIC_CONTEXT_BANDS\s*=\s*\{([\s\S]*?)\n\};', src)
     assert_true(block is not None, 'METRIC_CONTEXT_BANDS missing')
     bands = {}
     for entry in re.finditer(
-            r'(\w+):\s*\{\s*good:\s*\[([^\]]*)\],\s*fair:\s*\[([^\]]*)\]\s*\}', block.group(1)):
+            r'(\w+):\s*\{\s*good:\s*\[([^\]]*)\],\s*fair:\s*\[([^\]]*)\](?:,\s*labels:\s*\{([^}]*)\})?\s*\}', block.group(1)):
         def numbers(raw):
             return tuple(float('inf') if v.strip() == 'Infinity' else float(v)
                          for v in raw.split(','))
-        bands[entry.group(1)] = {'good': numbers(entry.group(2)), 'fair': numbers(entry.group(3))}
+        metric_bands = {'good': numbers(entry.group(2)), 'fair': numbers(entry.group(3))}
+        if entry.group(4):
+            labels = {}
+            for label_entry in re.finditer(r'(\w+):\s*"([^"]*)"', entry.group(4)):
+                labels[label_entry.group(1)] = label_entry.group(2)
+            metric_bands['labels'] = labels
+        bands[entry.group(1)] = metric_bands
     return bands
 
 
@@ -1176,6 +1242,46 @@ def test_gcal_ical_metric_context_translations():
             for lang in ('en', 'zh', 'hi', 'es', 'fr', 'ar', 'de', 'nl'):
                 assert_true(re.search(rf'\b{lang}\s*:\s*"[^"]+"', entry.group(1)),
                     f'{name}: {key}.{lang} missing')
+
+
+def test_metric_context_labels_route_through_translation_table():
+    """getMetricContext must resolve labels via t(), not return raw English.
+
+    Regression guard: bands carry English literals, so a renderer that returns
+    `labels.good` directly silently drops the `lang` argument for every locale.
+    """
+    for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+        helper = re.search(r'function metricContextLabel\([^)]*\)\s*\{[\s\S]*?\n\}', src)
+        assert_true(helper is not None, f'{name}: metricContextLabel helper missing')
+        assert_true('t(' in helper.group(0),
+            f'{name}: metricContextLabel must consult the translation table')
+        assert_true('localized === key' in helper.group(0),
+            f'{name}: metricContextLabel must guard against t() echoing the key back')
+        for slot in ('good', 'fair', 'bad'):
+            assert_true(re.search(rf'metricContextLabel\(labels\.{slot}, lang\)', src) is not None,
+                f'{name}: {slot} band must route through metricContextLabel with lang')
+        # Every band must be reachable: three metricContextLabel call sites.
+        assert_eq(len(re.findall(r'metricContextLabel\(labels\.', src)), 3,
+            f'{name}: all three band slots must be translated')
+
+
+def test_metric_context_dual_direction_labels_are_neutral():
+    """A band whose tail spans both tails must not carry a one-sided label.
+
+    humidity's `bad` bucket covers arid (<20%) and saturated (>80%) readings, so
+    "Muggy" is false in a desert; soilTemperature's covers sub-zero and >32C soil,
+    so "Cold" is false for scalding soil.
+    """
+    neutral_expectations = {
+        'humidity': 'Dry / Humid',
+        'soilTemperature': 'Cold / Hot',
+    }
+    for metric, expected in neutral_expectations.items():
+        for name, src in (('gcalweather.gs', GCAL), ('icalweather.gs', ICAL)):
+            bands = parse_source_metric_bands(src)
+            assert_true(metric in bands, f'{name}: {metric} band missing')
+            labels = bands[metric].get('labels') or {}
+            assert_eq(labels.get('bad'), expected, f'{name}: {metric} bad label must be direction-neutral')
 
 
 def test_gcal_ical_air_section_renders_pollutant_context():

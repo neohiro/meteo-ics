@@ -318,61 +318,99 @@ run("redactSecretsForLog", () => {
 function loadMetrics(src) {
   const decls = [
     extractConstObject(src, "METRIC_CONTEXT_BANDS"),
+    extractConstObject(src, "METRIC_CONTEXT_LABEL_KEYS"),
+    extractFunction(src, "metricContextLabel"),
     extractFunction(src, "getMetricContext"),
     extractFunction(src, "formatMetricContext"),
   ].join("\n\n");
-  const t = (key, lang) => {
-    const labels = { ctxGood: "Good", ctxFair: "Fair", ctxBad: "Bad" };
-    return labels[key] || key;
+  // Mirrors the real t(): returns the entry for the requested language, falls
+  // back to English, and echoes the key back when no entry exists at all.
+  const TABLE = {
+    ctxGood: { en: "Good", zh: "良好", de: "Gut" },
+    ctxFair: { en: "Fair", zh: "一般", de: "Mäßig" },
+    ctxBad: { en: "Bad", zh: "较差", de: "Schlecht" },
   };
-  return load(decls, { t }, ["METRIC_CONTEXT_BANDS", "getMetricContext", "formatMetricContext"]);
+  const t = (key, lang) => {
+    const entry = TABLE[key];
+    if (!entry) return key;
+    return entry[lang] || entry.en || key;
+  };
+  return load(decls, { t }, [
+    "METRIC_CONTEXT_BANDS", "METRIC_CONTEXT_LABEL_KEYS",
+    "metricContextLabel", "getMetricContext", "formatMetricContext",
+  ]);
 }
 
-run("metric contexts (gcal)", () => {
-  const m = loadMetrics(GCAL);
+run("metric contexts", () => {
+    for (const [name, src] of [["gcal", GCAL], ["ical", ICAL]]) {
+      run(`metric contexts (${name})`, () => {
+        const m = loadMetrics(src);
 
-  test("band edges are inclusive at the top and exclusive at the bottom", () => {
-    eq(m.getMetricContext(0, "uv", true, "en"), "Good", "uv 0");
-    eq(m.getMetricContext(2, "uv", true, "en"), "Good", "uv 2 upper edge");
-    eq(m.getMetricContext(2.1, "uv", true, "en"), "Fair", "uv just above");
-    eq(m.getMetricContext(5, "uv", true, "en"), "Fair", "uv 5");
-    eq(m.getMetricContext(5.1, "uv", true, "en"), "Bad", "uv just above 5");
-  });
+    test("band edges are inclusive at the top and exclusive at the bottom", () => {
+      eq(m.getMetricContext(0, "uv", true, "en"), "Low", "uv 0");
+      eq(m.getMetricContext(2, "uv", true, "en"), "Low", "uv 2 upper edge");
+      eq(m.getMetricContext(2.1, "uv", true, "en"), "Moderate", "uv just above");
+      eq(m.getMetricContext(5, "uv", true, "en"), "Moderate", "uv 5");
+      eq(m.getMetricContext(5.1, "uv", true, "en"), "High", "uv just above 5");
+    });
 
-  test("a blank reading yields no context instead of a false Fair", () => {
-    eq(m.getMetricContext("", "uv", true, "en"), "", "blank string");
-    eq(m.getMetricContext("   ", "uv", true, "en"), "", "whitespace string");
-    eq(m.getMetricContext(null, "uv", true, "en"), "", "null");
-    eq(m.getMetricContext(undefined, "uv", true, "en"), "", "undefined");
-  });
+    test("a blank reading yields no context instead of a false Fair", () => {
+      eq(m.getMetricContext("", "uv", true, "en"), "", "blank string");
+      eq(m.getMetricContext("   ", "uv", true, "en"), "", "whitespace string");
+      eq(m.getMetricContext(null, "uv", true, "en"), "", "null");
+      eq(m.getMetricContext(undefined, "uv", true, "en"), "", "undefined");
+    });
 
-  test("NaN and Infinity never produce a context", () => {
-    eq(m.getMetricContext(NaN, "uv", true, "en"), "", "NaN");
-    eq(m.getMetricContext(Infinity, "uv", true, "en"), "", "Infinity");
-    eq(m.getMetricContext(-Infinity, "uv", true, "en"), "", "-Infinity");
-  });
+    test("NaN and Infinity never produce a context", () => {
+      eq(m.getMetricContext(NaN, "uv", true, "en"), "", "NaN");
+      eq(m.getMetricContext(Infinity, "uv", true, "en"), "", "Infinity");
+      eq(m.getMetricContext(-Infinity, "uv", true, "en"), "", "-Infinity");
+    });
 
-  test("an unknown metric yields no context", () => {
-    eq(m.getMetricContext(5, "notAMetric", true, "en"), "", "unknown metric");
-  });
+    test("an unknown metric yields no context", () => {
+      eq(m.getMetricContext(5, "notAMetric", true, "en"), "", "unknown metric");
+    });
 
-  test("Fahrenheit readings are converted before banding", () => {
-    // 40 F is 4.4 C: Fair once converted, Bad if the raw value were compared
-    // against the Celsius bands. Proves the conversion actually runs.
-    eq(m.getMetricContext(40, "temperature", false, "en"), "Fair", "40F converts to Fair");
-    eq(m.getMetricContext(40, "temperature", true, "en"), "Bad", "40C stays Bad");
-    // 68 F is 20 C, inside the Good band for both.
-    eq(m.getMetricContext(68, "temperature", false, "en"), "Good", "68F converts to Good");
-    eq(m.getMetricContext(20, "temperature", true, "en"), "Good", "20C stays Good");
-    // Non-temperature metrics are never converted: were 40 to be read as
-    // Fahrenheit it would become 4.4, which is below the Fair band.
-    eq(m.getMetricContext(40, "humidity", false, "en"), "Good", "humidity is never converted");
-  });
+    test("Fahrenheit readings are converted before banding", () => {
+      // 40 F is 4.4 C: Fair once converted, Bad if the raw value were compared
+      // against the Celsius bands. Proves the conversion actually runs.
+      eq(m.getMetricContext(40, "temperature", false, "en"), "Cool", "40F converts to Cool");
+      eq(m.getMetricContext(40, "temperature", true, "en"), "Extreme", "40C stays Extreme");
+      // 68 F is 20 C, inside the Good band for both.
+      eq(m.getMetricContext(68, "temperature", false, "en"), "Mild", "68F converts to Mild");
+      eq(m.getMetricContext(20, "temperature", true, "en"), "Mild", "20C stays Mild");
+      // Non-temperature metrics are never converted: were 40 to be read as
+      // Fahrenheit it would become 4.4, which is below the Fair band.
+      eq(m.getMetricContext(40, "humidity", false, "en"), "Comfortable", "humidity is never converted");
+    });
 
-  test("formatMetricContext wraps the label in parentheses and hides blanks", () => {
-    eq(m.formatMetricContext(3, "uv", true, "en"), " (Fair)");
-    eq(m.formatMetricContext("", "uv", true, "en"), "", "blank must contribute nothing");
-  });
+    test("formatMetricContext wraps the label in parentheses and hides blanks", () => {
+      eq(m.formatMetricContext(3, "uv", true, "en"), " (Moderate)");
+      eq(m.formatMetricContext("", "uv", true, "en"), "", "blank must contribute nothing");
+    });
+
+    test("labels with vetted translations are localized", () => {
+      // aggregateAqi good/fair reuse the generic Good/Fair copy, which exists in
+      // all eight languages, so a non-English locale must not see English.
+      eq(m.getMetricContext(10, "aggregateAqi", true, "zh"), "良好", "zh good");
+      eq(m.getMetricContext(30, "aggregateAqi", true, "zh"), "一般", "zh fair");
+      eq(m.getMetricContext(30, "aggregateAqi", true, "de"), "Mäßig", "de fair");
+    });
+
+    test("metric-specific labels fall back to English without echoing a key", () => {
+      // "Mild" has no vetted T_L entry. It must render as English text, never as
+      // the lookup key, and never as a raw "ctxMild" artefact.
+      eq(m.getMetricContext(20, "temperature", true, "zh"), "Mild", "zh untranslated label");
+      const out = m.getMetricContext(20, "temperature", true, "de");
+      ok(out !== "ctxMild" && out !== "Mildde", "must not leak the translation key");
+    });
+
+    test("an unknown locale degrades to English rather than blanking out", () => {
+      eq(m.getMetricContext(10, "aggregateAqi", true, "xx"), "Good", "unknown locale");
+      eq(m.getMetricContext(20, "temperature", true, "xx"), "Mild", "unknown locale, English label");
+    });
+    });
+  }
 });
 
 run("pushFiniteHourlyValue", () => {

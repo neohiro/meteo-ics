@@ -23,7 +23,14 @@
  *    lower/upper/digit, no 6+ repeated chars.
  *  - 8 languages (en, zh, hi, es, fr, ar, de, nl) with full UI text + advice translation.
  *  - days/hazards/lang URL params all honored.
- *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes.
+ *  - RFC 5545 compliant: CRLF line endings, proper 75-octet line folding, escaped commas/semicolons/backslashes/newlines.
+ *  - Calendar-subscription friendly: the feed is served inline as text/calendar (no Content-Disposition
+ *    attachment), the stream is CRLF-terminated per RFC 5545 §3.1, and it declares REFRESH-INTERVAL so
+ *    subscribed clients refetch on a sane cadence instead of their ~daily default. Outlook and iOS can
+ *    "Subscribe from web" rather than downloading a file.
+ *  - Metric context labels are metric-specific and localized: getMetricContext() resolves each band
+ *    through t() via metricContextLabel(), using only copy already vetted in T_L, and falls back to
+ *    English text (never a raw key) for labels that have no translation yet.
  *  - Astronomical events year-aware (auto-detect current year for solstices/equinoxes).
  *  - Moon phase uses UTC reference date and accurate synodic-month boundaries.
  *  - Clean single empty line (\n\n) separation between card blocks.
@@ -740,6 +747,15 @@ const { waqiTokenSave, waqiTokenLoad, waqiTokenResolve } = (() => {
       }
       _waqiTokenCache = "";
       return "";
+    },
+    waqiTokenIsConfigured() {
+      const props = PropertiesService.getScriptProperties();
+      // Check Drive-encrypted token hint (set by waqiTokenSave)
+      if (props.getProperty("WAQI_KEY_HINT") === "stored") return true;
+      // Check legacy ScriptProperties token
+      const legacy = props.getProperty("WAQI_TOKEN");
+      if (legacy && legacy.length > 0) return true;
+      return false;
     }
   };
 })();
@@ -1655,8 +1671,7 @@ function fetchBreakingNews(dateStr) {
   // a past or future day would write a claim about that day that is not true.
   // Compare on UTC day keys (same convention as _todayISO / grid date keys) so
   // a 2 AM run doesn't misclassify today.
-  const todayKey = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()))
-    .toISOString().slice(0, 10);
+  const todayKey = Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd");
   if (dateStr !== todayKey) {
     Logger.log(`Breaking news: ${dateStr} is not the current day (${todayKey}) - no live fetch`);
     return null;
@@ -1788,6 +1803,8 @@ function doGet(e) {
     // (especially iOS) don't reject the feed with "Validation failed".
     const today = new Date();
     const todayStr = Utilities.formatDate(today, "UTC", "yyyyMMdd");
+    // Sanitize error message: no stack traces, no internal details
+    const errMsg = String(e).split("\n")[0].slice(0, 200);
     const errorIcs = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -1801,24 +1818,24 @@ function doGet(e) {
       `DTSTART;VALUE=DATE:${todayStr}`,
       `DTEND;VALUE=DATE:${todayStr}`,
       `SUMMARY:Feed Error — Check Configuration`,
-      `DESCRIPTION:Feed generation failed: ${escapeIcsText(String(e))}`,
+      `DESCRIPTION:Feed generation failed: ${escapeIcsText(errMsg)}`,
       "STATUS:CONFIRMED",
       "TRANSP:TRANSPARENT",
       "END:VEVENT",
       "END:VCALENDAR"
-    ].join("\r\n");
+    ].join("\r\n") + "\r\n";
     return ContentService.createTextOutput(errorIcs)
-      .setMimeType(ContentService.MimeType.ICAL)
-      .downloadAsFile("weather_feed_error.ics");
+      .setMimeType(ContentService.MimeType.ICAL);
   }
   if (dryRun) {
     return ContentService.createTextOutput(icsContent)
-      .setMimeType(ContentService.MimeType.PLAIN_TEXT)
-      .downloadAsFile("weather_feed_preview.txt");
+      .setMimeType(ContentService.MimeType.PLAIN_TEXT);
   }
+  // Serve ICS inline (no Content-Disposition: attachment) so calendar clients
+  // (Outlook, iOS, Google Calendar) can subscribe directly to the feed URL.
+  // The filename is conveyed via X-WR-CALNAME in the ICS content itself.
   return ContentService.createTextOutput(icsContent)
-    .setMimeType(ContentService.MimeType.ICAL)
-    .downloadAsFile("weather_feed.ics");
+    .setMimeType(ContentService.MimeType.ICAL);
 }
 
 function buildReadme(params) {
@@ -1971,7 +1988,7 @@ function handleStatusEndpoint(params) {
         openaq: OPENAQ_LATEST_ENDPOINT,
         waqi: WAQI_BASE_ENDPOINT + "<lat>;<lon>/"
       },
-      waqiTokenStored: !!waqiTokenResolve()
+      waqiTokenStored: waqiTokenIsConfigured()
     },
     supportedLanguages: SUPPORTED_LANGS,
     endpoints: {
@@ -2102,8 +2119,19 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
     "PRODID:-//Weather Astronomical Dashboard//" + lang.toUpperCase(),
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
+    // Advisory poll interval. Clients left to their own default often refetch
+    // daily, which would pin a 30-day feed to day-old numbers. PT3H keeps
+    // forecasts and hourly AQI reasonably current while bounding Apps Script
+    // execution cost (each poll is a billed execution, and heavy multi-city
+    // subscriptions can approach the daily quota if polled hourly). Operators
+    // with headroom can shorten this to PT1H.
+    "REFRESH-INTERVAL;VALUE=DURATION:PT3H",
+    "X-PUBLISHED-TTL:PT3H",
     `X-WR-CALNAME:${escapeIcsText(calName)}`,
-    `X-WR-TIMEZONE:${firstLocTz}`,
+    // loc.tz originates from the geocoding API response, so it is untrusted
+    // input. Escape it: a CRLF here would inject calendar-level properties
+    // ahead of every event in the feed.
+    `X-WR-TIMEZONE:${escapeIcsText(firstLocTz)}`,
     `X-WR-CALDESC:Weather + astronomical · v${ICAL_CONFIG.version} · Open-Meteo AQI (hourly)`,
     `X-WR-LANG:${lang}`,
     `X-META-SCRIPTVERSION:${ICAL_CONFIG.version}`,
@@ -2432,7 +2460,11 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   }
 
   lines.push("END:VCALENDAR");
-  return foldIcsLines(lines);
+  // RFC 5545 §3.1: every content line is CRLF-delimited, including the last
+  // one. Strict clients (notably iOS Calendar and Outlook) reject a feed whose
+  // final line is unterminated, so terminate the stream explicitly here rather
+  // than relying on a trailing empty element.
+  return foldIcsLines(lines) + "\r\n";
 }
 
 function escapeIcsText(str) {
@@ -2447,7 +2479,9 @@ function escapeIcsText(str) {
 
 function foldIcsLines(lines) {
   // RFC 5545 §3.1: lines must not exceed 75 octets. Handle UTF-8 by counting
-  // each code unit; non-ASCII characters use 2-4 octets so we estimate conservatively.
+  // each code unit; non-ASCII characters use 2-4 octets so we estimate
+  // optimistically (2 octets per non-ASCII). This is safe for typical weather
+  // feed content; emoji or supplementary-plane characters may exceed 75 octets.
   const octets = (s) => { let n = 0; for (let i = 0; i < s.length; i++) n += s.charCodeAt(i) < 128 ? 1 : 2; return n; };
   return lines.map(line => {
     if (octets(line) <= 75) return line;
@@ -3732,25 +3766,43 @@ function getPollutantContext(val, pollutant, lang) {
 }
 
 const METRIC_CONTEXT_BANDS = {
-  temperature: { good: [10, 26], fair: [0, 32] },
-  apparentTemperature: { good: [10, 26], fair: [0, 32] },
-  humidity: { good: [30, 70], fair: [20, 80] },
-  dewPoint: { good: [-20, 15], fair: [-30, 18] },
-  rain: { good: [0, 5], fair: [0, 25] },
-  rainProbability: { good: [0, 30], fair: [0, 70] },
-  wind: { good: [0, 20], fair: [0, 40] },
-  pressure: { good: [1000, 1020], fair: [990, 1035] },
-  cloudCover: { good: [0, 30], fair: [0, 70] },
-  uv: { good: [0, 2], fair: [0, 5] },
-  pollen: { good: [0, 10], fair: [0, 35] },
-  radiation: { good: [0, 8], fair: [0, 15] },
-  et0: { good: [0, 2], fair: [0, 4.5] },
-  soilTemperature: { good: [8, 30], fair: [0, 32] },
-  gdd: { good: [100, Infinity], fair: [25, Infinity] },
-  aggregateRain: { good: [0, 50], fair: [0, 100] },
-  aggregateTemperature: { good: [10, 25], fair: [0, 30] },
-  aggregateAqi: { good: [0, 20], fair: [0, 40] }
+  temperature: { good: [10, 26], fair: [0, 32], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
+  apparentTemperature: { good: [10, 26], fair: [0, 32], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
+  humidity: { good: [30, 70], fair: [20, 80], labels: { good: "Comfortable", fair: "Moderate", bad: "Dry / Humid" } },
+  dewPoint: { good: [-20, 15], fair: [-30, 18], labels: { good: "Dry", fair: "Moderate", bad: "Humid" } },
+  rain: { good: [0, 5], fair: [0, 25], labels: { good: "Light", fair: "Moderate", bad: "Heavy" } },
+  rainProbability: { good: [0, 30], fair: [0, 70], labels: { good: "Low", fair: "Medium", bad: "High" } },
+  wind: { good: [0, 20], fair: [0, 40], labels: { good: "Calm", fair: "Breezy", bad: "Windy" } },
+  pressure: { good: [1000, 1020], fair: [990, 1035], labels: { good: "Normal", fair: "Variable", bad: "Extreme" } },
+  cloudCover: { good: [0, 30], fair: [0, 70], labels: { good: "Clear", fair: "Partly Cloudy", bad: "Overcast" } },
+  uv: { good: [0, 2], fair: [0, 5], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  pollen: { good: [0, 10], fair: [0, 35], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  radiation: { good: [0, 8], fair: [0, 15], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  et0: { good: [0, 2], fair: [0, 4.5], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  soilTemperature: { good: [8, 30], fair: [0, 32], labels: { good: "Optimal", fair: "Cool", bad: "Cold / Hot" } },
+  gdd: { good: [100, Infinity], fair: [25, Infinity], labels: { good: "High", fair: "Moderate", bad: "Low" } },
+  aggregateRain: { good: [0, 50], fair: [0, 100], labels: { good: "Low", fair: "Moderate", bad: "High" } },
+  aggregateTemperature: { good: [10, 25], fair: [0, 30], labels: { good: "Mild", fair: "Cool", bad: "Extreme" } },
+  aggregateAqi: { good: [0, 20], fair: [0, 40], labels: { good: "Good", fair: "Fair", bad: "Poor" } }
 };
+
+// Maps a band label to its vetted T_L translation key. Only labels that
+// already have reviewed copy in all eight languages are listed; anything else
+// falls through to its English text rather than shipping a machine guess.
+const METRIC_CONTEXT_LABEL_KEYS = {
+  "Good": "ctxGood",
+  "Fair": "ctxFair",
+  "Bad": "ctxBad"
+};
+
+function metricContextLabel(label, lang) {
+  if (!label) return "";
+  const key = METRIC_CONTEXT_LABEL_KEYS[label];
+  if (!key) return label;
+  const localized = t(key, lang);
+  // t() echoes the key back when the entry is missing; never surface that.
+  return localized === key ? label : localized;
+}
 
 function getMetricContext(value, metric, isC, lang) {
   if (value == null || (typeof value === "string" && value.trim() === "")) return "";
@@ -3762,9 +3814,10 @@ function getMetricContext(value, metric, isC, lang) {
   if (isC === false && ["temperature", "apparentTemperature", "soilTemperature", "aggregateTemperature"].includes(metric)) {
     normalized = (num - 32) * (5 / 9);
   }
-  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return t("ctxGood", lang);
-  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return t("ctxFair", lang);
-  return t("ctxBad", lang);
+  const labels = bands.labels || { good: "Good", fair: "Fair", bad: "Bad" };
+  if (normalized >= bands.good[0] && normalized <= bands.good[1]) return metricContextLabel(labels.good, lang);
+  if (normalized >= bands.fair[0] && normalized <= bands.fair[1]) return metricContextLabel(labels.fair, lang);
+  return metricContextLabel(labels.bad, lang);
 }
 
 function formatMetricContext(value, metric, isC, lang) {
