@@ -1052,6 +1052,25 @@ const TZ_CACHE_MAX = 100; // Cap in-memory timezone cache per execution
 const TZ_CACHE_PROP_PREFIX = "TZ:";
 const TZ_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/**
+ * Single bounded insert point for the in-memory timezone cache.
+ *
+ * Every writer must go through here. Writing `_tzCache[key]` directly leaves
+ * the entry absent from the order queue, so it can never be evicted and the
+ * effective cache size silently exceeds TZ_CACHE_MAX. Queueing a key twice is
+ * equally wrong: shift() would delete the live entry while a phantom copy of
+ * the key stayed behind, evicting a healthy entry to drop nothing.
+ */
+function _tzCacheSet(cacheKey, tz) {
+  const dup = _tzCacheOrder.indexOf(cacheKey);
+  if (dup !== -1) _tzCacheOrder.splice(dup, 1);
+  while (_tzCacheOrder.length >= TZ_CACHE_MAX) {
+    delete _tzCache[_tzCacheOrder.shift()];
+  }
+  _tzCache[cacheKey] = tz;
+  _tzCacheOrder.push(cacheKey);
+}
+
 function _tzCacheRead(cacheKey) {
   // Fast path: in-memory cache
   if (_tzCache[cacheKey] !== undefined) return _tzCache[cacheKey];
@@ -1062,8 +1081,9 @@ function _tzCacheRead(cacheKey) {
       const entry = JSON.parse(raw);
       if (entry && entry.tz && Number.isFinite(entry.ts) &&
           Date.now() - entry.ts < TZ_CACHE_TTL_MS) {
-        _tzCache[cacheKey] = entry.tz;
-        _tzCacheOrder.push(cacheKey);
+        // Hydrating the in-memory cache is a write, so it must be bounded and
+        // queued like any other; otherwise this path skips the cap entirely.
+        _tzCacheSet(cacheKey, entry.tz);
         return entry.tz;
       }
       // Stale entry — evict
@@ -1078,13 +1098,7 @@ function _tzCacheRead(cacheKey) {
 }
 
 function _tzCacheWrite(cacheKey, tz) {
-  // FIFO eviction if cache exceeds limit (spec-compliant using insertion-order queue)
-  if (_tzCacheOrder.length >= TZ_CACHE_MAX) {
-    const firstKey = _tzCacheOrder.shift();
-    delete _tzCache[firstKey];
-  }
-  _tzCache[cacheKey] = tz;
-  _tzCacheOrder.push(cacheKey);
+  _tzCacheSet(cacheKey, tz);
   try {
     _scriptProps.setProperty(
       TZ_CACHE_PROP_PREFIX + cacheKey,
@@ -1107,7 +1121,7 @@ function resolveLocationTimezone(loc) {
     // Circuit breaker: fail fast if circuit is open
     if (!CB.isCallAllowed('timezone')) {
       Logger.log("Circuit [timezone] OPEN — using UTC fallback for " + (loc.name || cacheKey));
-      _tzCache[cacheKey] = "UTC";
+      _tzCacheSet(cacheKey, "UTC");
       return "UTC";
     }
 
@@ -1129,7 +1143,7 @@ function resolveLocationTimezone(loc) {
       CB.recordFailure('timezone');
       Logger.log("resolveLocationTimezone: lookup failed for " + (loc.name || cacheKey) + ": " + e);
     }
-    _tzCache[cacheKey] = "UTC";
+    _tzCacheSet(cacheKey, "UTC");
     return "UTC";
   }
   return "UTC";
