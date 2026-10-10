@@ -2450,7 +2450,7 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
       ].filter(Boolean).join("\n"));
 
       const fullDesc = sections.join("\n\n");
-      const uid = `weather_${norm(loc.name)}_${dateKey}@weatherdashboard`;
+      const uid = `weather_${stripControlChars(norm(loc.name))}_${dateKey}@weatherdashboard`;
 
       lines.push("BEGIN:VEVENT");
       lines.push(`UID:${uid}`);
@@ -2479,6 +2479,25 @@ function generateIcsFeed(locations, temperatureUnit, opts) {
   // final line is unterminated, so terminate the stream explicitly here rather
   // than relying on a trailing empty element.
   return foldIcsLines(lines) + "\r\n";
+}
+
+/**
+ * Strips C0/C1 control characters from a string destined for a raw ICS
+ * content line.
+ *
+ * UID is emitted without escapeIcsText() on purpose: escaping would rewrite
+ * commas and semicolons, which would change the identifier of every event
+ * already subscribed to this feed and make clients create duplicate entries
+ * instead of updating them. Control characters can never legitimately appear
+ * in a city name, so removing them is enough to keep the line safe.
+ *
+ * loc.name can contain one: it is taken verbatim from the ?locations= query
+ * parameter (percent-encoded newlines survive Apps Script's decoding) and from
+ * the geocoding response. A raw CRLF there would terminate the UID line early
+ * and let the remainder be parsed as arbitrary calendar properties.
+ */
+function stripControlChars(str) {
+  return String(str == null ? "" : str).replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
 }
 
 function escapeIcsText(str) {

@@ -581,6 +581,48 @@ def test_ics_calendar_header_escapes_untrusted_timezone():
             f'icalweather.gs: calendar property {name} interpolates {var} unescaped')
 
 
+def test_ics_event_properties_escaped_or_control_stripped():
+    """Every VEVENT property line must be safe against line injection.
+
+    The calendar header is already covered above, but event-level properties
+    interpolate the location name, which reaches the feed verbatim from the
+    ?locations= query parameter (percent-encoded newlines survive Apps Script's
+    decoding) and from the geocoder. A raw CR/LF in such a value ends the
+    content line early and lets the remainder be parsed as arbitrary calendar
+    properties in the subscriber's client.
+
+    UID is deliberately NOT run through escapeIcsText: escaping would rewrite
+    commas and semicolons, changing the identifier of every already-subscribed
+    event and making clients create duplicates instead of updating. It instead
+    strips C0/C1 control characters, which can never appear in a real city name
+    and so leaves every existing UID byte-identical.
+    """
+    body = re.search(r'lines\.push\(`[^`]*`\);', ICAL)
+    event_lines = re.findall(r'lines\.push\(`([A-Z0-9;-]+):([^`]*)\`\);', ICAL)
+    assert_true(event_lines, 'icalweather.gs: no templated VEVENT property lines found')
+
+    # UID is built once above the event block; sanitisation happens there.
+    uid_expr = re.search(r'const uid = `([^`]*)`', ICAL)
+    assert_true(uid_expr is not None, 'icalweather.gs: uid declaration not found')
+    assert_true('stripControlChars(' in uid_expr.group(1),
+        'icalweather.gs: uid must be built through stripControlChars')
+
+    # Values built purely from date/format helpers carry no free-form input.
+    safe_vars = {'lang', 'ICAL_CONFIG.version', 'fetchedAt', 'icsDate',
+                 'icsNextDate', 'dtstampStr', 'uid'}
+    for name, value in event_lines:
+        var = re.fullmatch(r'\$\{([A-Za-z_][\w.]*)\}', value)
+        if not var or var.group(1) in safe_vars:
+            continue
+        assert_true(f'escapeIcsText({var.group(1)})' in value,
+            f'icalweather.gs: event property {name} interpolates {var.group(1)} unescaped')
+
+    assert_true(re.search(r'function stripControlChars\([^)]*\)\s*\{[\s\S]*?\\u0000-\\u001F', ICAL),
+        'stripControlChars must remove the C0 control range')
+    assert_true(re.search(r'const uid = `weather_\$\{stripControlChars\(norm\(loc\.name\)\)\}_', ICAL),
+        'icalweather.gs: UID must be built through stripControlChars(norm(loc.name))')
+
+
 def test_ics_declares_refresh_interval():
     """Subscribed clients need a poll hint or they refetch on their own schedule.
 
