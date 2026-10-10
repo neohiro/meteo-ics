@@ -479,6 +479,54 @@ function assertNoLoneSurrogates(s, where) {
 
 const ics = loadIcsText();
 
+/** Builds the UID exactly as generateIcsFeed does, from the real helpers. */
+function buildUid(src, locName, dateKey) {
+  const decls = [
+    extractFunction(src, "norm"),
+    extractFunction(src, "stripControlChars"),
+  ].join("\n\n");
+  const m = load(decls, {}, ["norm", "stripControlChars"]);
+  return `weather_${m.stripControlChars(m.norm(locName))}_${dateKey}@weatherdashboard`;
+}
+
+run("event UID construction (ical)", () => {
+  test("a control character cannot terminate the UID line", () => {
+    // loc.name reaches the feed verbatim from ?locations= (and from the
+    // geocoder), so a percent-encoded CRLF must not survive into a content line.
+    const injected = buildUid(ICAL, "Foo\r\nSUMMARY:Pwned", "2026-10-10");
+    eq(/[\r\n]/.test(injected), false, "UID must not contain CR or LF");
+    eq(/[\r\n]/.test(buildUid(ICAL, "Foo\nSUMMARY:Pwned", "2026-10-10")), false, "bare LF");
+    eq(/[\r\n]/.test(buildUid(ICAL, "Foo\rSUMMARY:Pwned", "2026-10-10")), false, "bare CR");
+  });
+
+  test("all C0/C1 control characters are stripped", () => {
+    const dirty = "A BCDEF";
+    const uid = buildUid(ICAL, dirty, "2026-10-10");
+    eq(/[\u0000-\u001F\u007F-\u009F]/.test(uid), false,
+      `controls survived: ${JSON.stringify(uid)}`);
+    ok(uid.startsWith("weather_abc"), `payload must be stripped, got ${uid}`);
+  });
+
+  test("ordinary names keep their exact historical UID", () => {
+    // Backward compatibility: escaping commas would change these identifiers
+    // and make every client re-create events instead of updating them.
+    eq(buildUid(ICAL, "Kuala Lumpur", "2026-10-10"),
+      "weather_kuala lumpur_2026-10-10@weatherdashboard", "space preserved");
+    eq(buildUid(ICAL, "Washington, D.C.", "2026-10-10"),
+      "weather_washington, d.c._2026-10-10@weatherdashboard", "comma preserved");
+    eq(buildUid(ICAL, "São Paulo", "2026-10-10"),
+      "weather_sao paulo_2026-10-10@weatherdashboard", "accent folded as before");
+    eq(buildUid(ICAL, "Zürich", "2026-10-10"),
+      "weather_zurich_2026-10-10@weatherdashboard", "umlaut folded as before");
+  });
+
+  test("the UID stays a single well-formed content line", () => {
+    const line = `UID:${buildUid(ICAL, "Foo\r\nX-INJECT:1", "2026-10-10")}`;
+    eq(line.includes("\r\n"), false, "emitted UID line must stay intact");
+    ok(/^UID:[^\r\n]*$/.test(line), `malformed content line: ${JSON.stringify(line)}`);
+  });
+});
+
 run("escapeIcsText (ical)", () => {
   test("escapes the characters RFC 5545 reserves in TEXT values", () => {
     eq(ics.escapeIcsText("a,b;c\\d"), "a\\,b\\;c\\\\d", "comma, semicolon, backslash");
