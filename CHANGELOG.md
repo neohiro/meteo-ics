@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.5.2] — 2026-10-13
+
 ### Fixed
 - **Timezone cache could grow past its bound and evict the wrong entries**: the in-memory timezone cache is capped by an insertion-order queue (`TZ_CACHE_MAX`), not by key count, but three write paths ignored that queue. `_tzCacheRead()` pushed hydrated entries straight onto the order array with no bound check, so a run that resolved many coordinates from `ScriptProperties` grew the cache without limit while the queue still reported it as capped. `resolveLocationTimezone()` also assigned `_tzCache[key]` directly when the circuit was open and when a lookup failed, leaving those entries out of the queue so they could never be evicted at all. Finally, writing an already-cached key appended a second copy of it to the queue, so the next eviction deleted a live entry while a phantom key stayed behind. All writes now funnel through a single `_tzCacheSet()` helper that dedupes the key and evicts until there is room.
 - **Line folding counted the wrong number of UTF-8 octets**: `foldIcsLines()` estimated 2 octets for every non-ASCII character, but CJK characters are 3 and emoji are 4. A `SUMMARY:` line of 30 CJK characters measured 68 octets under that estimate and was emitted unfolded at 98 real octets — an RFC 5545 §3.1 violation that strict clients (iOS Calendar, Outlook) can reject. Folding now counts true UTF-8 octets per code point (1/2/3/4) and never splits a UTF-16 surrogate pair, which previously could emit lone surrogates that parsers reject outright. Output for ASCII-only feeds is byte-identical to before.

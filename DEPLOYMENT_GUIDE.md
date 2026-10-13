@@ -1,6 +1,6 @@
 # meteo-ics — Production Deployment Guide
 
-**Version:** 2.5.1
+**Version:** 2.5.2
 **Test Status:** 342/342 passing | Structural balance: OK | Cross-file collisions: 0
 
 ---

@@ -431,7 +431,7 @@ const FALLBACK_CITY_COORDS = {
 const CONFIG = {
   calendarId: "",
   calendarName: "Weather Forecast",
-  version: "2.5.1",
+  version: "2.5.2",
   temperatureUnit: "celsius",
   forecastDays: 30,
   deterministicDays: 14,
